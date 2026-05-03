@@ -1,0 +1,335 @@
+/* 
+  Localizable.strings (Spanish)
+  SpectRoom
+  
+  Created by EVYATAR DAYAN on 2025-10-23.
+*/
+
+// MARK: - App Name & Tagline
+"app.name" = "SpectRoom";
+"app.tagline" = "Un espacio seguro para conexiones significativas";
+
+// MARK: - Authentication
+"auth.sign.in" = "Iniciar Sesión";
+"auth.sign.up" = "Registrarse";
+"auth.email" = "Correo Electrónico";
+"auth.password" = "Contraseña";
+"auth.confirm.password" = "Confirmar Contraseña";
+"auth.full.name" = "Nombre Completo";
+"auth.email.placeholder" = "Ingresa tu correo electrónico";
+"auth.password.placeholder" = "Ingresa tu contraseña";
+"auth.confirm.password.placeholder" = "Confirma tu contraseña";
+"auth.name.placeholder" = "Ingresa tu nombre completo";
+"auth.forgot.password" = "¿Olvidaste tu Contraseña?";
+"auth.no.account" = "¿No tienes una cuenta?";
+"auth.have.account" = "¿Ya tienes una cuenta?";
+"auth.error" = "Error";
+"auth.ok" = "OK";
+"auth.email.required" = "Por favor ingresa tu correo electrónico primero";
+"auth.password.reset.sent" = "Correo de restablecimiento de contraseña enviado a %@";
+"auth.error.credentials" = "Credenciales inválidas, inténtalo de nuevo.";
+"auth.error.credentials.with.forgot" = "Credenciales inválidas, inténtalo de nuevo. Considera usar \"¿Olvidaste tu Contraseña?\"";
+"auth.error.login.inputs" = "Por favor ingresa tu correo electrónico y contraseña.";
+"auth.error.fullname" = "Ingresa tu nombre completo";
+"auth.error.email.format" = "Formato de correo incorrecto";
+"auth.error.password.match" = "Las contraseñas no coinciden";
+"auth.alert.title" = "Por favor revisa tu información";
+
+// MARK: - Onboarding
+"onboarding.welcome.title" = "Bienvenido a SpectRoom";
+"onboarding.welcome.subtitle" = "Un espacio seguro y comprensivo para conexiones significativas";
+"onboarding.welcome.description" = "Conecta con personas que entienden y aprecian tu perspectiva única.";
+"onboarding.match.title" = "Encuentra tu Pareja";
+"onboarding.match.subtitle" = "Descubre personas con intereses y valores similares";
+"onboarding.match.description" = "Nuestro sistema de emparejamiento te ayuda a encontrar personas compatibles que comparten tus intereses y estilo de comunicación.";
+"onboarding.communication.title" = "Comunicación Segura";
+"onboarding.communication.subtitle" = "Chatea a tu propio ritmo en un ambiente cómodo";
+"onboarding.communication.description" = "Tómate tu tiempo para conocer a alguien. Sin presión, sin prisa, solo conexiones genuinas.";
+"onboarding.settings.title" = "Tu Espacio";
+"onboarding.settings.subtitle" = "Controla tu experiencia con configuraciones personalizables";
+"onboarding.settings.description" = "Establece tus preferencias para notificaciones, privacidad y cómo quieres interactuar con otros.";
+"onboarding.previous" = "Anterior";
+"onboarding.next" = "Siguiente";
+"onboarding.get.started" = "Comenzar";
+
+// MARK: - Navigation & Tabs
+"nav.discover" = "Descubrir";
+"nav.matches" = "Coincidencias";
+"nav.messages" = "Mensajes";
+"nav.profile" = "Perfil";
+"nav.settings" = "Configuración";
+
+// MARK: - Settings
+"settings.title" = "Configuración";
+"settings.app.settings" = "Configuración de la App";
+"settings.notifications" = "Notificaciones";
+"settings.notifications.description" = "Activar notificaciones";
+"settings.dark.mode" = "Modo Oscuro";
+"settings.dark.mode.description" = "Activar modo oscuro";
+"settings.language" = "Idioma";
+"settings.language.description" = "Seleccionar idioma de la app";
+"settings.support" = "Soporte";
+"settings.privacy.safety" = "Privacidad y Seguridad";
+"settings.privacy.safety.description" = "Controla tu configuración de privacidad";
+"settings.help.support" = "Ayuda y Soporte";
+"settings.help.support.description" = "Obtén ayuda y contacta con soporte";
+"settings.about" = "Acerca de";
+"settings.about.description" = "Versión de la app e información";
+"settings.sign.out" = "Cerrar Sesión";
+"settings.development" = "Desarrollo";
+"settings.reset.user.data" = "Restablecer datos del usuario";
+"settings.reset.user.data.description" = "Limpiar coincidencias, deslizamientos, etc.";
+"settings.notification.permission" = "Permiso de Notificaciones";
+"settings.notification.permission.message" = "Las notificaciones están desactivadas. Por favor actívalas en Configuración para recibir notificaciones de coincidencias y mensajes.";
+"settings.settings.button" = "Configuración";
+"settings.cancel" = "Cancelar";
+"settings.blocked.users.section.title" = "Usuarios bloqueados";
+"settings.blocked.users.button.title" = "Usuarios bloqueados";
+"settings.blocked.users.button.subtitle" = "Ver todos los usuarios bloqueados";
+
+"settings.authentication.section.title" = "Autenticación";
+"settings.authentication.signout.subtitle" = "Toca para cerrar sesión";
+
+"address.search.map.placeholder" = "Busca para previsualizar la ubicación";
+"address.search.use.address" = "Usar esta dirección";
+"address.search.privacy.notice" = "¡Tu dirección no se compartirá!";
+"address.search.title" = "Buscar dirección";
+"address.search.placeholder" = "Busca una dirección";
+"address.search.searching" = "Buscando...";
+"address.search.no.results" = "No se encontraron direcciones";
+"address.search.geocoding" = "Obteniendo coordenadas...";
+
+// MARK: - Profile
+"profile.title" = "Perfil";
+"profile.title.with.name" = "Perfil de %@";
+"profile.my.title" = "Mi perfil";
+"profile.edit" = "Editar";
+"profile.age" = "Edad";
+"profile.my.age" = "Mi Edad";
+"profile.years.old" = "años";
+"profile.location" = "Ubicación";
+"profile.my.location" = "Mi Ubicación";
+"profile.location.not.specified" = "No especificada";
+"profile.about.me" = "Acerca de Mí";
+"profile.no.bio" = "No hay biografía disponible";
+"profile.my.interests" = "Mis Intereses";
+"profile.no.interests" = "Aún no hay intereses agregados";
+"profile.gender.preferences" = "Género y Preferencias";
+"profile.preferences" = "Preferencias";
+"profile.im.a" = "Soy";
+"profile.interested.in" = "interesado/a en";
+"profile.looking.for" = "Buscando";
+"profile.preferred.age" = "Edad preferida: %@ a %@";
+"profile.no.preferences" = "No hay preferencias establecidas";
+"profile.my.photos" = "Mis Fotos";
+"profile.no.photos" = "Aún no hay fotos agregadas";
+"profile.gender" = "Género";
+"profile.no.one" = "nadie";
+"profile.nothing.specific" = "nada específico";
+
+// MARK: - Matches
+"matches.title" = "Coincidencias";
+"matches.loading" = "Cargando coincidencias...";
+"matches.empty" = "Aún no hay coincidencias";
+"matches.empty.description" = "¡Comienza a deslizar para encontrar tu pareja perfecta!";
+"matches.start.swiping" = "Comenzar a Deslizar";
+"matches.new.message" = "Nuevo Mensaje";
+"matches.new.message.to" = "a %@";
+"matches.view.profile" = "Ver Perfil";
+"matches.matched" = "Coincidencia %@";
+"matches.message.button" = "Mensaje";
+"matches.message.label" = "Mensaje";
+"matches.error.no.profile" = "Error: No se seleccionó ningún perfil";
+"matches.error.no.recipient" = "Error: No se seleccionó ningún destinatario";
+"matches.default.message" = "Hola. Me gusta tu perfil.";
+"matches.pre.message.button" = "Mensaje rápido";
+"matches.pre.message.title" = "Mensaje rápido";
+"matches.pre.message.subtitle" = "Elige un mensaje preescrito";
+"matches.pre.message.option1" = "Hola. Buen match. Sin prisa para responder.";
+"matches.pre.message.option2" = "Hola. Encantado de conectar si tú también.";
+"matches.pre.message.option3" = "Hola. ¿Quieres charlar un poco?";
+"matches.pre.message.option4" = "Hola. Podemos mantenerlo simple. 😊";
+"matches.pre.message.option5" = "Hola. Me gusta tu perfil.";
+"matches.pre.message.option6" = "Hola. Estoy aquí si quieres hablar.";
+"matches.pre.message.option7" = "¡Hola! Encantado de conocerte. ¿Quieres contarme un poco sobre ti?";
+"matches.pre.message.option8" = "¡Hola! ¿Qué te interesó de mi perfil?";
+"matches.pre.message.option9" = "¡Hola! 😊 ¿Qué buscas aquí?";
+"matches.pre.message.option10" = "¡Hola! Espero que tu día vaya bien. ¿Qué te gusta hacer?";
+"matches.pre.message.option11" = "¡Hola! Me encantaría conocerte. ¿Qué te gusta?";
+"matches.pre.message.option12" = "¡Hola! Gran match. ¿Qué te hizo unirte a SpectRoom?";
+
+// MARK: - Messages
+"messages.title" = "Mensajes";
+"messages.loading" = "Cargando mensajes...";
+"messages.loading.conversation" = "Cargando conversación...";
+"messages.empty" = "Aún no hay mensajes";
+"messages.empty.description" = "¡Comienza a deslizar para encontrar tu pareja perfecta!";
+"messages.start.swiping" = "Comenzar a Deslizar";
+"messages.new.message" = "Nuevo Mensaje";
+"messages.send" = "Enviar";
+"messages.send.message" = "Enviar Mensaje";
+"messages.type.message" = "Escribe un mensaje...";
+"messages.type.something" = "Escribe algo...";
+"messages.conversation.with" = "Conversación con %@";
+"messages.no.messages.found" = "No se encontraron mensajes";
+"messages.error.no.message" = "Error: No se seleccionó ningún mensaje";
+"messages.image.saved" = "Imagen Guardada";
+"messages.image.saved.success" = "Imagen guardada en tu biblioteca de fotos";
+"messages.image.saved.failed" = "Error al guardar la imagen";
+"messages.you" = "Tú";
+"messages.voice.recording" = "Grabando...";
+"messages.voice.ready" = "Mensaje listo";
+"messages.preview.photo" = "📷 Foto";
+"messages.preview.voice" = "🎤 Mensaje de voz";
+"messages.preview.voice.duration" = "🎤 Mensaje de voz • %@";
+
+// MARK: - Match Modal
+"match.modal.title.prefix" = "¡Es una";
+"match.modal.title.highlight" = "Coincidencia!";
+"match.modal.title" = "¡Es una Coincidencia!";
+"match.modal.description" = "Tú y %@ se han gustado mutuamente";
+"match.modal.send.message" = "Enviar Mensaje";
+"match.modal.maybe.later" = "Tal Vez Más Tarde";
+
+// MARK: - New Message Notification
+"message.notification.title" = "Nuevo Mensaje";
+"message.notification.from" = "Nuevo mensaje de %@";
+"message.notification.open.message" = "Abrir Mensaje";
+"message.notification.later" = "Más Tarde";
+
+// MARK: - Search/Discover
+"search.empty.no.more.profiles.line1" = "No hay más perfiles para mostrar";
+"search.empty.no.more.profiles.line2" = "es momento de interactuar con tus coincidencias";
+"search.empty.matches.prefix" = "Tienes";
+"search.empty.matches.suffix" = "coincidencias.";
+"search.empty.messages.prefix" = "Tienes";
+"search.empty.messages.suffix" = "mensajes.";
+"search.online.now" = "En línea";
+"search.offline" = "Desconectado";
+"search.title" = "Descubrir";
+"search.loading" = "Cargando perfiles...";
+"search.no.more.profiles" = "No hay más perfiles";
+"search.no.more.profiles.description" = "¡Vuelve más tarde para ver nuevas personas!";
+"search.pass" = "Pasar";
+"search.like" = "Me Gusta";
+"search.view.profile" = "Ver Perfil";
+"search.new.message" = "Nuevo Mensaje";
+"search.distance.km" = "%@ km de distancia";
+"search.distance.m" = "%@ m de distancia";
+"search.match.with" = "%@%% coincidencia con";
+
+// MARK: - Profile Edit
+"profile.edit.title" = "Editar Perfil";
+"profile.edit.complete.title" = "Completa tu Perfil";
+"profile.edit.name" = "Nombre";
+"profile.edit.name.placeholder" = "Ingresa tu nombre";
+"profile.edit.date.of.birth" = "Fecha de Nacimiento";
+"profile.edit.my.age" = "Mi Edad: %@";
+"profile.edit.loading" = "Cargando perfil...";
+"profile.edit.saving" = "Guardando...";
+"profile.edit.age" = "Edad";
+"profile.edit.location" = "Ubicación";
+"profile.edit.location.placeholder" = "Selecciona tu ubicación";
+"profile.edit.about.me" = "Acerca de Mí";
+"profile.edit.character.counter.min" = "Mín: %@ Máx: 500";
+"profile.edit.character.counter.max" = "Máx: %@";
+"profile.edit.interests" = "Intereses";
+"profile.edit.photos" = "Fotos";
+"profile.edit.gender" = "Género";
+"profile.edit.i.am" = "Soy";
+"profile.edit.gender.man" = "Hombre";
+"profile.edit.gender.woman" = "Mujer";
+"profile.edit.gender.nonbinary" = "No binario";
+"profile.edit.interested.in" = "Interesado/a en";
+"profile.edit.interested.anyone" = "Cualquiera";
+"profile.edit.looking.for" = "Buscando";
+"profile.edit.looking.friendship" = "Amistad";
+"profile.edit.looking.relationship" = "Relación";
+"profile.edit.looking.not.sure" = "No estoy seguro/a";
+"profile.edit.preferred.age" = "Edad Preferida";
+"profile.edit.energy.level" = "Nivel de energía hoy";
+"profile.edit.energy.quiet.calm" = "Tranquilo y Calmado";
+"profile.edit.energy.soft.steady" = "Suave y Constante";
+"profile.edit.energy.balanced" = "Energía Equilibrada";
+"profile.edit.energy.ready.chat" = "Listo para Chatear";
+"profile.edit.energy.fully.social" = "Modo Social Completo";
+"profile.edit.save" = "Guardar";
+"profile.edit.cancel" = "Cancelar";
+"profile.edit.add.photo" = "Agregar Foto";
+"profile.edit.add" = "Agregar";
+"profile.edit.remove.photo" = "Eliminar Foto";
+"profile.edit.profile.photo" = "Foto de Perfil";
+"profile.edit.profile.incomplete" = "Perfil Incompleto";
+"profile.edit.validation.full.name" = "Ingresa tu nombre completo";
+"profile.edit.validation.age" = "Debes tener 18 años o más";
+"profile.edit.validation.location" = "Ingresa tu ubicación";
+"profile.edit.validation.bio" = "\"Acerca de mí\" debe tener al menos 30 caracteres";
+"profile.edit.validation.photos" = "Agrega al menos 3 fotos";
+"profile.edit.validation.interests" = "Selecciona al menos 3 intereses";
+"profile.edit.validation.gender" = "Selecciona tu género";
+"profile.edit.validation.interested.in" = "Selecciona en quién estás interesado/a";
+"profile.edit.validation.looking.for" = "Selecciona qué estás buscando";
+"profile.edit.error.updating" = "Error al actualizar perfil: %@";
+"profile.edit.gallery.photos" = "Fotos de Galería";
+"profile.edit.search.address" = "Buscar Dirección";
+
+// MARK: - Common
+"common.ok" = "OK";
+"common.cancel" = "Cancelar";
+"common.close" = "Cerrar";
+"common.save" = "Guardar";
+"common.edit" = "Editar";
+"common.delete" = "Eliminar";
+"common.loading" = "Cargando...";
+"common.error" = "Error";
+"common.success" = "Éxito";
+"common.done" = "Hecho";
+
+// MARK: - Language Selection
+"language.selection.title" = "Seleccionar Idioma";
+
+
+"profile.interested.anyone" = "cualquiera";
+
+"profile.edit.lifestyle.title" = "¿Cuál describe mejor tu estilo de vida?";
+"profile.lifestyle.placeholder" = "Estilo de vida no especificado";
+"profile.edit.lifestyle.independent" = "Vivo de forma independiente";
+"profile.edit.lifestyle.family" = "Vivo con mi familia o personal de apoyo";
+"profile.edit.lifestyle.assisted" = "Vivo en un entorno compartido o asistido";
+"profile.edit.lifestyle.prefer.not" = "Prefiero no compartirlo";
+"profile.edit.share.lifestyle" = "Compartir estilo de vida";
+"profile.edit.share.body.type" = "Compartir tipo de cuerpo";
+"profile.edit.ideal.first.date" = "Primera cita ideal";
+"profile.edit.ideal.date.relaxing.park.walk" = "Paseo relajante por el parque";
+"profile.edit.ideal.date.cozy.cafe.meet" = "Encuentro en un café acogedor";
+"profile.edit.ideal.date.museum.gallery.stroll" = "Paseo por museo o galería";
+"profile.edit.ideal.date.cinema.movie.night" = "Noche de cine";
+"profile.edit.ideal.date.friendly.video.chat" = "Chat de video amigable";
+"profile.ideal.first.date" = "Primera cita ideal";
+"profile.body.type" = "Tipo de cuerpo";
+"profile.edit.body.type.slim" = "Delgado";
+"profile.edit.body.type.average" = "Promedio";
+"profile.edit.body.type.athletic" = "Atlético";
+"profile.edit.body.type.full.bodied" = "Corpulento";
+"profile.edit.interest.photography" = "Fotografía";
+"profile.edit.interest.music" = "Música";
+"profile.edit.interest.art" = "Arte";
+"profile.edit.interest.reading" = "Lectura";
+"profile.edit.interest.cooking" = "Cocina";
+"profile.edit.interest.travel" = "Viajes";
+"profile.edit.interest.sports" = "Deportes";
+"profile.edit.interest.gaming" = "Videojuegos";
+"profile.edit.interest.movies" = "Cine";
+"profile.edit.interest.nature" = "Naturaleza";
+"profile.edit.interest.technology" = "Tecnología";
+"profile.edit.interest.fitness" = "Fitness";
+"profile.edit.interest.dancing" = "Baile";
+"profile.edit.interest.writing" = "Escritura";
+"profile.edit.interest.gardening" = "Jardinería";
+"profile.edit.interest.animals" = "Animales";
+"profile.edit.interest.science" = "Ciencia";
+"profile.edit.interest.history" = "Historia";
+"profile.edit.interest.languages" = "Idiomas";
+"profile.edit.interest.volunteering" = "Voluntariado";
+
+"profile.lifestyle.title" = "Estilo de vida";

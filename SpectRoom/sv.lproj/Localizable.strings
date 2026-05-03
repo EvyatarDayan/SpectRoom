@@ -1,0 +1,335 @@
+/* 
+  Localizable.strings (Swedish)
+  SpectRoom
+  
+  Created by EVYATAR DAYAN on 2025-10-23.
+*/
+
+// MARK: - App Name & Tagline
+"app.name" = "SpectRoom";
+"app.tagline" = "Ett säkert utrymme för meningsfulla kontakter";
+
+// MARK: - Authentication
+"auth.sign.in" = "Logga In";
+"auth.sign.up" = "Registrera Dig";
+"auth.email" = "E-post";
+"auth.password" = "Lösenord";
+"auth.confirm.password" = "Bekräfta Lösenord";
+"auth.full.name" = "Fullständigt Namn";
+"auth.email.placeholder" = "Ange din e-postadress";
+"auth.password.placeholder" = "Ange ditt lösenord";
+"auth.confirm.password.placeholder" = "Bekräfta ditt lösenord";
+"auth.name.placeholder" = "Ange ditt fullständiga namn";
+"auth.forgot.password" = "Glömt Lösenord?";
+"auth.no.account" = "Har du inget konto?";
+"auth.have.account" = "Har du redan ett konto?";
+"auth.error" = "Fel";
+"auth.ok" = "OK";
+"auth.email.required" = "Vänligen ange din e-postadress först";
+"auth.password.reset.sent" = "E-post för återställning av lösenord skickad till %@";
+"auth.error.credentials" = "Ogiltiga inloggningsuppgifter, försök igen.";
+"auth.error.credentials.with.forgot" = "Ogiltiga inloggningsuppgifter, försök igen. Överväg att använda \"Glömt lösenord\"";
+"auth.error.login.inputs" = "Ange din e-postadress och ditt lösenord.";
+"auth.error.fullname" = "Ange ditt fullständiga namn";
+"auth.error.email.format" = "Felaktigt e-postformat";
+"auth.error.password.match" = "Lösenorden stämmer inte överens";
+"auth.alert.title" = "Granska dina uppgifter";
+
+// MARK: - Onboarding
+"onboarding.welcome.title" = "Välkommen till SpectRoom";
+"onboarding.welcome.subtitle" = "Ett säkert och förstående utrymme för meningsfulla kontakter";
+"onboarding.welcome.description" = "Koppla samman med människor som förstår och uppskattar ditt unika perspektiv.";
+"onboarding.match.title" = "Hitta Din Match";
+"onboarding.match.subtitle" = "Upptäck människor med liknande intressen och värderingar";
+"onboarding.match.description" = "Vårt matchningssystem hjälper dig att hitta kompatibla människor som delar dina intressen och kommunikationsstil.";
+"onboarding.communication.title" = "Säker Kommunikation";
+"onboarding.communication.subtitle" = "Chatta i din egen takt i en bekväm miljö";
+"onboarding.communication.description" = "Ta dig tid att lära känna någon. Inget tryck, ingen brådska - bara äkta kontakter.";
+"onboarding.settings.title" = "Ditt Utrymme";
+"onboarding.settings.subtitle" = "Kontrollera din upplevelse med anpassningsbara inställningar";
+"onboarding.settings.description" = "Ställ in dina preferenser för notifikationer, integritet och hur du vill interagera med andra.";
+"onboarding.previous" = "Föregående";
+"onboarding.next" = "Nästa";
+"onboarding.get.started" = "Kom Igång";
+
+// MARK: - Navigation & Tabs
+"nav.discover" = "Upptäck";
+"nav.matches" = "Matchningar";
+"nav.messages" = "Meddelanden";
+"nav.profile" = "Profil";
+"nav.settings" = "Inställningar";
+
+// MARK: - Settings
+"settings.title" = "Inställningar";
+"settings.app.settings" = "Appinställningar";
+"settings.notifications" = "Notifikationer";
+"settings.notifications.description" = "Aktivera notifikationer";
+"settings.dark.mode" = "Mörkt Läge";
+"settings.dark.mode.description" = "Aktivera mörkt läge";
+"settings.language" = "Språk";
+"settings.language.description" = "Välj appens språk";
+"settings.support" = "Support";
+"settings.privacy.safety" = "Integritet och Säkerhet";
+"settings.privacy.safety.description" = "Kontrollera dina integritetsinställningar";
+"settings.help.support" = "Hjälp och Support";
+"settings.help.support.description" = "Få hjälp och kontakta support";
+"settings.about" = "Om";
+"settings.about.description" = "Appversion och information";
+"settings.sign.out" = "Logga Ut";
+"settings.development" = "Utveckling";
+"settings.reset.user.data" = "Återställ användardata";
+"settings.reset.user.data.description" = "Rensa matchningar, swipe etc.";
+"settings.notification.permission" = "Notifikationsbehörighet";
+"settings.notification.permission.message" = "Notifikationer är inaktiverade. Vänligen aktivera dem i Inställningar för att ta emot notifikationer om matchningar och meddelanden.";
+"settings.settings.button" = "Inställningar";
+"settings.cancel" = "Avbryt";
+"settings.blocked.users.section.title" = "Blockerade användare";
+"settings.blocked.users.button.title" = "Blockerade användare";
+"settings.blocked.users.button.subtitle" = "Visa alla blockerade användare";
+
+"settings.authentication.section.title" = "Autentisering";
+"settings.authentication.signout.subtitle" = "Tryck för att logga ut";
+
+"address.search.map.placeholder" = "Sök för att förhandsvisa platsen";
+"address.search.use.address" = "Använd denna adress";
+"address.search.privacy.notice" = "Din adress kommer inte att delas!";
+"address.search.title" = "Sök adress";
+"address.search.placeholder" = "Sök efter en adress";
+"address.search.searching" = "Söker...";
+"address.search.no.results" = "Inga adresser hittades";
+"address.search.geocoding" = "Hämtar koordinater...";
+
+// MARK: - Profile
+"profile.title" = "Profil";
+"profile.title.with.name" = "%@s profil";
+"profile.my.title" = "Min profil";
+"profile.edit" = "Redigera";
+"profile.age" = "Ålder";
+"profile.my.age" = "Min Ålder";
+"profile.years.old" = "år gammal";
+"profile.location" = "Plats";
+"profile.my.location" = "Min Plats";
+"profile.location.not.specified" = "Ej angiven";
+"profile.about.me" = "Om Mig";
+"profile.no.bio" = "Ingen biografi tillgänglig";
+"profile.my.interests" = "Mina Intressen";
+"profile.no.interests" = "Inga intressen tillagda ännu";
+"profile.gender.preferences" = "Kön och Preferenser";
+"profile.preferences" = "Preferenser";
+"profile.im.a" = "Jag är";
+"profile.interested.in" = "intresserad av";
+"profile.looking.for" = "Söker";
+"profile.preferred.age" = "Föredragen ålder: %@ till %@";
+"profile.no.preferences" = "Inga preferenser inställda";
+"profile.my.photos" = "Mina Foton";
+"profile.no.photos" = "Inga foton tillagda ännu";
+"profile.gender" = "Kön";
+"profile.no.one" = "ingen";
+"profile.nothing.specific" = "inget specifikt";
+
+// MARK: - Matches
+"matches.title" = "Matchningar";
+"matches.loading" = "Laddar matchningar...";
+"matches.empty" = "Inga matchningar ännu";
+"matches.empty.description" = "Börja swipa för att hitta din perfekta match!";
+"matches.start.swiping" = "Börja Swipa";
+"matches.new.message" = "Nytt Meddelande";
+"matches.new.message.to" = "till %@";
+"matches.view.profile" = "Visa Profil";
+"matches.matched" = "Matchade %@";
+"matches.message.button" = "Meddelande";
+"matches.message.label" = "Meddelande";
+"matches.error.no.profile" = "Fel: Ingen profil vald";
+"matches.error.no.recipient" = "Fel: Ingen mottagare vald";
+"matches.default.message" = "Hej. Jag gillar din profil.";
+"matches.pre.message.button" = "Snabbmeddelande";
+"matches.pre.message.title" = "Snabbmeddelande";
+"matches.pre.message.subtitle" = "Välj ett förskrivet meddelande";
+"matches.pre.message.option1" = "Hej. Trevligt match. Ingen brådska att svara.";
+"matches.pre.message.option2" = "Hej. Glad att koppla om du också är det.";
+"matches.pre.message.option3" = "Hej. Vill du chatta lite?";
+"matches.pre.message.option4" = "Hej. Vi kan hålla det enkelt. 😊";
+"matches.pre.message.option5" = "Hej. Jag gillar din profil.";
+"matches.pre.message.option6" = "Hej. Jag är här om du vill prata.";
+"matches.pre.message.option7" = "Hej! Trevligt att träffas. Vill du berätta lite om dig själv?";
+"matches.pre.message.option8" = "Hej där! Vad intresserade dig i min profil?";
+"matches.pre.message.option9" = "Hej! 😊 Vad letar du efter här?";
+"matches.pre.message.option10" = "Hej! Hoppas din dag går bra. Vad tycker du om att göra?";
+"matches.pre.message.option11" = "Hej! Jag skulle gärna lära känna dig. Vad gillar du?";
+"matches.pre.message.option12" = "Hej! Bra match. Vad fick dig att gå med i SpectRoom?";
+
+// MARK: - Messages
+"messages.title" = "Meddelanden";
+"messages.loading" = "Laddar meddelanden...";
+"messages.loading.conversation" = "Laddar konversation...";
+"messages.empty" = "Inga meddelanden ännu";
+"messages.empty.description" = "Börja swipa för att hitta din perfekta match!";
+"messages.start.swiping" = "Börja Swipa";
+"messages.new.message" = "Nytt Meddelande";
+"messages.send" = "Skicka";
+"messages.send.message" = "Skicka Meddelande";
+"messages.type.message" = "Skriv ett meddelande...";
+"messages.type.something" = "Skriv något...";
+"messages.conversation.with" = "Konversation med %@";
+"messages.no.messages.found" = "Inga meddelanden hittades";
+"messages.error.no.message" = "Fel: Inget meddelande valt";
+"messages.image.saved" = "Bild Sparad";
+"messages.image.saved.success" = "Bild sparad i ditt fotobibliotek";
+"messages.image.saved.failed" = "Misslyckades med att spara bilden";
+"messages.you" = "Du";
+"messages.voice.recording" = "Spelar in...";
+"messages.voice.ready" = "Meddelande klart";
+"messages.preview.photo" = "📷 Foto";
+"messages.preview.voice" = "🎤 Röstmeddelande";
+"messages.preview.voice.duration" = "🎤 Röstmeddelande • %@";
+
+// MARK: - Match Modal
+"match.modal.title.prefix" = "Det är en";
+"match.modal.title.highlight" = "Match!";
+"match.modal.title" = "Det är en Match!";
+"match.modal.description" = "Du och %@ har gillat varandra";
+"match.modal.send.message" = "Skicka Meddelande";
+"match.modal.maybe.later" = "Kanske Senare";
+
+// MARK: - New Message Notification
+"message.notification.title" = "Nytt Meddelande";
+"message.notification.from" = "Nytt meddelande från %@";
+"message.notification.open.message" = "Öppna Meddelande";
+"message.notification.later" = "Senare";
+
+// MARK: - Search/Discover
+"search.empty.no.more.profiles.line1" = "Inga fler profiler att visa";
+"search.empty.no.more.profiles.line2" = "dags att interagera med dina matcher";
+"search.empty.matches.prefix" = "Du har";
+"search.empty.matches.suffix" = "matcher.";
+"search.empty.messages.prefix" = "Du har";
+"search.empty.messages.suffix" = "meddelanden.";
+"search.online.now" = "Online";
+"search.offline" = "Offline";
+"search.title" = "Upptäck";
+"search.loading" = "Laddar profiler...";
+"search.no.more.profiles" = "Inga fler profiler";
+"search.no.more.profiles.description" = "Kom tillbaka senare för nya personer!";
+"search.pass" = "Hoppa Över";
+"search.like" = "Gilla";
+"search.view.profile" = "Visa Profil";
+"search.new.message" = "Nytt Meddelande";
+"search.distance.km" = "%@ km bort";
+"search.distance.m" = "%@ m bort";
+"search.match.with" = "%@%% match med";
+
+// MARK: - Profile Edit
+"profile.edit.title" = "Redigera Profil";
+"profile.edit.complete.title" = "Komplettera Din Profil";
+"profile.edit.name" = "Namn";
+"profile.edit.name.placeholder" = "Ange ditt namn";
+"profile.edit.date.of.birth" = "Födelsedatum";
+"profile.edit.my.age" = "Min Ålder: %@";
+"profile.edit.loading" = "Laddar profil...";
+"profile.edit.saving" = "Sparar...";
+"profile.edit.age" = "Ålder";
+"profile.edit.location" = "Plats";
+"profile.edit.location.placeholder" = "Välj din plats";
+"profile.edit.about.me" = "Om Mig";
+"profile.edit.character.counter.min" = "Min: %@ Max: 500";
+"profile.edit.character.counter.max" = "Max: %@";
+"profile.edit.interests" = "Intressen";
+"profile.edit.photos" = "Foton";
+"profile.edit.gender" = "Kön";
+"profile.edit.i.am" = "Jag är";
+"profile.edit.gender.man" = "Man";
+"profile.edit.gender.woman" = "Kvinna";
+"profile.edit.gender.nonbinary" = "Icke-binär";
+"profile.edit.interested.in" = "intresserad av";
+"profile.edit.interested.anyone" = "Vem som helst";
+"profile.edit.looking.for" = "Söker";
+"profile.edit.looking.friendship" = "Vänskap";
+"profile.edit.looking.relationship" = "Relation";
+"profile.edit.looking.not.sure" = "Inte säker än";
+"profile.edit.preferred.age" = "Föredragen Ålder";
+"profile.edit.energy.level" = "Energinivå idag";
+"profile.edit.energy.quiet.calm" = "Tyst och Lugn";
+"profile.edit.energy.soft.steady" = "Mjuk och Stabil";
+"profile.edit.energy.balanced" = "Balanserad Energi";
+"profile.edit.energy.ready.chat" = "Redo att Chatta";
+"profile.edit.energy.fully.social" = "Fullt Socialt Läge";
+"profile.edit.save" = "Spara";
+"profile.edit.cancel" = "Avbryt";
+"profile.edit.add.photo" = "Lägg Till Foto";
+"profile.edit.add" = "Lägg Till";
+"profile.edit.remove.photo" = "Ta Bort Foto";
+"profile.edit.profile.photo" = "Profilfoto";
+"profile.edit.profile.incomplete" = "Profil Ofullständig";
+"profile.edit.validation.full.name" = "Ange ditt fullständiga namn";
+"profile.edit.validation.age" = "Du måste vara 18 år eller äldre";
+"profile.edit.validation.location" = "Ange din plats";
+"profile.edit.validation.bio" = "\"Om mig\" måste vara minst 30 tecken";
+"profile.edit.validation.photos" = "Lägg till minst 3 foton";
+"profile.edit.validation.interests" = "Välj minst 3 intressen";
+"profile.edit.validation.gender" = "Välj ditt kön";
+"profile.edit.validation.interested.in" = "Välj vem du är intresserad av";
+"profile.edit.validation.looking.for" = "Välj vad du söker";
+"profile.edit.error.updating" = "Fel vid uppdatering av profil: %@";
+"profile.edit.gallery.photos" = "Gallerifoton";
+"profile.edit.search.address" = "Sök Adress";
+
+// MARK: - Common
+"common.ok" = "OK";
+"common.cancel" = "Avbryt";
+"common.close" = "Stäng";
+"common.save" = "Spara";
+"common.edit" = "Redigera";
+"common.delete" = "Radera";
+"common.loading" = "Laddar...";
+"common.error" = "Fel";
+"common.success" = "Framgång";
+"common.done" = "Klar";
+
+// MARK: - Language Selection
+"language.selection.title" = "Välj Språk";
+
+
+"profile.interested.anyone" = "vem som helst";
+
+"profile.edit.lifestyle.title" = "Vilket beskriver bäst din livsstil?";
+"profile.lifestyle.placeholder" = "Livsstil ej angiven";
+"profile.edit.lifestyle.independent" = "Jag bor självständigt";
+"profile.edit.lifestyle.family" = "Jag bor med familj eller stödpersonal";
+"profile.edit.lifestyle.assisted" = "Jag bor i ett delat eller assisterat boende";
+"profile.edit.lifestyle.prefer.not" = "Föredrar att inte dela";
+"profile.edit.share.lifestyle" = "Dela livsstil";
+"profile.edit.share.body.type" = "Dela kroppstyp";
+"profile.edit.ideal.first.date" = "Ideal första dejt";
+"profile.edit.ideal.date.relaxing.park.walk" = "Avslappnad promenad i parken";
+"profile.edit.ideal.date.cozy.cafe.meet" = "Mysigt kafémöte";
+"profile.edit.ideal.date.museum.gallery.stroll" = "Promenad på museum eller galleri";
+"profile.edit.ideal.date.cinema.movie.night" = "Biofilmkväll";
+"profile.edit.ideal.date.friendly.video.chat" = "Vänlig videosamtal";
+"profile.ideal.first.date" = "Ideal första dejt";
+"profile.body.type" = "Kroppstyp";
+"profile.edit.body.type.slim" = "Smal";
+"profile.edit.body.type.average" = "Genomsnittlig";
+"profile.edit.body.type.athletic" = "Atletisk";
+"profile.edit.body.type.full.bodied" = "Kraftig";
+"profile.edit.interest.photography" = "Fotografering";
+"profile.edit.interest.music" = "Musik";
+"profile.edit.interest.art" = "Konst";
+"profile.edit.interest.reading" = "Läsning";
+"profile.edit.interest.cooking" = "Matlagning";
+"profile.edit.interest.travel" = "Resor";
+"profile.edit.interest.sports" = "Sport";
+"profile.edit.interest.gaming" = "Spel";
+"profile.edit.interest.movies" = "Film";
+"profile.edit.interest.nature" = "Natur";
+"profile.edit.interest.technology" = "Teknologi";
+"profile.edit.interest.fitness" = "Fitness";
+"profile.edit.interest.dancing" = "Dans";
+"profile.edit.interest.writing" = "Skrivande";
+"profile.edit.interest.gardening" = "Trädgårdsarbete";
+"profile.edit.interest.animals" = "Djur";
+"profile.edit.interest.science" = "Vetenskap";
+"profile.edit.interest.history" = "Historia";
+"profile.edit.interest.languages" = "Språk";
+"profile.edit.interest.volunteering" = "Volontärarbete";
+
+"profile.lifestyle.title" = "Livsstil";

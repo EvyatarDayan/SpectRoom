@@ -6,6 +6,16 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		2ECBE0322EBCE02A008AEF32 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 2ECBE0312EBCE02A008AEF32 /* FirebaseAuth */; };
+		2ECBE0342EBCE02A008AEF32 /* FirebaseDatabase in Frameworks */ = {isa = PBXBuildFile; productRef = 2ECBE0332EBCE02A008AEF32 /* FirebaseDatabase */; };
+		2ECBE0362EBCE02A008AEF32 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 2ECBE0352EBCE02A008AEF32 /* FirebaseFirestore */; };
+		2ECBE0382EBCE02A008AEF32 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 2ECBE0372EBCE02A008AEF32 /* FirebaseFunctions */; };
+		2ECBE03A2EBCE02A008AEF32 /* FirebaseInAppMessaging-Beta in Frameworks */ = {isa = PBXBuildFile; productRef = 2ECBE0392EBCE02A008AEF32 /* FirebaseInAppMessaging-Beta */; };
+		2ECBE03C2EBCE02A008AEF32 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 2ECBE03B2EBCE02A008AEF32 /* FirebaseMessaging */; };
+		2ECBE03E2EBCE02A008AEF32 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 2ECBE03D2EBCE02A008AEF32 /* FirebaseStorage */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		2E4A44562EAA22EC00EF3E86 /* SpectRoom.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SpectRoom.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +33,13 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2ECBE03C2EBCE02A008AEF32 /* FirebaseMessaging in Frameworks */,
+				2ECBE0342EBCE02A008AEF32 /* FirebaseDatabase in Frameworks */,
+				2ECBE0322EBCE02A008AEF32 /* FirebaseAuth in Frameworks */,
+				2ECBE0362EBCE02A008AEF32 /* FirebaseFirestore in Frameworks */,
+				2ECBE03E2EBCE02A008AEF32 /* FirebaseStorage in Frameworks */,
+				2ECBE0382EBCE02A008AEF32 /* FirebaseFunctions in Frameworks */,
+				2ECBE03A2EBCE02A008AEF32 /* FirebaseInAppMessaging-Beta in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +82,13 @@
 			);
 			name = SpectRoom;
 			packageProductDependencies = (
+				2ECBE0312EBCE02A008AEF32 /* FirebaseAuth */,
+				2ECBE0332EBCE02A008AEF32 /* FirebaseDatabase */,
+				2ECBE0352EBCE02A008AEF32 /* FirebaseFirestore */,
+				2ECBE0372EBCE02A008AEF32 /* FirebaseFunctions */,
+				2ECBE0392EBCE02A008AEF32 /* FirebaseInAppMessaging-Beta */,
+				2ECBE03B2EBCE02A008AEF32 /* FirebaseMessaging */,
+				2ECBE03D2EBCE02A008AEF32 /* FirebaseStorage */,
 			);
 			productName = SpectRoom;
 			productReference = 2E4A44562EAA22EC00EF3E86 /* SpectRoom.app */;
@@ -91,9 +115,16 @@
 			knownRegions = (
 				en,
 				Base,
+				es,
+				sv,
+				fr,
+				de,
 			);
 			mainGroup = 2E4A444D2EAA22EC00EF3E86;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				2ECBE0302EBCE02A008AEF32 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2E4A44572EAA22EC00EF3E86 /* Products */;
 			projectDirPath = "";
@@ -255,6 +286,8 @@
 				DEVELOPMENT_TEAM = 77VUNZSFA7;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We use your microphone so you can record and send voice messages to other members.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "SpectRoom needs access to save photos from conversations to your photo library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -284,6 +317,8 @@
 				DEVELOPMENT_TEAM = 77VUNZSFA7;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "We use your microphone so you can record and send voice messages to other members.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "SpectRoom needs access to save photos from conversations to your photo library.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -324,6 +359,55 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		2ECBE0302EBCE02A008AEF32 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.5.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		2ECBE0312EBCE02A008AEF32 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2ECBE0302EBCE02A008AEF32 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		2ECBE0332EBCE02A008AEF32 /* FirebaseDatabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2ECBE0302EBCE02A008AEF32 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseDatabase;
+		};
+		2ECBE0352EBCE02A008AEF32 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2ECBE0302EBCE02A008AEF32 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		2ECBE0372EBCE02A008AEF32 /* FirebaseFunctions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2ECBE0302EBCE02A008AEF32 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFunctions;
+		};
+		2ECBE0392EBCE02A008AEF32 /* FirebaseInAppMessaging-Beta */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2ECBE0302EBCE02A008AEF32 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = "FirebaseInAppMessaging-Beta";
+		};
+		2ECBE03B2EBCE02A008AEF32 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2ECBE0302EBCE02A008AEF32 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
+		2ECBE03D2EBCE02A008AEF32 /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 2ECBE0302EBCE02A008AEF32 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 2E4A444E2EAA22EC00EF3E86 /* Project object */;
 }

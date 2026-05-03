@@ -1,0 +1,907 @@
+//
+//  AppStateManager.swift
+//  SpectRoom
+//
+//  Created by EVYATAR DAYAN on 2025-10-23.
+//
+
+import Foundation
+import SwiftUI
+import FirebaseAuth
+import Combine
+import UIKit
+
+class AppStateManager: ObservableObject {
+    @Published var isAuthenticated = false
+    @Published var hasCompletedOnboarding = false
+    @Published var hasCompletedInitialProfile = false
+    @Published var isNewSignup = false
+    @Published var signUpName: String = ""
+    @Published var currentUser: SpectRoomUser?
+    @Published var matches: [Match] = []
+    @Published var conversations: [Conversation] = []
+    @Published var cachedMatches: [MatchDisplay] = [] // Cache for matches list
+    @Published var cachedMessageConversations: [MessageDisplay] = [] // Cache for message conversations list
+    @Published var blockedUsers: [BlockedUser] = []
+    @Published var authErrorMessage: String?
+    private var lastMatchesUpdate: Date?
+    private var lastMessageConversationsUpdate: Date?
+    
+    // Cache for individual conversation messages (keyed by otherUserId)
+    private var cachedConversationMessages: [String: [MessageDisplay]] = [:]
+    private var conversationMessagesCacheTimestamp: [String: Date] = [:]
+    @Published var isLoading = false
+    
+    // Match notification properties
+    @Published var showingMatchNotification = false
+    @Published var newMatchProfile: ProfileCard?
+    @Published var shouldOpenMessageModal = false
+    @Published var viewedMatchProfileId: String? = nil // Track when a match profile is viewed
+    private var lastMatchId: String?
+    private var isShowingSwipeMatchPopup = false
+    
+    // New message notification properties
+    @Published var showingNewMessageNotification = false
+    @Published var newMessageSenderName: String = ""
+    @Published var newMessageSenderPhotoURL: String?
+    @Published var newMessageSenderId: String = ""
+    @Published var shouldOpenConversation = false
+    @Published var conversationToOpenSenderId: String? = nil
+    @Published var currentlyOpenConversationSenderId: String? = nil // Track which conversation is currently open
+    private var lastMessageId: String?
+    
+    private let firebaseAuth = FirebaseAuthService.shared
+    private var cancellables = Set<AnyCancellable>()
+    private let newMessageReceivedSubject = PassthroughSubject<MessageDisplay, Never>()
+    var newMessageReceivedPublisher: AnyPublisher<MessageDisplay, Never> {
+        newMessageReceivedSubject.eraseToAnyPublisher()
+    }
+    private let newMatchReceivedSubject = PassthroughSubject<MatchDisplay, Never>()
+    var newMatchReceivedPublisher: AnyPublisher<MatchDisplay, Never> {
+        newMatchReceivedSubject.eraseToAnyPublisher()
+    }
+    
+    static let shared = AppStateManager()
+    
+    private init() {
+        // Listen to Firebase authentication state changes
+        // Ensure all updates happen on the main thread to avoid publishing from background threads
+        firebaseAuth.$isAuthenticated
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isAuth in
+                self?.isAuthenticated = isAuth
+                if isAuth {
+                    // User is authenticated - set online status and preload photos
+                    Task {
+                        await self?.updateOnlineStatus(isOnline: true)
+                        await self?.preloadUserPhotos()
+                    }
+                    // Start listening for new matches when authenticated
+                    // This will notify users when they receive a match (even if they didn't swipe)
+                    self?.startListeningForMatches()
+                    // Start listening for new messages when authenticated
+                    // This will notify users when they receive a new message
+                    self?.startListeningForNewMessages()
+                } else {
+                    // Set offline status before clearing data
+                    Task {
+                        await self?.updateOnlineStatus(isOnline: false)
+                    }
+                    // Clear user data when not authenticated to prevent stale data
+                    self?.currentUser = nil
+                    self?.clearMessageConversationsCache() // Clear message conversations cache
+                    print("🔐 User logged out - cleared all user data")
+                }
+            }
+            .store(in: &cancellables)
+        
+        // Listen to Firebase user changes
+        // Ensure all updates happen on the main thread to avoid publishing from background threads
+        firebaseAuth.$currentUser
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] newUser in
+                self?.currentUser = newUser
+                if let user = newUser {
+                    print("🔄 AppStateManager: Updated currentUser with \(user.photos.count) photos")
+                    self?.blockedUsers = user.blockedUsers
+                } else {
+                    self?.blockedUsers = []
+                }
+            }
+            .store(in: &cancellables)
+        
+        // Note: Sound is now played when push notification is received (handled by iOS)
+        
+        // Load saved state if available (but not authentication state)
+        loadAppState()
+        
+        // Clear any stale authentication data on app start
+        clearStaleAuthData()
+    }
+    
+    // MARK: - Authentication
+    func signIn(email: String, password: String) {
+        isLoading = true
+        
+        // Check for empty fields - treat as invalid credentials
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if trimmedEmail.isEmpty || trimmedPassword.isEmpty {
+            // Treat empty fields as invalid credentials
+            Task { @MainActor in
+                self.isLoading = false
+                let currentAttempts = UserDefaults.standard.integer(forKey: "failedSignInAttempts")
+                let newAttempts = currentAttempts + 1
+                UserDefaults.standard.set(newAttempts, forKey: "failedSignInAttempts")
+                
+                // Show extended message every 5th time (5th, 10th, 15th, etc.)
+                if newAttempts % 5 == 0 {
+                    self.authErrorMessage = "auth.error.credentials.with.forgot".localized
+                } else {
+                    self.authErrorMessage = "auth.error.credentials".localized
+                }
+            }
+            return
+        }
+        
+        Task {
+            do {
+                try await firebaseAuth.signIn(email: trimmedEmail, password: trimmedPassword)
+                await MainActor.run {
+                    self.isLoading = false
+                    // Reset failed sign-in attempts counter on successful sign-in
+                    UserDefaults.standard.set(0, forKey: "failedSignInAttempts")
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                    print("Sign in error: \(error.localizedDescription)")
+                    
+                    // Increment failed sign-in attempts counter
+                    let currentAttempts = UserDefaults.standard.integer(forKey: "failedSignInAttempts")
+                    let newAttempts = currentAttempts + 1
+                    UserDefaults.standard.set(newAttempts, forKey: "failedSignInAttempts")
+                    
+                    // Show extended message every 5th time (5th, 10th, 15th, etc.)
+                    if newAttempts % 5 == 0 {
+                        self.authErrorMessage = "auth.error.credentials.with.forgot".localized
+                    } else {
+                        self.authErrorMessage = "auth.error.credentials".localized
+                    }
+                }
+            }
+        }
+    }
+    
+    func signUp(name: String, age: Int, email: String, password: String) {
+        isLoading = true
+        
+        Task {
+            do {
+                try await firebaseAuth.signUp(email: email, password: password, name: name, age: age)
+                await MainActor.run {
+                    self.isLoading = false
+                    // Mark as new signup to trigger mandatory profile completion
+                    self.isNewSignup = true
+                    self.signUpName = name
+                    self.hasCompletedInitialProfile = false
+                    self.saveAppState()
+                    print("🆕 New user signed up - will show mandatory profile completion")
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                    // Handle error - you might want to show an alert
+                    print("Sign up error: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+    
+    func signOut() {
+        Task {
+            do {
+                try await firebaseAuth.signOut()
+                // Clear all local state EXCEPT hasCompletedOnboarding
+                // hasCompletedOnboarding should persist so users don't see onboarding again after sign out
+                // All @Published property updates must happen on the main thread
+                await MainActor.run {
+                    currentUser = nil
+                    isNewSignup = false
+                    hasCompletedInitialProfile = false
+                    matches = []
+                    cachedMatches = []
+                    lastMatchesUpdate = nil
+                    conversations = []
+                    blockedUsers = []
+                    clearMessageConversationsCache() // Clear message conversations cache
+                    // NOTE: hasCompletedOnboarding is NOT reset here - it persists across sign-outs
+                    // This ensures users go to sign-in view, not onboarding view, when they sign out
+                    saveAppState()
+                    print("🔐 User signed out successfully - hasCompletedOnboarding preserved: \(hasCompletedOnboarding)")
+                }
+            } catch {
+                await MainActor.run {
+                    print("Sign out error: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+    
+    
+    func resetPassword(email: String) {
+        Task {
+            do {
+                try await firebaseAuth.resetPassword(email: email)
+            } catch {
+                print("Reset password error: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    // MARK: - User Data
+    // User data is now automatically synced with FirebaseAuthService via @Published properties
+    
+    func cleanupUserPhotos() {
+        if var user = currentUser {
+            let originalCount = user.photos.count
+            user.photos = user.photos.filter { photoURL in
+                let trimmedURL = photoURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                return !trimmedURL.isEmpty && URL(string: trimmedURL) != nil
+            }
+            currentUser = user
+            print("🧹 AppStateManager: Cleaned up photos from \(originalCount) to \(user.photos.count)")
+            saveAppState()
+        }
+    }
+    
+    func isProfileComplete() -> Bool {
+        guard let user = currentUser else { return false }
+        
+        // Check full name (first and last at least)
+        let nameComponents = user.name.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: " ")
+        let hasFullName = nameComponents.count >= 2 && nameComponents.allSatisfy { !$0.isEmpty }
+        
+        // Check age
+        let hasValidAge = user.age >= 18 && user.age <= 100
+        
+        // Check about me (at least 20 characters)
+        let hasAboutMe = user.bio.trimmingCharacters(in: .whitespacesAndNewlines).count >= 20
+        
+        // Check interests (at least 3)
+        let hasInterests = user.interests.count >= 3
+        
+        // Check photos (at least 3)
+        let validPhotos = user.photos.filter { photoURL in
+            let trimmedURL = photoURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !trimmedURL.isEmpty && URL(string: trimmedURL) != nil
+        }
+        let hasPhotos = validPhotos.count >= 3
+        
+        // Check profile photo (must exist - first photo)
+        let hasProfilePhoto = !validPhotos.isEmpty
+        
+        let isComplete = hasFullName && hasValidAge && hasAboutMe && hasInterests && hasPhotos && hasProfilePhoto
+        
+        print("📋 Profile completion check:")
+        print("  - Full name: \(hasFullName) (\(nameComponents.count) components)")
+        print("  - Valid age: \(hasValidAge) (\(user.age))")
+        print("  - About me: \(hasAboutMe) (\(user.bio.count) chars)")
+        print("  - Interests: \(hasInterests) (\(user.interests.count) items)")
+        print("  - Photos: \(hasPhotos) (\(validPhotos.count) photos)")
+        print("  - Profile photo: \(hasProfilePhoto)")
+        print("  - Overall: \(isComplete)")
+        
+        return isComplete
+    }
+    
+    
+    // MARK: - Onboarding
+    func completeOnboarding() {
+        hasCompletedOnboarding = true
+        saveAppState()
+    }
+    
+    func resetOnboarding() {
+        hasCompletedOnboarding = false
+        saveAppState()
+        print("🔄 Onboarding state reset - wizard will show on next app launch")
+    }
+    
+    func completeInitialProfile() {
+        hasCompletedInitialProfile = true
+        isNewSignup = false
+        signUpName = "" // Clear the sign up name
+        saveAppState()
+        print("✅ Initial profile completed - user can now access main app")
+    }
+    
+    // MARK: - Matches
+    func addMatch(_ match: Match) {
+        matches.append(match)
+        saveAppState()
+    }
+    
+    func removeMatch(_ match: Match) {
+        matches.removeAll { $0.id == match.id }
+        saveAppState()
+    }
+
+    // MARK: - Matches Cache
+    func getCachedOrFreshMatches() async throws -> [MatchDisplay] {
+        if let lastUpdate = lastMatchesUpdate,
+           Date().timeIntervalSince(lastUpdate) < 60,
+           !cachedMatches.isEmpty {
+            print("💕 Returning cached matches (\(cachedMatches.count) items, updated \(Date().timeIntervalSince(lastUpdate)) seconds ago)")
+            return cachedMatches
+        }
+        return try await refreshMatchesCache()
+    }
+    
+    @discardableResult
+    func refreshMatchesCache() async throws -> [MatchDisplay] {
+        print("💕 Refreshing matches cache...")
+        let fetched = try await firebaseAuth.fetchMatches()
+        await MainActor.run {
+            cachedMatches = fetched
+            lastMatchesUpdate = Date()
+        }
+        return fetched
+    }
+    
+    func updateMatchesCache(with match: MatchDisplay) {
+        Task {
+            await MainActor.run {
+                if let index = cachedMatches.firstIndex(where: { $0.otherUser.userId == match.otherUser.userId }) {
+                    cachedMatches[index] = match
+                } else {
+                    cachedMatches.insert(match, at: 0)
+                }
+                cachedMatches.sort { $0.matchedAt > $1.matchedAt }
+                lastMatchesUpdate = Date()
+                newMatchReceivedSubject.send(match)
+            }
+        }
+    }
+    
+    // MARK: - Conversations
+    func addConversation(_ conversation: Conversation) {
+        conversations.append(conversation)
+        saveAppState()
+    }
+    
+    func updateConversation(_ conversation: Conversation) {
+        if let index = conversations.firstIndex(where: { $0.id == conversation.id }) {
+            conversations[index] = conversation
+            saveAppState()
+        }
+    }
+    
+    // MARK: - Persistence
+    func saveAppState() {
+        let encoder = JSONEncoder()
+        
+        if let userData = try? encoder.encode(currentUser) {
+            UserDefaults.standard.set(userData, forKey: "currentUser")
+        }
+        
+        // Don't save authentication state - Firebase handles this
+        UserDefaults.standard.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding")
+        UserDefaults.standard.set(hasCompletedInitialProfile, forKey: "hasCompletedInitialProfile")
+        UserDefaults.standard.set(isNewSignup, forKey: "isNewSignup")
+        
+        if let matchesData = try? encoder.encode(matches) {
+            UserDefaults.standard.set(matchesData, forKey: "matches")
+        }
+        
+        if let conversationsData = try? encoder.encode(conversations) {
+            UserDefaults.standard.set(conversationsData, forKey: "conversations")
+        }
+    }
+    
+    private func loadAppState() {
+        let decoder = JSONDecoder()
+        
+        if let userData = UserDefaults.standard.data(forKey: "currentUser"),
+           let user = try? decoder.decode(SpectRoomUser.self, from: userData) {
+            currentUser = user
+            blockedUsers = user.blockedUsers
+            print("📱 Loaded user from UserDefaults with \(user.photos.count) photos")
+        }
+        
+        // Don't load authentication state from UserDefaults - rely on Firebase
+        // isAuthenticated will be set by FirebaseAuthService
+        hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+        hasCompletedInitialProfile = UserDefaults.standard.bool(forKey: "hasCompletedInitialProfile")
+        isNewSignup = UserDefaults.standard.bool(forKey: "isNewSignup")
+        
+        if let matchesData = UserDefaults.standard.data(forKey: "matches"),
+           let matches = try? decoder.decode([Match].self, from: matchesData) {
+            self.matches = matches
+        }
+        
+        if let conversationsData = UserDefaults.standard.data(forKey: "conversations"),
+           let conversations = try? decoder.decode([Conversation].self, from: conversationsData) {
+            self.conversations = conversations
+        }
+    }
+    
+    private func clearStaleAuthData() {
+        // Clear any cached authentication data to prevent stale state
+        UserDefaults.standard.removeObject(forKey: "isAuthenticated")
+        print("🧹 Cleared stale authentication data from UserDefaults")
+    }
+    
+    func resetAllAppState() {
+        // Reset all app state for testing/development
+        Task {
+            do {
+                // Delete all swipes, matches, and messages from Firebase
+                try await FirebaseAuthService.shared.deleteAllUserInteractions()
+                
+                await MainActor.run {
+                    // Reset local state
+                    hasCompletedOnboarding = false
+                    hasCompletedInitialProfile = false
+                    isNewSignup = false
+                    currentUser = nil
+                    matches = []
+                    conversations = []
+                    blockedUsers = []
+                    clearMessageConversationsCache() // Clear message conversations cache
+                    saveAppState()
+                    print("🔄 All app state reset - app will start fresh")
+                }
+            } catch {
+                await MainActor.run {
+                    print("❌ Error deleting user interactions: \(error.localizedDescription)")
+                    // Still reset local state even if Firebase deletion fails
+                    hasCompletedOnboarding = false
+                    hasCompletedInitialProfile = false
+                    isNewSignup = false
+                    currentUser = nil
+                    matches = []
+                    conversations = []
+                    clearMessageConversationsCache()
+                    saveAppState()
+                }
+            }
+        }
+    }
+    
+    func isUserBlocked(_ userId: String) -> Bool {
+        blockedUsers.contains(where: { $0.id == userId })
+    }
+
+    func blockUser(userId: String, name: String) {
+        guard !isUserBlocked(userId) else { return }
+        let blockedUser = BlockedUser(id: userId, name: name, blockedAt: Date())
+
+        Task {
+            await MainActor.run {
+                self.blockedUsers.append(blockedUser)
+                if var current = self.currentUser {
+                    current.blockedUsers = self.blockedUsers
+                    self.currentUser = current
+                }
+                self.saveAppState()
+            }
+
+            do {
+                try await firebaseAuth.blockUser(userId: userId, name: name)
+            } catch {
+                print("⚠️ Unable to persist block to Firestore: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func unblockUser(userId: String) {
+        guard isUserBlocked(userId) else { return }
+
+        Task {
+            await MainActor.run {
+                self.blockedUsers.removeAll { $0.id == userId }
+                if var current = self.currentUser {
+                    current.blockedUsers = self.blockedUsers
+                    self.currentUser = current
+                }
+                self.saveAppState()
+            }
+
+            do {
+                try await firebaseAuth.unblockUser(userId: userId)
+            } catch {
+                print("⚠️ Unable to persist unblock to Firestore: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: - Photo Preloading
+    private func preloadUserPhotos() async {
+        // Preload photos from Firebase Storage to improve user experience
+        print("🔄 Preloading user photos for better UX...")
+        
+        // Only sync photos once when user first logs in, not continuously
+        guard currentUser?.photos.isEmpty == true else {
+            print("📸 Photos already loaded, skipping preload")
+            return
+        }
+        
+        await firebaseAuth.syncPhotosFromStorage()
+        print("✅ User photos preloaded successfully")
+    }
+    
+    func startListeningForMatches() {
+        guard isAuthenticated else {
+            print("❌ Cannot start listening for matches - user not authenticated")
+            return
+        }
+        
+        print("💕 Starting to listen for new matches...")
+        
+        firebaseAuth.listenForNewMatches { [weak self] matchDisplay in
+            DispatchQueue.main.async {
+                print("💕 New match received: \(matchDisplay.otherUser.name)")
+                print("💕 Match ID: \(matchDisplay.id)")
+                print("💕 Current showingMatchNotification state: \(self?.showingMatchNotification ?? false)")
+                print("💕 Last match ID: \(self?.lastMatchId ?? "nil")")
+                
+                // Prevent duplicate notifications for the same match
+                guard self?.lastMatchId != matchDisplay.id else {
+                    print("💕 Duplicate match notification, ignoring")
+                    return
+                }
+                
+                // Only show notification if not already showing one
+                guard self?.showingMatchNotification != true else {
+                    print("💕 Match notification already showing, ignoring new match")
+                    return
+                }
+                
+                // Check if app is in background/closed
+                let isAppInBackground = UIApplication.shared.applicationState != .active
+                
+                // Show in-app notification if app is active (foreground)
+                // Cloud Function will handle push notifications when app is closed
+                if !isAppInBackground {
+                    // Show notification for both users via the listener
+                    // Add a small delay to ensure match is fully synced before showing popup
+                    // This helps ensure both users get the popup properly
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        self?.lastMatchId = matchDisplay.id
+                        self?.newMatchProfile = matchDisplay.otherUser
+                        self?.showingMatchNotification = true
+                        print("💕 Match notification set to show for: \(matchDisplay.otherUser.name)")
+                        self?.updateMatchesCache(with: matchDisplay)
+                    }
+                } else {
+                    // App is closed/backgrounded
+                    // Cloud Function will send push notification automatically
+                    // Just update the match ID to prevent duplicates
+                    self?.lastMatchId = matchDisplay.id
+                    print("💕 App is closed/backgrounded - Cloud Function will send push notification for match: \(matchDisplay.otherUser.name)")
+                    self?.updateMatchesCache(with: matchDisplay)
+                }
+            }
+        }
+    }
+    
+    func dismissMatchNotification() {
+        print("💕 Dismissing match notification")
+        print("💕 Current showingMatchNotification: \(showingMatchNotification)")
+        print("💕 Current newMatchProfile: \(newMatchProfile?.name ?? "nil")")
+        
+        showingMatchNotification = false
+        newMatchProfile = nil
+        shouldOpenMessageModal = false
+        isShowingSwipeMatchPopup = false
+        
+        print("💕 Match notification dismissed")
+    }
+    
+    func setShowingSwipeMatchPopup(_ showing: Bool) {
+        print("💕 Setting isShowingSwipeMatchPopup to: \(showing)")
+        isShowingSwipeMatchPopup = showing
+    }
+    
+    // MARK: - New Message Notification
+    
+    func startListeningForNewMessages() {
+        guard isAuthenticated else {
+            print("❌ Cannot start listening for messages - user not authenticated")
+            return
+        }
+        
+        print("💬 Starting to listen for new messages...")
+        
+        firebaseAuth.listenForNewMessages { [weak self] senderId, senderName, senderPhotoURL, messageDocId in
+            DispatchQueue.main.async {
+                print("💬 New message received from: \(senderName)")
+                print("💬 Sender ID: \(senderId), Message Doc ID: \(messageDocId)")
+                print("💬 Current showingNewMessageNotification state: \(self?.showingNewMessageNotification ?? false)")
+                print("💬 Last message ID: \(self?.lastMessageId ?? "nil")")
+                
+                // Prevent duplicate notifications for the same message (using document ID)
+                guard self?.lastMessageId != messageDocId else {
+                    print("💬 Duplicate message notification (same document ID), ignoring")
+                    return
+                }
+                
+                // Only show notification if not already showing one
+                guard self?.showingNewMessageNotification != true else {
+                    print("💬 Message notification already showing, ignoring new message")
+                    return
+                }
+                
+                // Don't show notification if conversation with this sender is already open
+                if let openSenderId = self?.currentlyOpenConversationSenderId, openSenderId == senderId {
+                    print("💬 Conversation with \(senderName) is already open, skipping notification popup")
+                    return
+                }
+                
+                // Update cache with new message in background
+                Task {
+                    do {
+                        if let conversation = try await FirebaseAuthService.shared.fetchLatestMessageFromSender(senderId: senderId) {
+                            self?.updateConversationInCache(conversation)
+                        }
+                    } catch {
+                        print("❌ Failed to update cache for new message: \(error)")
+                    }
+                }
+                
+                // Check if conversation with this sender is currently open
+                let isConversationOpen = self?.currentlyOpenConversationSenderId == senderId
+                
+                // NEVER send push notification if conversation is currently open (regardless of app state)
+                if isConversationOpen {
+                    print("💬 Conversation with \(senderName) is currently open, skipping push notification")
+                    // Just update the message ID to prevent duplicates
+                    self?.lastMessageId = messageDocId
+                    return
+                }
+                
+                // Check if app is in background/closed
+                let isAppInBackground = UIApplication.shared.applicationState != .active
+                
+                // Only send push notification if app is closed/backgrounded
+                if isAppInBackground {
+                    // Fetch message content for notification
+                    Task {
+                        // Get message content for notification
+                        let messageContent = try? await FirebaseAuthService.shared.fetchLatestMessageContent(from: senderId)
+                        
+                        let hasPermission = await NotificationService.shared.checkNotificationPermission()
+                        if hasPermission && NotificationService.shared.areNotificationsEnabled() {
+                            NotificationService.shared.sendNewMessageNotification(
+                                senderName: senderName,
+                                messageContent: messageContent ?? "New message",
+                                senderId: senderId
+                            )
+                            print("📱 Push notification sent for message from: \(senderName)")
+                        }
+                    }
+                }
+                
+                // Just update the message ID to prevent duplicates
+                self?.lastMessageId = messageDocId
+            }
+        }
+    }
+    
+    func dismissNewMessageNotification() {
+        print("💬 Dismissing new message notification")
+        print("💬 Current showingNewMessageNotification: \(showingNewMessageNotification)")
+        
+        showingNewMessageNotification = false
+        newMessageSenderName = ""
+        newMessageSenderPhotoURL = nil
+        newMessageSenderId = ""
+        shouldOpenConversation = false
+        conversationToOpenSenderId = nil
+        
+        print("💬 New message notification dismissed")
+    }
+    
+    
+    // MARK: - Message Conversations Cache
+    
+    /// Get cached conversations if available and recent (within 30 seconds), otherwise fetch fresh
+    func getCachedOrFreshConversations() async throws -> [MessageDisplay] {
+        // If cache is empty or older than 30 seconds, fetch fresh
+        if let lastUpdate = lastMessageConversationsUpdate,
+           Date().timeIntervalSince(lastUpdate) < 30.0,
+           !cachedMessageConversations.isEmpty {
+            print("💬 Returning cached conversations (\(cachedMessageConversations.count) items, updated \(Date().timeIntervalSince(lastUpdate)) seconds ago)")
+            return cachedMessageConversations
+        }
+        
+        // Cache is stale or empty, fetch fresh
+        print("💬 Cache is stale or empty, fetching fresh conversations...")
+        return try await refreshMessageConversationsCache()
+    }
+    
+    /// Refresh the message conversations cache from Firebase
+    func refreshMessageConversationsCache() async throws -> [MessageDisplay] {
+        print("💬 Refreshing message conversations cache...")
+        let latestMessages = try await FirebaseAuthService.shared.fetchLatestMessagesFromEachUser()
+        let sortedMessages = latestMessages.sorted { $0.createdAt > $1.createdAt }
+        
+        await MainActor.run {
+            cachedMessageConversations = sortedMessages
+            print("💬 Cache updated with \(sortedMessages.count) conversations")
+            lastMessageConversationsUpdate = Date()
+        }
+        
+        return sortedMessages
+    }
+    
+    /// Update a single conversation in the cache (when a new message arrives)
+    func updateConversationInCache(_ conversation: MessageDisplay) {
+        Task {
+            await MainActor.run {
+                if let index = cachedMessageConversations.firstIndex(where: { conv in
+                    let otherUserId = conv.senderName == "You" ? conv.recipientId : conv.senderId
+                    let newOtherUserId = conversation.senderName == "You" ? conversation.recipientId : conversation.senderId
+                    return otherUserId == newOtherUserId
+                }) {
+                    let existing = cachedMessageConversations[index]
+                    if conversation.createdAt >= existing.createdAt {
+                        cachedMessageConversations[index] = conversation
+                        print("💬 Updated conversation in cache: \(conversation.recipientName)")
+                    }
+                } else {
+                    cachedMessageConversations.append(conversation)
+                    print("💬 Added new conversation to cache: \(conversation.recipientName)")
+                }
+                cachedMessageConversations.sort { $0.createdAt > $1.createdAt }
+                lastMessageConversationsUpdate = Date()
+                newMessageReceivedSubject.send(conversation)
+            }
+        }
+    }
+    
+    /// Clear the message conversations cache (e.g., on logout)
+    func clearMessageConversationsCache() {
+        cachedMessageConversations = []
+        lastMessageConversationsUpdate = nil
+        cachedConversationMessages = [:]
+        conversationMessagesCacheTimestamp = [:]
+        print("💬 Message conversations cache cleared")
+    }
+    
+    // MARK: - Individual Conversation Messages Cache
+    
+    /// Get cached conversation messages if available and recent (within 5 minutes), otherwise return nil
+    func getCachedConversationMessages(for otherUserId: String) -> [MessageDisplay]? {
+        // Check if we have cached messages for this conversation
+        guard let cachedMessages = cachedConversationMessages[otherUserId],
+              let timestamp = conversationMessagesCacheTimestamp[otherUserId] else {
+            print("💬 No cached messages for conversation with \(otherUserId)")
+            return nil
+        }
+        
+        // Check if cache is still valid (within 5 minutes)
+        let cacheAge = Date().timeIntervalSince(timestamp)
+        if cacheAge < 300.0 { // 5 minutes
+            print("💬 Returning cached conversation messages for \(otherUserId) (\(cachedMessages.count) messages, \(Int(cacheAge)) seconds old)")
+            return cachedMessages
+        } else {
+            print("💬 Cache expired for conversation with \(otherUserId) (\(Int(cacheAge)) seconds old)")
+            // Remove expired cache
+            cachedConversationMessages.removeValue(forKey: otherUserId)
+            conversationMessagesCacheTimestamp.removeValue(forKey: otherUserId)
+            return nil
+        }
+    }
+    
+    /// Cache conversation messages for a specific user
+    func cacheConversationMessages(_ messages: [MessageDisplay], for otherUserId: String) {
+        Task { @MainActor in
+            cachedConversationMessages[otherUserId] = messages
+            conversationMessagesCacheTimestamp[otherUserId] = Date()
+            print("💬 Cached \(messages.count) messages for conversation with \(otherUserId)")
+        }
+    }
+    
+    /// Update conversation messages cache when new messages arrive
+    func updateConversationMessagesCache(_ newMessages: [MessageDisplay], for otherUserId: String) {
+        Task { @MainActor in
+            // If we have cached messages, merge them with new ones
+            if var existingMessages = cachedConversationMessages[otherUserId] {
+                // Create a set of existing message IDs for quick lookup
+                let existingIds = Set(existingMessages.map { "\($0.content)_\($0.createdAt.timeIntervalSince1970)" })
+                
+                // Add only new messages that don't exist in cache
+                for newMessage in newMessages {
+                    let newId = "\(newMessage.content)_\(newMessage.createdAt.timeIntervalSince1970)"
+                    if !existingIds.contains(newId) {
+                        existingMessages.append(newMessage)
+                    }
+                }
+                
+                // Sort by creation date
+                existingMessages.sort { $0.createdAt < $1.createdAt }
+                
+                cachedConversationMessages[otherUserId] = existingMessages
+                conversationMessagesCacheTimestamp[otherUserId] = Date()
+                print("💬 Updated conversation cache for \(otherUserId) with new messages (total: \(existingMessages.count))")
+            } else {
+                // No existing cache, just store the new messages
+                cacheConversationMessages(newMessages, for: otherUserId)
+            }
+        }
+    }
+    
+    /// Clear cache for a specific conversation
+    func clearConversationMessagesCache(for otherUserId: String) {
+        Task { @MainActor in
+            cachedConversationMessages.removeValue(forKey: otherUserId)
+            conversationMessagesCacheTimestamp.removeValue(forKey: otherUserId)
+            print("💬 Cleared conversation cache for \(otherUserId)")
+        }
+    }
+    
+    // MARK: - App State Management for Push Notifications
+    
+    /// Update app state in Firestore so Cloud Functions can check if app is active
+    func updateAppStateInFirestore(isActive: Bool) async {
+        guard firebaseAuth.auth.currentUser != nil else {
+            return
+        }
+        
+        do {
+            let now = Date()
+            let state: [String: Any] = [
+                "appIsActive": isActive,
+                "appStateUpdatedAt": now.timeIntervalSince1970,
+                "isOnline": isActive,
+                "lastSeen": now.timeIntervalSince1970
+            ]
+            try await firebaseAuth.updateUserData(state)
+            
+            // Also update local user object
+            if var user = currentUser {
+                user.isOnline = isActive
+                user.lastSeen = now
+                await MainActor.run {
+                    self.currentUser = user
+                }
+            }
+            
+            print("📱 Updated app state in Firestore: \(isActive ? "active" : "inactive"), isOnline: \(isActive)")
+        } catch {
+            print("❌ Failed to update app state in Firestore: \(error)")
+        }
+    }
+    
+    // MARK: - Update Online Status
+    func updateOnlineStatus(isOnline: Bool) async {
+        guard firebaseAuth.auth.currentUser != nil else {
+            return
+        }
+        
+        do {
+            let now = Date()
+            let statusData: [String: Any] = [
+                "isOnline": isOnline,
+                "lastSeen": now.timeIntervalSince1970
+            ]
+            try await firebaseAuth.updateUserData(statusData)
+            
+            // Also update local user object
+            if var user = currentUser {
+                user.isOnline = isOnline
+                user.lastSeen = now
+                await MainActor.run {
+                    self.currentUser = user
+                }
+            }
+            
+            print("🟢 Updated online status: \(isOnline ? "online" : "offline")")
+        } catch {
+            print("❌ Failed to update online status: \(error)")
+        }
+    }
+}

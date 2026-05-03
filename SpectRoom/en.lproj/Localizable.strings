@@ -1,0 +1,335 @@
+/* 
+  Localizable.strings (English)
+  SpectRoom
+  
+  Created by EVYATAR DAYAN on 2025-10-23.
+*/
+
+// MARK: - App Name & Tagline
+"app.name" = "SpectRoom";
+"app.tagline" = "A safe space for meaningful connections";
+
+// MARK: - Authentication
+"auth.sign.in" = "Sign In";
+"auth.sign.up" = "Sign Up";
+"auth.email" = "Email";
+"auth.password" = "Password";
+"auth.confirm.password" = "Confirm Password";
+"auth.full.name" = "Full Name";
+"auth.email.placeholder" = "Enter your email";
+"auth.password.placeholder" = "Enter your password";
+"auth.confirm.password.placeholder" = "Confirm your password";
+"auth.name.placeholder" = "Enter your full name";
+"auth.forgot.password" = "Forgot Password?";
+"auth.no.account" = "Don't have an account?";
+"auth.have.account" = "Already have an account?";
+"auth.error" = "Error";
+"auth.ok" = "OK";
+"auth.email.required" = "Please enter your email address first";
+"auth.password.reset.sent" = "Password reset email sent to %@";
+"auth.error.credentials" = "Invalid credentials, try again.";
+"auth.error.credentials.with.forgot" = "Invalid credentials, try again. Consider using \"Forgot password\"";
+"auth.error.login.inputs" = "Please enter your email and password.";
+"auth.error.fullname" = "Enter your full name";
+"auth.error.email.format" = "Incorrect email format";
+"auth.error.password.match" = "Passwords don't match";
+"auth.alert.title" = "Please review your information";
+
+// MARK: - Onboarding
+"onboarding.welcome.title" = "Welcome to SpectRoom";
+"onboarding.welcome.subtitle" = "A safe and understanding space for meaningful connections";
+"onboarding.welcome.description" = "Connect with people who understand and appreciate your unique perspective.";
+"onboarding.match.title" = "Find Your Match";
+"onboarding.match.subtitle" = "Discover people with similar interests and values";
+"onboarding.match.description" = "Our matching system helps you find compatible people who share your interests and communication style.";
+"onboarding.communication.title" = "Safe Communication";
+"onboarding.communication.subtitle" = "Chat at your own pace in a comfortable environment";
+"onboarding.communication.description" = "Take your time to get to know someone. No pressure, no rush - just genuine connections.";
+"onboarding.settings.title" = "Your Space";
+"onboarding.settings.subtitle" = "Control your experience with customizable settings";
+"onboarding.settings.description" = "Set your preferences for notifications, privacy, and how you want to interact with others.";
+"onboarding.previous" = "Previous";
+"onboarding.next" = "Next";
+"onboarding.get.started" = "Get Started";
+
+// MARK: - Navigation & Tabs
+"nav.discover" = "Discover";
+"nav.matches" = "Matches";
+"nav.messages" = "Messages";
+"nav.profile" = "Profile";
+"nav.settings" = "Settings";
+
+// MARK: - Settings
+"settings.title" = "Settings";
+"settings.app.settings" = "App Settings";
+"settings.notifications" = "Notifications";
+"settings.notifications.description" = "Enable notifications";
+"settings.dark.mode" = "Dark Mode";
+"settings.dark.mode.description" = "Enable dark mode";
+"settings.language" = "Language";
+"settings.language.description" = "Select app language";
+"settings.support" = "Support";
+"settings.privacy.safety" = "Privacy & Safety";
+"settings.privacy.safety.description" = "Control your privacy settings";
+"settings.help.support" = "Help & Support";
+"settings.help.support.description" = "Get help and contact support";
+"settings.about" = "About";
+"settings.about.description" = "App version and information";
+"settings.sign.out" = "Sign Out";
+"settings.development" = "Development";
+"settings.reset.user.data" = "Reset user data";
+"settings.reset.user.data.description" = "Clear match, swipe etc.";
+"settings.notification.permission" = "Notification Permission";
+"settings.notification.permission.message" = "Notifications are disabled. Please enable them in Settings to receive match and message notifications.";
+"settings.settings.button" = "Settings";
+"settings.cancel" = "Cancel";
+"settings.blocked.users.section.title" = "Blocked Users";
+"settings.blocked.users.button.title" = "Blocked Users";
+"settings.blocked.users.button.subtitle" = "See all blocked users";
+
+"settings.authentication.section.title" = "Authentication";
+"settings.authentication.signout.subtitle" = "Tap to sign out";
+
+"address.search.map.placeholder" = "Search to preview the location";
+"address.search.use.address" = "Use this address";
+"address.search.privacy.notice" = "Your address will not be shared!";
+"address.search.title" = "Search Address";
+"address.search.placeholder" = "Search for an address";
+"address.search.searching" = "Searching...";
+"address.search.no.results" = "No addresses found";
+"address.search.geocoding" = "Getting coordinates...";
+
+// MARK: - Profile
+"profile.title" = "Profile";
+"profile.title.with.name" = "%@'s profile";
+"profile.my.title" = "My profile";
+"profile.edit" = "Edit";
+"profile.age" = "Age";
+"profile.my.age" = "My Age";
+"profile.years.old" = "years old";
+"profile.location" = "Location";
+"profile.my.location" = "My Location";
+"profile.location.not.specified" = "Not specified";
+"profile.about.me" = "About Me";
+"profile.no.bio" = "No bio available";
+"profile.my.interests" = "My Interests";
+"profile.no.interests" = "No interests added yet";
+"profile.gender.preferences" = "Gender & Preferences";
+"profile.preferences" = "Preferences";
+"profile.im.a" = "I'm a";
+"profile.interested.in" = "interested in";
+"profile.looking.for" = "Looking for";
+"profile.preferred.age" = "Preferred age: %@ to %@";
+"profile.no.preferences" = "No preferences set";
+"profile.my.photos" = "My Photos";
+"profile.no.photos" = "No photos added yet";
+"profile.gender" = "Gender";
+"profile.no.one" = "no one";
+"profile.nothing.specific" = "nothing specific";
+
+// MARK: - Matches
+"matches.title" = "Matches";
+"matches.loading" = "Loading matches...";
+"matches.empty" = "No matches yet";
+"matches.empty.description" = "Start swiping to find your perfect match!";
+"matches.start.swiping" = "Start Swiping";
+"matches.new.message" = "New Message";
+"matches.new.message.to" = "to %@";
+"matches.view.profile" = "View Profile";
+"matches.matched" = "Matched %@";
+"matches.message.button" = "Message";
+"matches.message.label" = "Message";
+"matches.error.no.profile" = "Error: No profile selected";
+"matches.error.no.recipient" = "Error: No recipient selected";
+"matches.default.message" = "Hey. I like your profile.";
+"matches.pre.message.button" = "Quick message";
+"matches.pre.message.title" = "Quick message";
+"matches.pre.message.subtitle" = "Choose a pre-written message";
+"matches.pre.message.option1" = "Hi. Nice match. No rush to reply.";
+"matches.pre.message.option2" = "Hello. Happy to connect if you are.";
+"matches.pre.message.option3" = "Hi. Want to chat a little?";
+"matches.pre.message.option4" = "Hi. We can keep it simple. 😊";
+"matches.pre.message.option5" = "Hey. I like your profile.";
+"matches.pre.message.option6" = "Hi. I'm here if you want to talk.";
+"matches.pre.message.option7" = "Hi! Nice to meet you. Want to share a bit about yourself?";
+"matches.pre.message.option8" = "Hi there! What interested you about my profile?";
+"matches.pre.message.option9" = "Hello! 😊 What are you looking for here?";
+"matches.pre.message.option10" = "Hi! Hope your day is going well. What do you enjoy doing?";
+"matches.pre.message.option11" = "Hey! I'd love to get to know you. What's something you like?";
+"matches.pre.message.option12" = "Hi! Great match. What made you join SpectRoom?";
+
+// MARK: - Messages
+"messages.title" = "Messages";
+"messages.loading" = "Loading messages...";
+"messages.loading.conversation" = "Loading conversation...";
+"messages.empty" = "No messages yet";
+"messages.empty.description" = "Start swiping to find your perfect match!";
+"messages.start.swiping" = "Start Swiping";
+"messages.new.message" = "New Message";
+"messages.send" = "Send";
+"messages.send.message" = "Send Message";
+"messages.type.message" = "Type a message...";
+"messages.type.something" = "Type something...";
+"messages.conversation.with" = "Conversation with %@";
+"messages.no.messages.found" = "No messages found";
+"messages.error.no.message" = "Error: No message selected";
+"messages.image.saved" = "Image Saved";
+"messages.image.saved.success" = "Image saved to your photo library";
+"messages.image.saved.failed" = "Failed to save image";
+"messages.you" = "You";
+"messages.voice.recording" = "Recording...";
+"messages.voice.ready" = "Message ready";
+"messages.preview.photo" = "📷 Photo";
+"messages.preview.voice" = "🎤 Voice message";
+"messages.preview.voice.duration" = "🎤 Voice message • %@";
+
+// MARK: - Match Modal
+"match.modal.title.prefix" = "It's a";
+"match.modal.title.highlight" = "Match!";
+"match.modal.title" = "It's a Match!";
+"match.modal.description" = "You and %@ have liked each other";
+"match.modal.send.message" = "Send a Message";
+"match.modal.maybe.later" = "Maybe Later";
+
+// MARK: - New Message Notification
+"message.notification.title" = "New Message";
+"message.notification.from" = "New message from %@";
+"message.notification.open.message" = "Open Message";
+"message.notification.later" = "Later";
+
+// MARK: - Search/Discover
+"search.empty.no.more.profiles.line1" = "There are no more profiles to display";
+"search.empty.no.more.profiles.line2" = "time to interact with your matches";
+"search.empty.matches.prefix" = "You have";
+"search.empty.matches.suffix" = "matches.";
+"search.empty.messages.prefix" = "You have";
+"search.empty.messages.suffix" = "messages.";
+"search.online.now" = "Online";
+"search.offline" = "Offline";
+"search.title" = "Discover";
+"search.loading" = "Loading profiles...";
+"search.no.more.profiles" = "No more profiles";
+"search.no.more.profiles.description" = "Check back later for new people!";
+"search.pass" = "Pass";
+"search.like" = "Like";
+"search.view.profile" = "View Profile";
+"search.new.message" = "New Message";
+"search.distance.km" = "%@ km away";
+"search.distance.m" = "%@ m away";
+"search.match.with" = "%@%% match with";
+
+// MARK: - Profile Edit
+"profile.edit.title" = "Edit Profile";
+"profile.edit.complete.title" = "Complete Your Profile";
+"profile.edit.name" = "Name";
+"profile.edit.name.placeholder" = "Enter your name";
+"profile.edit.date.of.birth" = "Date of Birth";
+"profile.edit.my.age" = "My Age: %@";
+"profile.edit.loading" = "Loading profile...";
+"profile.edit.saving" = "Saving...";
+"profile.edit.age" = "Age";
+"profile.edit.location" = "Location";
+"profile.edit.location.placeholder" = "Select your location";
+"profile.edit.about.me" = "About Me";
+"profile.edit.character.counter.min" = "Min: %@ Max: 500";
+"profile.edit.character.counter.max" = "Max: %@";
+"profile.edit.interests" = "Interests";
+"profile.edit.photos" = "Photos";
+"profile.edit.gender" = "Gender";
+"profile.edit.i.am" = "I am";
+"profile.edit.gender.man" = "Man";
+"profile.edit.gender.woman" = "Woman";
+"profile.edit.gender.nonbinary" = "Non-binary";
+"profile.edit.interested.in" = "Interested in";
+"profile.edit.interested.anyone" = "Anyone";
+"profile.edit.looking.for" = "Looking for";
+"profile.edit.looking.friendship" = "Friendship";
+"profile.edit.looking.relationship" = "Relationship";
+"profile.edit.looking.not.sure" = "Not sure yet";
+"profile.edit.preferred.age" = "Preferred Age";
+"profile.edit.energy.level" = "Energy level today";
+"profile.edit.energy.quiet.calm" = "Quiet and Calm";
+"profile.edit.energy.soft.steady" = "Soft and Steady";
+"profile.edit.energy.balanced" = "Balanced Energy";
+"profile.edit.energy.ready.chat" = "Ready to Chat";
+"profile.edit.energy.fully.social" = "Fully Social Mode";
+"profile.edit.save" = "Save";
+"profile.edit.cancel" = "Cancel";
+"profile.edit.add.photo" = "Add Photo";
+"profile.edit.add" = "Add";
+"profile.edit.remove.photo" = "Remove Photo";
+"profile.edit.profile.photo" = "Profile Photo";
+"profile.edit.profile.incomplete" = "Profile Incomplete";
+"profile.edit.validation.full.name" = "Enter your full name";
+"profile.edit.validation.age" = "You must be 18 years or older";
+"profile.edit.validation.location" = "Enter your location";
+"profile.edit.validation.bio" = "\"About me\" must be at least 30 characters";
+"profile.edit.validation.photos" = "Add at least 3 photos";
+"profile.edit.validation.interests" = "Select at least 3 interests";
+"profile.edit.validation.gender" = "Select your gender";
+"profile.edit.validation.interested.in" = "Select who you're interested in";
+"profile.edit.validation.looking.for" = "Select what you're looking for";
+"profile.edit.error.updating" = "Error updating profile: %@";
+"profile.edit.gallery.photos" = "Gallery Photos";
+"profile.edit.search.address" = "Search Address";
+
+// MARK: - Common
+"common.ok" = "OK";
+"common.cancel" = "Cancel";
+"common.close" = "Close";
+"common.save" = "Save";
+"common.edit" = "Edit";
+"common.delete" = "Delete";
+"common.loading" = "Loading...";
+"common.error" = "Error";
+"common.success" = "Success";
+"common.done" = "Done";
+
+// MARK: - Language Selection
+"language.selection.title" = "Select Language";
+
+
+"profile.interested.anyone" = "anyone";
+
+"profile.edit.lifestyle.title" = "Which of these describes your lifestyle best?";
+"profile.lifestyle.placeholder" = "Lifestyle not specified";
+"profile.edit.lifestyle.independent" = "I live independently";
+"profile.edit.lifestyle.family" = "I live with family or support staff";
+"profile.edit.lifestyle.assisted" = "I live in a shared or assisted setting";
+"profile.edit.lifestyle.prefer.not" = "Prefer not to share";
+"profile.edit.share.lifestyle" = "Share lifestyle";
+"profile.edit.share.body.type" = "Share body type";
+"profile.edit.ideal.first.date" = "Ideal First Date";
+"profile.edit.ideal.date.relaxing.park.walk" = "Relaxing Park Walk";
+"profile.edit.ideal.date.cozy.cafe.meet" = "Cozy Café Meet";
+"profile.edit.ideal.date.museum.gallery.stroll" = "Museum or Gallery Stroll";
+"profile.edit.ideal.date.cinema.movie.night" = "Cinema Movie Night";
+"profile.edit.ideal.date.friendly.video.chat" = "Friendly Video Chat";
+"profile.ideal.first.date" = "Ideal First Date";
+"profile.body.type" = "Body type";
+"profile.edit.body.type.slim" = "Slim";
+"profile.edit.body.type.average" = "Average";
+"profile.edit.body.type.athletic" = "Athletic";
+"profile.edit.body.type.full.bodied" = "Full-bodied";
+"profile.edit.interest.photography" = "Photography";
+"profile.edit.interest.music" = "Music";
+"profile.edit.interest.art" = "Art";
+"profile.edit.interest.reading" = "Reading";
+"profile.edit.interest.cooking" = "Cooking";
+"profile.edit.interest.travel" = "Travel";
+"profile.edit.interest.sports" = "Sports";
+"profile.edit.interest.gaming" = "Gaming";
+"profile.edit.interest.movies" = "Movies";
+"profile.edit.interest.nature" = "Nature";
+"profile.edit.interest.technology" = "Technology";
+"profile.edit.interest.fitness" = "Fitness";
+"profile.edit.interest.dancing" = "Dancing";
+"profile.edit.interest.writing" = "Writing";
+"profile.edit.interest.gardening" = "Gardening";
+"profile.edit.interest.animals" = "Animals";
+"profile.edit.interest.science" = "Science";
+"profile.edit.interest.history" = "History";
+"profile.edit.interest.languages" = "Languages";
+"profile.edit.interest.volunteering" = "Volunteering";
+
+"profile.lifestyle.title" = "Lifestyle";

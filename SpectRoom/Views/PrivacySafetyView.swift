@@ -42,7 +42,7 @@ struct PrivacySafetyView: View {
                             content: """
                             • You choose what personal information to share in your profile.
                             
-                            • Sensitive information—such as accessibility needs, support levels, health-related details, or communication preferences—is always optional.
+                            • Sensitive information-such as accessibility needs, support levels, health-related details, or communication preferences-is always optional.
                             
                             • You can edit or remove your information at any time in your profile settings.
                             
@@ -126,7 +126,7 @@ struct PrivacySafetyView: View {
                             • Use a public place
                             • Tell a friend or family member where you're going
                             • Consider using the app's check-in feature (if available)
-                            • Trust your instincts—if something feels wrong, leave immediately
+                            • Trust your instincts-if something feels wrong, leave immediately
                             
                             Your safety always comes first.
                             """

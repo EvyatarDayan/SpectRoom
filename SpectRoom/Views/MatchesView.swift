@@ -16,10 +16,6 @@ struct MatchesView: View {
     @State private var isLoading = true
     @State private var showingProfileModal = false
     @State private var selectedProfile: ProfileCard?
-    @State private var showingNewMessageModal = false
-    @State private var messageRecipient: ProfileCard?
-    @State private var isOpeningExistingConversation = false
-    
     var body: some View {
         NavigationView {
             Group {
@@ -72,35 +68,6 @@ struct MatchesView: View {
                         .foregroundColor(.red)
                     Button("common.close".localized) {
                         showingProfileModal = false
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: Binding(
-            get: { 
-                let isPresented = showingNewMessageModal
-                print("💬 MatchesView Message Sheet binding GET - isPresented: \(isPresented), messageRecipient: \(messageRecipient?.name ?? "nil")")
-                return isPresented
-            },
-            set: { newValue in
-                print("💬 MatchesView Message Sheet binding SET - newValue: \(newValue), current showingNewMessageModal: \(showingNewMessageModal)")
-                print("💬 messageRecipient at set time: \(messageRecipient?.name ?? "nil"), userId: \(messageRecipient?.userId ?? "nil")")
-                print("💬 isOpeningExistingConversation: \(isOpeningExistingConversation)")
-                showingNewMessageModal = newValue
-                print("💬 showingNewMessageModal after set: \(showingNewMessageModal)")
-            }
-        )) {
-            let _ = print("💬 MatchesView Message Sheet closure EXECUTING - messageRecipient: \(messageRecipient?.name ?? "nil")")
-            if let recipient = messageRecipient {
-                let _ = print("💬 MatchesView Creating NewMessageModal with profile: \(recipient.name), userId: \(recipient.userId), isExistingConversation: \(isOpeningExistingConversation)")
-                NewMessageModal(profile: recipient, isExistingConversation: isOpeningExistingConversation)
-            } else {
-                let _ = print("❌ MatchesView messageRecipient is nil in sheet closure!")
-                VStack {
-                    Text("matches.error.no.recipient".localized)
-                        .foregroundColor(.red)
-                    Button("common.close".localized) {
-                        showingNewMessageModal = false
                     }
                 }
             }
@@ -162,42 +129,13 @@ private extension MatchesView {
                 print("🔍 showingProfileModal after: \(showingProfileModal)")
             }, onMessage: {
                 print("💬 Message button tapped for: \(match.otherUser.name)")
-                print("💬 Profile userId: \(match.otherUser.userId), age: \(match.otherUser.age)")
-                print("💬 Setting messageRecipient to: \(match.otherUser.name)")
-                appState.viewedMatchProfileId = match.otherUser.userId
-                Task {
-                    do {
-                        let conversationExists = try await FirebaseAuthService.shared.checkIfConversationExists(with: match.otherUser.userId)
-                        await MainActor.run {
-                            if conversationExists {
-                                print("💬 Opening existing conversation with: \(match.otherUser.name)")
-                                selectedTab = 0
-                                isOpeningExistingConversation = true
-                                messageRecipient = match.otherUser
-                                print("💬 messageRecipient after set: \(messageRecipient?.name ?? "nil"), userId: \(messageRecipient?.userId ?? "nil")")
-                                print("💬 showingNewMessageModal before: \(showingNewMessageModal)")
-                                showingNewMessageModal = true
-                                print("💬 showingNewMessageModal after: \(showingNewMessageModal)")
-                            } else {
-                                print("💬 Opening new message modal for: \(match.otherUser.name)")
-                                isOpeningExistingConversation = false
-                                messageRecipient = match.otherUser
-                                print("💬 messageRecipient after set: \(messageRecipient?.name ?? "nil"), userId: \(messageRecipient?.userId ?? "nil")")
-                                print("💬 showingNewMessageModal before: \(showingNewMessageModal)")
-                                showingNewMessageModal = true
-                                print("💬 showingNewMessageModal after: \(showingNewMessageModal)")
-                            }
-                        }
-                    } catch {
-                        print("❌ Error checking conversation: \(error)")
-                        await MainActor.run {
-                            messageRecipient = match.otherUser
-                            print("💬 messageRecipient after set (error case): \(messageRecipient?.name ?? "nil"), userId: \(messageRecipient?.userId ?? "nil")")
-                            print("💬 showingNewMessageModal before: \(showingNewMessageModal)")
-                            showingNewMessageModal = true
-                            print("💬 showingNewMessageModal after: \(showingNewMessageModal)")
-                        }
-                    }
+                let userId = match.otherUser.userId
+                appState.viewedMatchProfileId = userId
+                appState.conversationToOpenProfile = match.otherUser
+                selectedTab = 0
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    appState.conversationToOpenSenderId = userId
+                    print("💬 Navigated to Messages and set conversationToOpenSenderId: \(userId)")
                 }
             })
             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))

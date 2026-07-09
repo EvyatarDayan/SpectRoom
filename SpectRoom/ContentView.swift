@@ -60,7 +60,10 @@ struct ContentView: View {
                         appState.dismissMatchNotification()
                     }
                 )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
                 .presentationBackground(.clear)
+                .presentationCornerRadius(24)
             }
         }
         .sheet(isPresented: $showingNewMessageModal) {
@@ -110,25 +113,20 @@ struct ContentView: View {
 struct CustomFooterMenu: View {
     @Binding var selectedTab: Int
     @EnvironmentObject var appState: AppStateManager
-    @State private var unreadMessageCount: Int = 0
+    @Environment(\.colorScheme) private var colorScheme
     @State private var matchCount: Int = 0
     @State private var viewedMatches: Set<String> = []
-    @State private var viewedConversations: Set<String> = [] // Track which conversations have been viewed
     
     // UserDefaults keys for persisting viewed items
     private let viewedMatchesKey = "viewedMatches"
-    private let viewedConversationsKey = "viewedConversations"
     
     // Computed property for display count (total matches minus viewed)
     private var displayMatchCount: Int {
         max(0, matchCount - viewedMatches.count)
     }
     
-    // Computed property for display count (total unread messages)
-    // When conversations are viewed, we track them and the badge will be updated via Firebase refresh
-    // This computed property ensures the badge doesn't show negative numbers
     private var displayUnreadMessageCount: Int {
-        max(0, unreadMessageCount)
+        max(0, appState.unreadMessageCount)
     }
     
     // Load viewed matches from UserDefaults
@@ -143,21 +141,6 @@ struct CustomFooterMenu: View {
     private func saveViewedMatches() {
         if let encoded = try? JSONEncoder().encode(viewedMatches) {
             UserDefaults.standard.set(encoded, forKey: viewedMatchesKey)
-        }
-    }
-    
-    // Load viewed conversations from UserDefaults
-    private func loadViewedConversations() {
-        if let data = UserDefaults.standard.data(forKey: viewedConversationsKey),
-           let decoded = try? JSONDecoder().decode(Set<String>.self, from: data) {
-            viewedConversations = decoded
-        }
-    }
-    
-    // Save viewed conversations to UserDefaults
-    private func saveViewedConversations() {
-        if let encoded = try? JSONEncoder().encode(viewedConversations) {
-            UserDefaults.standard.set(encoded, forKey: viewedConversationsKey)
         }
     }
     
@@ -276,11 +259,8 @@ struct CustomFooterMenu: View {
                 }) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 25))
-                        .foregroundColor(.white)
-                        .frame(width: 60, height: 60)
-                        .background(Color.green)
-                        .clipShape(Circle())
-                        .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                        .foregroundColor(selectedTab == 2 ? .blue : .gray)
+                        .floatingCircleButtonStyle(colorScheme: colorScheme)
                 }
                 .offset(y: -34) // Elevated to extend partially outside menu borders
                 
@@ -289,71 +269,27 @@ struct CustomFooterMenu: View {
             .zIndex(1) // Ensure Discover button is on top
         }
         .onAppear {
-            // Load persisted viewed matches and conversations
             loadViewedMatches()
-            loadViewedConversations()
-            // Delay slightly to ensure view is fully initialized
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                loadUnreadMessageCount()
+                appState.refreshUnreadMessageCount()
                 loadMatchCount()
             }
         }
-        .onChange(of: appState.showingNewMessageNotification) { newValue in
-            // Refresh count when new message notification appears
-            if newValue {
-                loadUnreadMessageCount()
-            }
+        .onReceive(appState.newMessageReceivedPublisher) { _ in
+            appState.refreshUnreadMessageCount()
         }
         .onChange(of: selectedTab) { newTab in
-            // Refresh count when switching to messages tab (to clear badge after reading)
             if newTab == 0 && appState.isAuthenticated {
-                loadUnreadMessageCount()
+                appState.refreshUnreadMessageCount()
             }
-            // When switching to matches tab, refresh match count
             if newTab == 1 && appState.isAuthenticated {
                 loadMatchCount()
             }
         }
-        .onChange(of: appState.currentlyOpenConversationSenderId) { newValue in
+        .onChange(of: appState.currentlyOpenConversationSenderId) { _ in
             if appState.isAuthenticated {
-                if let userId = newValue {
-                    // Conversation opened - mark as viewed (same logic as matches)
-                    if !viewedConversations.contains(userId) {
-                        viewedConversations.insert(userId)
-                        saveViewedConversations() // Persist to UserDefaults
-                        print("💬 ContentView: Marked conversation with user \(userId) as viewed")
-                        
-                        // Count unread messages from this user and subtract from badge immediately
-                        Task {
-                            do {
-                                let unreadFromUser = try await FirebaseAuthService.shared.countUnreadMessagesFromUser(userId)
-                                await MainActor.run {
-                                    if unreadFromUser > 0 {
-                                        unreadMessageCount = max(0, unreadMessageCount - unreadFromUser)
-                                        print("💬 ContentView: Subtracted \(unreadFromUser) unread messages from badge. New count: \(unreadMessageCount)")
-                                    }
-                                }
-                            } catch {
-                                print("⚠️ Could not count unread messages from user: \(error)")
-                                // Fallback: subtract 1 optimistically
-                                await MainActor.run {
-                                    if unreadMessageCount > 0 {
-                                        unreadMessageCount = max(0, unreadMessageCount - 1)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Refresh count from Firebase after a delay to get accurate count
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                        loadUnreadMessageCount()
-                    }
-                } else {
-                    // Conversation closed - refresh count after a small delay
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        loadUnreadMessageCount()
-                    }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    appState.refreshUnreadMessageCount()
                 }
             }
         }
@@ -391,10 +327,7 @@ struct CustomFooterMenu: View {
         guard appState.isAuthenticated else {
             matchCount = 0
             viewedMatches = []
-            viewedConversations = []
-            // Clear persisted viewed matches and conversations on sign out
             UserDefaults.standard.removeObject(forKey: viewedMatchesKey)
-            UserDefaults.standard.removeObject(forKey: viewedConversationsKey)
             return
         }
         
@@ -412,34 +345,20 @@ struct CustomFooterMenu: View {
             }
         }
     }
-    
-    private func loadUnreadMessageCount() {
-        // Only fetch if user is authenticated
-        guard appState.isAuthenticated else {
-            unreadMessageCount = 0
-            return
-        }
-        
-        Task {
-            do {
-                let count = try await FirebaseAuthService.shared.countUnreadIncomingMessages()
-                await MainActor.run {
-                    unreadMessageCount = count
-                }
-            } catch {
-                print("❌ Error loading unread message count: \(error)")
-                await MainActor.run {
-                    unreadMessageCount = 0
-                }
-            }
-        }
-    }
 }
 
 // Extension for rounded corners on specific sides
 extension View {
     func cornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
         clipShape(RoundedCorner(radius: radius, corners: corners))
+    }
+    
+    func floatingCircleButtonStyle(colorScheme: ColorScheme, size: CGFloat = 60) -> some View {
+        let shadowColor = colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.2)
+        return frame(width: size, height: size)
+            .background(Color(.systemBackground))
+            .clipShape(Circle())
+            .shadow(color: shadowColor, radius: 8, x: 0, y: 4)
     }
 }
 

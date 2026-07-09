@@ -49,6 +49,7 @@ struct SettingsView: View {
                         }
                         Spacer()
                         Toggle("", isOn: $notificationsEnabled)
+                            .compactToggleStyle()
                             .onChange(of: notificationsEnabled) { enabled in
                                 if enabled {
                                     Task {
@@ -84,6 +85,7 @@ struct SettingsView: View {
                         }
                         Spacer()
                         Toggle("", isOn: $isDarkMode)
+                            .compactToggleStyle()
                     }
                     
                     HStack {
@@ -448,6 +450,14 @@ private struct BlockedUsersModal: View {
         }
     }
 }
+
+private extension View {
+    func compactToggleStyle() -> some View {
+        scaleEffect(0.8, anchor: .trailing)
+            .frame(width: 46, height: 28, alignment: .trailing)
+    }
+}
+
 #Preview {
     SettingsView()
         .environmentObject(AppStateManager.shared)

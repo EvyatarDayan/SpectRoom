@@ -89,6 +89,9 @@ struct SearchView: View {
                                 },
                                 onMessagesTap: {
                                     selectedTab = 0 // Navigate to Messages tab
+                                },
+                                onStartOverTap: {
+                                    resetUnlikedProfiles()
                                 }
                             )
                             .onAppear {
@@ -124,10 +127,7 @@ struct SearchView: View {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 24))
                                     .foregroundColor(.red)
-                                    .frame(width: 60, height: 60)
-                                    .background(Color.white)
-                                    .clipShape(Circle())
-                                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                                    .floatingCircleButtonStyle(colorScheme: colorScheme)
                             }
                             
                             Spacer()
@@ -143,10 +143,7 @@ struct SearchView: View {
                                 Image(systemName: "heart.fill")
                                     .font(.system(size: 24))
                                     .foregroundColor(.green)
-                                    .frame(width: 60, height: 60)
-                                    .background(Color.white)
-                                    .clipShape(Circle())
-                                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                                    .floatingCircleButtonStyle(colorScheme: colorScheme)
                             }
                         }
                         .padding(.horizontal, 260) // Reduced from individual padding
@@ -330,19 +327,25 @@ struct SearchView: View {
         return isMatch
     }
     
-    private func loadUsersFromDatabase() {
+    private func loadUsersFromDatabase(ignorePassedFilter: Bool = false, preferServerSwipeData: Bool = false) {
         print("🔍 SearchView: Starting to load users from database...")
         Task {
             do {
-                // Fetch all users and liked user IDs in parallel
+                // Fetch all users and swipe history in parallel
                 async let usersTask = FirebaseAuthService.shared.fetchAllUsers()
-                async let likedUserIdsTask = FirebaseAuthService.shared.fetchLikedUserIds()
+                async let swipeFilterTask = FirebaseAuthService.shared.fetchSwipeFilterState(preferServer: preferServerSwipeData)
                 
                 let users = try await usersTask
-                let likedUserIds = try await likedUserIdsTask
+                let swipeFilter = try await swipeFilterTask
+                let likedUserIds = swipeFilter.likedUserIds
+                let passedUserIds = ignorePassedFilter ? Set<String>() : swipeFilter.passedUserIds
                 
                 print("🔍 SearchView: Received \(users.count) users from Firebase")
                 print("💕 SearchView: Found \(likedUserIds.count) already-liked users to filter out")
+                print("💕 SearchView: Found \(passedUserIds.count) already-passed users to filter out")
+                if ignorePassedFilter {
+                    print("💕 SearchView: Ignoring passed filter after Start over")
+                }
                 
                 await MainActor.run {
                     if users.isEmpty {
@@ -366,6 +369,12 @@ struct SearchView: View {
                             // Exclude already-liked users
                             if likedUserIds.contains(userId) {
                                 print("💕 SearchView: Filtering out already-liked user: \(user.name) (\(userId))")
+                                return false
+                            }
+                            
+                            // Exclude already-passed users until Start over is used
+                            if passedUserIds.contains(userId) {
+                                print("💕 SearchView: Filtering out already-passed user: \(user.name) (\(userId))")
                                 return false
                             }
                             
@@ -654,6 +663,27 @@ struct SearchView: View {
             }
         }
     }
+
+    private func resetUnlikedProfiles() {
+        guard !isLoading else { return }
+        isLoading = true
+
+        Task {
+            do {
+                try await FirebaseAuthService.shared.resetPassSwipesToNew()
+                await MainActor.run {
+                    currentCardIndex = 0
+                    profiles = []
+                }
+                loadUsersFromDatabase(ignorePassedFilter: true, preferServerSwipeData: true)
+            } catch {
+                print("❌ Error resetting passed profiles: \(error)")
+                await MainActor.run {
+                    isLoading = false
+                }
+            }
+        }
+    }
 }
 
 struct SwipeableProfileCard: View {
@@ -865,14 +895,17 @@ struct SwipeableProfileCard: View {
                             )
                         
                         VStack(spacing: 6) {
-                            Text(String(format: "search.match.with".localized, "\(calculateMatchPercentage(for: profile))"))
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.green)
-                            Text(profile.name)
+                            let matchPercentage = calculateMatchPercentage(for: profile)
+                            let profileFirstName = firstName(from: profile.name)
+                            
+                            (Text("search.match.prefix".localized)
+                             + Text(String(format: "search.match.percent.part".localized, matchPercentage))
+                                .foregroundColor(matchPercentage > 49 ? .green : .primary)
+                             + Text(String(format: "search.match.suffix".localized, profileFirstName)))
                                 .font(.system(size: 18, weight: .bold))
                                 .foregroundColor(.primary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 12)
@@ -1144,11 +1177,8 @@ struct UserProfileModal: View {
     }
     
     private var profileTitle: String {
-        let name = displayProfile.name
-        if !name.isEmpty {
-            return String(format: "profile.title.with.name".localized, name)
-        }
-        return "profile.title".localized
+        let name = displayProfile.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "profile.title".localized : name
     }
 
     private var displayProfile: ProfileCard {
@@ -1194,17 +1224,13 @@ struct UserProfileModal: View {
                     .aspectRatio(contentMode: .fill)
                     .ignoresSafeArea()
             )
-            .navigationTitle(profileTitle)
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    VStack(spacing: 30) {
-                        Spacer()
-                            .frame(height: 16)
-                        Text(profileTitle)
-                            .font(.system(size: 28, weight: .bold))
-                            .padding(.bottom, 30)
-                    }
+                    Text(profileTitle)
+                        .font(.headline)
+                        .lineLimit(1)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("common.done".localized) {
@@ -1946,6 +1972,7 @@ struct NewMessageModal: View {
     let isExistingConversation: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) var colorScheme
+    @EnvironmentObject private var appState: AppStateManager
     @State private var messageText: String = ""
     @State private var showingPreMessageOptions = false
     
@@ -2088,17 +2115,24 @@ struct NewMessageModal: View {
     }
     
     private func sendMessage() async {
-        guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let trimmedMessage = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedMessage.isEmpty else { return }
         
         do {
             let messageId = try await FirebaseAuthService.shared.sendMessage(
                 to: profile.userId,
-                content: messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+                content: trimmedMessage
             )
             
             print("✅ Message sent successfully with ID: \(messageId)")
             
             await MainActor.run {
+                appState.recordOutgoingMessage(
+                    to: profile.userId,
+                    recipientName: profile.name,
+                    recipientPhotoURL: profile.imageURL,
+                    content: trimmedMessage
+                )
                 dismiss()
             }
             
@@ -2114,6 +2148,7 @@ struct EmptyStateCard: View {
     let messagesCount: Int
     let onMatchesTap: () -> Void
     let onMessagesTap: () -> Void
+    let onStartOverTap: () -> Void
     
     var body: some View {
         ZStack {
@@ -2152,39 +2187,56 @@ struct EmptyStateCard: View {
                     .padding(.horizontal, 20)
                 }
                 
-                // Matches and messages sections
-                VStack(alignment: .leading, spacing: 12) {
-                    // First box: Matches count (Button)
+                // Action section
+                VStack(alignment: .leading, spacing: 10) {
                     Button(action: {
                         onMatchesTap()
                     }) {
                         (Text("search.empty.matches.prefix".localized)
-                         + Text(" \(matchesCount)").foregroundColor(.green)
+                         + Text(" \(matchesCount)")
                          + Text(" " + "search.empty.matches.suffix".localized))
-                            .font(.headline)
+                            .font(.system(size: 22, weight: .bold))
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.blue)
-                            .cornerRadius(12)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 14)
+                        .padding(.vertical, 14)
+                        .background(Color.blue)
+                        .cornerRadius(12)
                     }
                     
-                    // Second box: Messages count (Button)
                     Button(action: {
                         onMessagesTap()
                     }) {
                         (Text("search.empty.messages.prefix".localized)
-                         + Text(" \(messagesCount)").foregroundColor(.green)
+                         + Text(" \(messagesCount)")
                          + Text(" " + "search.empty.messages.suffix".localized))
-                            .font(.headline)
+                            .font(.system(size: 22, weight: .bold))
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.blue)
-                            .cornerRadius(12)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 14)
+                        .padding(.vertical, 14)
+                        .background(Color.blue)
+                        .cornerRadius(12)
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button(action: {
+                            onStartOverTap()
+                        }) {
+                            Text("search.empty.start.over".localized)
+                                .font(.footnote.weight(.semibold))
+                                .foregroundColor(.blue)
+                                .padding(.top, 10)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-                .padding(16)
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                .padding(.bottom, 8)
             }
         }
         .frame(width: UIScreen.main.bounds.width - 60, height: 500)

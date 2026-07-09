@@ -581,26 +581,69 @@ class FirebaseAuthService: ObservableObject {
         print("✅ Swipe recorded successfully")
     }
     
-    // MARK: - Fetch Liked Users
-    func fetchLikedUserIds() async throws -> Set<String> {
+    // MARK: - Fetch Swipe Filter State
+    
+    struct SwipeFilterState {
+        let likedUserIds: Set<String>
+        let passedUserIds: Set<String>
+    }
+    
+    func fetchSwipeFilterState(preferServer: Bool = false) async throws -> SwipeFilterState {
         guard let currentUserId = auth.currentUser?.uid else {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
         
-        print("💕 Fetching liked user IDs for filtering...")
+        print("💕 Fetching swipe filter state\(preferServer ? " from server" : "")...")
         
         let swipesRef = db.collection("users").document(currentUserId).collection("swipes")
-        let snapshot = try await swipesRef.whereField("action", isEqualTo: SwipeType.like.rawValue).getDocuments()
+        let snapshot: QuerySnapshot
+        if preferServer {
+            snapshot = try await swipesRef.getDocuments(source: .server)
+        } else {
+            snapshot = try await swipesRef.getDocuments()
+        }
+        
+        var latestSwipeByUser: [String: (action: String, createdAt: TimeInterval)] = [:]
+        for document in snapshot.documents {
+            let data = document.data()
+            guard let toUserId = data["toUserId"] as? String,
+                  let action = data["action"] as? String else {
+                continue
+            }
+            
+            let createdAt = data["createdAt"] as? TimeInterval ?? 0
+            if let existing = latestSwipeByUser[toUserId], existing.createdAt >= createdAt {
+                continue
+            }
+            
+            latestSwipeByUser[toUserId] = (action, createdAt)
+        }
         
         var likedUserIds = Set<String>()
-        for document in snapshot.documents {
-            if let toUserId = document.data()["toUserId"] as? String {
-                likedUserIds.insert(toUserId)
+        var passedUserIds = Set<String>()
+        
+        for (userId, state) in latestSwipeByUser {
+            switch state.action {
+            case SwipeType.like.rawValue, SwipeType.superLike.rawValue:
+                likedUserIds.insert(userId)
+            case SwipeType.pass.rawValue:
+                passedUserIds.insert(userId)
+            default:
+                print("⚠️ Unknown swipe action '\(state.action)' for user \(userId)")
             }
         }
         
-        print("💕 Found \(likedUserIds.count) liked users to filter out")
-        return likedUserIds
+        print("💕 Swipe filter state: \(likedUserIds.count) liked, \(passedUserIds.count) passed")
+        return SwipeFilterState(likedUserIds: likedUserIds, passedUserIds: passedUserIds)
+    }
+    
+    // MARK: - Fetch Liked Users
+    func fetchLikedUserIds(preferServer: Bool = false) async throws -> Set<String> {
+        try await fetchSwipeFilterState(preferServer: preferServer).likedUserIds
+    }
+    
+    func fetchPassedUserIds(preferServer: Bool = false) async throws -> Set<String> {
+        try await fetchSwipeFilterState(preferServer: preferServer).passedUserIds
     }
     
     func checkForMatch(with targetUserId: String) async throws -> Bool {
@@ -1876,6 +1919,42 @@ class FirebaseAuthService: ObservableObject {
         
         try await batch.commit()
         print("✅ Deleted \(snapshot.documents.count) swipes")
+    }
+
+    /// Resets all pass swipes so those profiles become new again (removes pass records).
+    func resetPassSwipesToNew() async throws {
+        guard let currentUserId = auth.currentUser?.uid else {
+            throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+
+        print("🔄 Resetting pass swipes to new for user: \(currentUserId)")
+
+        let swipesRef = db.collection("users").document(currentUserId).collection("swipes")
+        let snapshot = try await swipesRef.whereField("action", isEqualTo: SwipeType.pass.rawValue).getDocuments(source: .server)
+
+        guard !snapshot.documents.isEmpty else {
+            print("✅ No pass swipes to reset")
+            return
+        }
+
+        let batchSize = 450
+        for batchStart in stride(from: 0, to: snapshot.documents.count, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, snapshot.documents.count)
+            let batch = db.batch()
+            for document in snapshot.documents[batchStart..<batchEnd] {
+                batch.deleteDocument(document.reference)
+            }
+            try await batch.commit()
+        }
+
+        let remainingSnapshot = try await swipesRef.whereField("action", isEqualTo: SwipeType.pass.rawValue).getDocuments(source: .server)
+        print("✅ Reset \(snapshot.documents.count) pass swipes to new. Remaining pass swipes: \(remainingSnapshot.documents.count)")
+    }
+    
+    /// Delete only pass swipes for the current user.
+    /// Keeps likes intact, so matches history remains untouched.
+    func deletePassSwipes() async throws {
+        try await resetPassSwipesToNew()
     }
     
     /// Delete all matches for the current user

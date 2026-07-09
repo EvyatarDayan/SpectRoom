@@ -155,7 +155,8 @@ struct MessagesView: View {
         }
         .onChange(of: conversations.count) { count in
             // If we have a conversation to open and conversations just loaded, try to open it
-            if let senderId = appState.conversationToOpenSenderId, !senderId.isEmpty, count > 0 {
+            if let senderId = appState.conversationToOpenSenderId, !senderId.isEmpty,
+               count > 0 || appState.conversationToOpenProfile?.userId == senderId {
                 print("💬 Conversations loaded (\(count) items), checking if we can open conversation for: \(senderId)")
                 // Small delay to ensure conversations array is fully populated
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -168,7 +169,7 @@ struct MessagesView: View {
         }
         .onChange(of: isLoading) { loading in
             // When loading finishes, check if we need to open a conversation
-            if !loading, let senderId = appState.conversationToOpenSenderId, !senderId.isEmpty, !conversations.isEmpty {
+            if !loading, let senderId = appState.conversationToOpenSenderId, !senderId.isEmpty {
                 print("💬 Loading finished with \(conversations.count) conversations, checking if we can open conversation for: \(senderId)")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     if self.appState.conversationToOpenSenderId == senderId {
@@ -196,17 +197,9 @@ struct MessagesView: View {
                     appState.currentlyOpenConversationSenderId = otherUserId
                     print("💬 Conversation opened with user: \(otherUserId)")
                     
-                    // Mark messages as read when conversation opens
-                    if message.senderName != "You" {
-                        Task {
-                            do {
-                                print("💬 Marking messages as read from user: \(otherUserId)")
-                                try await FirebaseAuthService.shared.markMessagesAsRead(from: otherUserId)
-                                print("💬 Successfully marked messages as read from user: \(otherUserId)")
-                            } catch {
-                                print("❌ Failed to mark messages as read: \(error)")
-                            }
-                        }
+                    // Mark all incoming messages from this user as read when conversation opens
+                    Task {
+                        await appState.markMessagesAsRead(from: otherUserId)
                     }
                     
                     // Store in Firestore so Cloud Function can check if conversation is open
@@ -384,8 +377,10 @@ struct MessagesView: View {
         print("💬 isLoading: \(isLoading)")
         print("💬 Conversation list: \(conversations.map { "\($0.recipientName) (sender: \($0.senderId), recipient: \($0.recipientId))" })")
         
-        // If conversations are still loading and we haven't retried much, wait a bit
-        if isLoading && retryCount < 3 {
+        let pendingNewConversation = appState.conversationToOpenProfile?.userId == senderId
+        
+        // If conversations are still loading, wait briefly unless we're opening a brand-new conversation
+        if isLoading && retryCount < 3 && !pendingNewConversation {
             print("💬 Conversations still loading, will retry in 0.5 seconds (retry: \(retryCount + 1))")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if self.appState.conversationToOpenSenderId == senderId {
@@ -431,6 +426,7 @@ struct MessagesView: View {
                     print("💬 ✅ Modal should now be visible")
                     // Clear the conversationToOpenSenderId after opening
                     self.appState.conversationToOpenSenderId = nil
+                    self.appState.conversationToOpenProfile = nil
                     // Clear the sender info from AppStateManager
                     self.appState.newMessageSenderName = ""
                     self.appState.newMessageSenderPhotoURL = nil
@@ -448,9 +444,8 @@ struct MessagesView: View {
                     }
                 }
             }
-        } else if retryCount == 0 {
-            // First attempt failed, try fetching directly from Firebase immediately
-            print("💬 No conversation found in list, fetching directly from Firebase")
+        } else if pendingNewConversation || retryCount == 0 {
+            print("💬 No conversation found in list, resolving conversation for sender: \(senderId)")
             Task {
                 await fetchAndCreateConversationForSender(senderId: senderId)
             }
@@ -464,13 +459,64 @@ struct MessagesView: View {
                 }
             }
         } else {
-            print("💬 Conversation not found after retries, clearing state")
-            // Clear the conversationToOpenSenderId even if not found
+            print("💬 Conversation not found after retries, checking for new conversation profile")
+            if let profile = appState.conversationToOpenProfile, profile.userId == senderId {
+                openNewConversationModal(for: profile)
+            } else {
+                print("💬 No profile available for new conversation, clearing state")
+                // Clear the conversationToOpenSenderId even if not found
+                appState.conversationToOpenSenderId = nil
+                appState.conversationToOpenProfile = nil
+                // Clear the sender info from AppStateManager
+                appState.newMessageSenderName = ""
+                appState.newMessageSenderPhotoURL = nil
+                appState.newMessageSenderId = ""
+            }
+        }
+    }
+    
+    private func openNewConversationModal(for profile: ProfileCard) {
+        print("💬 Opening new conversation modal for: \(profile.name)")
+        guard let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid else {
             appState.conversationToOpenSenderId = nil
-            // Clear the sender info from AppStateManager
-            appState.newMessageSenderName = ""
-            appState.newMessageSenderPhotoURL = nil
-            appState.newMessageSenderId = ""
+            appState.conversationToOpenProfile = nil
+            return
+        }
+        
+        let placeholderMessage = Message(
+            conversationId: UUID(),
+            senderId: UUID(),
+            senderFirebaseId: currentUserId,
+            content: "",
+            createdAt: Date(),
+            type: .text
+        )
+        
+        let messageDisplay = MessageDisplay(
+            message: placeholderMessage,
+            senderName: "You",
+            recipientName: profile.name,
+            senderId: currentUserId,
+            recipientId: profile.userId,
+            senderProfilePhotoURL: nil,
+            recipientProfilePhotoURL: profile.imageURL
+        )
+        
+        selectedMessage = messageDisplay
+        conversationMessages = []
+        appState.currentlyOpenConversationSenderId = profile.userId
+        
+        Task {
+            await updateConversationOpenState(userId: profile.userId, isOpen: true)
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            if self.selectedMessage != nil {
+                self.showingMessageModal = true
+                print("💬 ✅ New conversation modal opened for: \(profile.name)")
+            }
+            self.appState.conversationToOpenSenderId = nil
+            self.appState.conversationToOpenProfile = nil
         }
     }
     
@@ -503,6 +549,7 @@ struct MessagesView: View {
                             print("💬 ✅ Modal should now be visible")
                             // Clear the conversationToOpenSenderId
                             self.appState.conversationToOpenSenderId = nil
+                            self.appState.conversationToOpenProfile = nil
                             // Clear the sender info from AppStateManager
                             self.appState.newMessageSenderName = ""
                             self.appState.newMessageSenderPhotoURL = nil
@@ -524,19 +571,29 @@ struct MessagesView: View {
             } else {
                 print("❌ No message found from sender: \(senderId)")
                 await MainActor.run {
-                    appState.conversationToOpenSenderId = nil
-                    appState.newMessageSenderName = ""
-                    appState.newMessageSenderPhotoURL = nil
-                    appState.newMessageSenderId = ""
+                    if let profile = appState.conversationToOpenProfile, profile.userId == senderId {
+                        openNewConversationModal(for: profile)
+                    } else {
+                        appState.conversationToOpenSenderId = nil
+                        appState.conversationToOpenProfile = nil
+                        appState.newMessageSenderName = ""
+                        appState.newMessageSenderPhotoURL = nil
+                        appState.newMessageSenderId = ""
+                    }
                 }
             }
         } catch {
             print("❌ Error fetching message from sender: \(error)")
             await MainActor.run {
-                appState.conversationToOpenSenderId = nil
-                appState.newMessageSenderName = ""
-                appState.newMessageSenderPhotoURL = nil
-                appState.newMessageSenderId = ""
+                if let profile = appState.conversationToOpenProfile, profile.userId == senderId {
+                    openNewConversationModal(for: profile)
+                } else {
+                    appState.conversationToOpenSenderId = nil
+                    appState.conversationToOpenProfile = nil
+                    appState.newMessageSenderName = ""
+                    appState.newMessageSenderPhotoURL = nil
+                    appState.newMessageSenderId = ""
+                }
             }
         }
     }
@@ -1082,7 +1139,7 @@ struct MessageConversationModal: View {
             Button(action: {
                 showingImagePicker = true
             }) {
-                Image(systemName: "camera")
+                Image(systemName: "folder")
                     .font(.system(size: 20))
                     .foregroundColor(.blue)
                     .frame(width: 44, height: 44)
@@ -1142,17 +1199,16 @@ struct MessageConversationModal: View {
         if let cachedMessages = appState.getCachedConversationMessages(for: otherUserId) {
             print("💬 MessageConversationModal: Using cached messages (\(cachedMessages.count) messages)")
             Task {
-                // Mark messages as read when conversation first opens (only once)
-                if !hasMarkedAsRead && message.senderName != "You" {
-                    try? await FirebaseAuthService.shared.markMessagesAsRead(from: otherUserId)
+                // Mark all incoming messages from this user as read when conversation first opens
+                if !hasMarkedAsRead {
+                    await appState.markMessagesAsRead(from: otherUserId)
                     await MainActor.run {
                         hasMarkedAsRead = true
                     }
                 }
                 
                 await MainActor.run {
-                    // Use cached messages immediately
-                    conversationMessages = cachedMessages.sorted { $0.createdAt < $1.createdAt }
+                    conversationMessages = cachedMessages.deduplicatedConversationMessages()
                     isLoadingMessages = false
                     previousMessageCount = conversationMessages.count
                     
@@ -1173,9 +1229,9 @@ struct MessageConversationModal: View {
         // No cache available, fetch from DB
         Task {
             do {
-                // Mark messages as read when conversation first opens (only once)
-                if !hasMarkedAsRead && message.senderName != "You" {
-                    try await FirebaseAuthService.shared.markMessagesAsRead(from: otherUserId)
+                // Mark all incoming messages from this user as read when conversation first opens
+                if !hasMarkedAsRead {
+                    await appState.markMessagesAsRead(from: otherUserId)
                     await MainActor.run {
                         hasMarkedAsRead = true
                     }
@@ -1268,8 +1324,8 @@ struct MessageConversationModal: View {
                     // Update only the message content, preserve existing MessageDisplay objects
                     updateMessageContentOnly(with: messageContent)
                 
-                // Update cache with latest messages
-                appState.updateConversationMessagesCache(conversationMessages, for: otherUserId)
+                // Update cache with latest messages (replace to avoid stale duplicates)
+                appState.cacheConversationMessages(conversationMessages, for: otherUserId)
                 
                 // Check if new messages arrived (from the other user)
                 let newCount = conversationMessages.count
@@ -1281,9 +1337,11 @@ struct MessageConversationModal: View {
                     }
                     
                     if hasNewIncomingMessage {
-                        // Play sound for new incoming message
                         SoundService.shared.playNewMessageSound()
                         print("🔊 Played new message sound for incoming message in conversation")
+                        Task {
+                            await appState.markMessagesAsRead(from: otherUserId)
+                        }
                     }
                 }
                 
@@ -1330,28 +1388,25 @@ struct MessageConversationModal: View {
         } else {
             otherUserId = message.senderId
         }
-        // Create a map of existing messages by their content and timestamp for quick lookup
+        // Create a map of existing messages by stable identity for quick lookup
         var existingMessagesMap: [String: MessageDisplay] = [:]
         for msg in conversationMessages {
-            let key = "\(msg.content)_\(msg.createdAt.timeIntervalSince1970)"
-            existingMessagesMap[key] = msg
+            existingMessagesMap[msg.deduplicationKey] = msg
         }
         
         // Create new MessageDisplay objects only for new messages
         var updatedMessages: [MessageDisplay] = []
         
         for message in newMessages {
-            let key = "\(message.content)_\(message.createdAt.timeIntervalSince1970)"
+            let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid ?? ""
+            let senderName = message.senderFirebaseId == currentUserId ? "You" : "Other User"
+            let recipientName = senderName == "You" ? "Other User" : "You"
+            let recipientId = message.senderFirebaseId == currentUserId ? otherUserId : currentUserId
+            let dedupKey = "\(message.senderFirebaseId)_\(recipientId)_\(message.type.rawValue)_\(message.content)"
             
-            if let existingMessage = existingMessagesMap[key] {
-                // Message already exists, keep the existing MessageDisplay object
+            if let existingMessage = existingMessagesMap[dedupKey] {
                 updatedMessages.append(existingMessage)
             } else {
-                // New message, create MessageDisplay with cached profile photos
-                let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid ?? ""
-                let senderName = message.senderFirebaseId == currentUserId ? "You" : "Other User"
-                let recipientName = senderName == "You" ? "Other User" : "You"
-                
                 let messageDisplay = MessageDisplay(
                     message: message,
                     senderName: senderName,

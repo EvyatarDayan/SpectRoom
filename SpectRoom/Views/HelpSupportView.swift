@@ -67,9 +67,9 @@ struct HelpSupportView: View {
                                     .font(.system(size: 18))
                                     .fontWeight(.semibold)
                                 Button(action: {
-                                    openWebsite("https://abashelariprod.wordpress.com")
+                                    openWebsite("https://abashelari.com")
                                 }) {
-                                    Text("abashelariprod.com")
+                                    Text("https://abashelari.com")
                                         .font(.system(size: 18))
                                         .foregroundColor(.blue)
                                 }

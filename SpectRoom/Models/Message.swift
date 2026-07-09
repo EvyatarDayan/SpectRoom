@@ -151,6 +151,20 @@ struct MessageDisplay: Identifiable {
         self.recipientProfilePhotoURL = recipientProfilePhotoURL
         self.voiceDuration = message.voiceDuration
     }
+    
+    /// Stable identity for deduplicating optimistic vs server-fetched copies of the same message.
+    var deduplicationKey: String {
+        "\(senderId)_\(recipientId)_\(messageType.rawValue)_\(content)"
+    }
+}
+
+extension Array where Element == MessageDisplay {
+    func deduplicatedConversationMessages() -> [MessageDisplay] {
+        var seen = Set<String>()
+        return sorted { $0.createdAt < $1.createdAt }.filter { message in
+            seen.insert(message.deduplicationKey).inserted
+        }
+    }
 }
 
 extension Date {

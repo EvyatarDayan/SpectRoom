@@ -94,10 +94,13 @@
 "address.search.use.address" = "Använd denna adress";
 "address.search.privacy.notice" = "Din adress kommer inte att delas!";
 "address.search.title" = "Sök adress";
-"address.search.placeholder" = "Sök efter en adress";
+"address.search.placeholder" = "Sök efter en adress i Sverige";
 "address.search.searching" = "Söker...";
 "address.search.no.results" = "Inga adresser hittades";
+"address.search.no.results.sweden" = "Inga adresser hittades i Sverige";
 "address.search.geocoding" = "Hämtar koordinater...";
+"address.search.sweden.only.notice" = "SpectRoom är för tillfället endast tillgängligt i Sverige.";
+"address.search.outside.sweden" = "Välj en plats inom Sverige.";
 
 // MARK: - Profile
 "profile.title" = "Profil";
@@ -187,7 +190,9 @@
 "match.modal.title.prefix" = "Det är en";
 "match.modal.title.highlight" = "Match!";
 "match.modal.title" = "Det är en Match!";
-"match.modal.description" = "Du och %@ har gillat varandra";
+"match.modal.description" = "Du och %@ har gillat varandra!";
+"match.modal.description.prefix" = "Du och ";
+"match.modal.description.suffix" = " har gillat varandra!";
 "match.modal.send.message" = "Skicka Meddelande";
 "match.modal.maybe.later" = "Kanske Senare";
 
@@ -198,12 +203,13 @@
 "message.notification.later" = "Senare";
 
 // MARK: - Search/Discover
-"search.empty.no.more.profiles.line1" = "Inga fler profiler att visa";
-"search.empty.no.more.profiles.line2" = "dags att interagera med dina matcher";
+"search.empty.no.more.profiles.line1" = "Du har sett alla tillgängliga profiler för tillfället.";
+"search.empty.no.more.profiles.line2" = "Det är ett perfekt tillfälle att skicka meddelanden till dina matcher!";
 "search.empty.matches.prefix" = "Du har";
-"search.empty.matches.suffix" = "matcher.";
+"search.empty.matches.suffix" = "matcher";
 "search.empty.messages.prefix" = "Du har";
-"search.empty.messages.suffix" = "meddelanden.";
+"search.empty.messages.suffix" = "meddelanden";
+"search.empty.start.over" = "Granska passerade profiler";
 "search.online.now" = "Online";
 "search.offline" = "Offline";
 "search.title" = "Upptäck";
@@ -216,7 +222,9 @@
 "search.new.message" = "Nytt Meddelande";
 "search.distance.km" = "%@ km bort";
 "search.distance.m" = "%@ m bort";
-"search.match.with" = "%@%% match med";
+"search.match.prefix" = "Du har ";
+"search.match.percent.part" = "%d%% match";
+"search.match.suffix" = " med %@";
 
 // MARK: - Profile Edit
 "profile.edit.title" = "Redigera Profil";
@@ -229,7 +237,7 @@
 "profile.edit.saving" = "Sparar...";
 "profile.edit.age" = "Ålder";
 "profile.edit.location" = "Plats";
-"profile.edit.location.placeholder" = "Välj din plats";
+"profile.edit.location.placeholder" = "Välj din plats i Sverige";
 "profile.edit.about.me" = "Om Mig";
 "profile.edit.character.counter.min" = "Min: %@ Max: 500";
 "profile.edit.character.counter.max" = "Max: %@";
@@ -262,7 +270,7 @@
 "profile.edit.profile.incomplete" = "Profil Ofullständig";
 "profile.edit.validation.full.name" = "Ange ditt fullständiga namn";
 "profile.edit.validation.age" = "Du måste vara 18 år eller äldre";
-"profile.edit.validation.location" = "Ange din plats";
+"profile.edit.validation.location" = "Välj en plats i Sverige";
 "profile.edit.validation.bio" = "\"Om mig\" måste vara minst 30 tecken";
 "profile.edit.validation.photos" = "Lägg till minst 3 foton";
 "profile.edit.validation.interests" = "Välj minst 3 intressen";

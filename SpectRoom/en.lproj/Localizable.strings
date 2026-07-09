@@ -94,10 +94,13 @@
 "address.search.use.address" = "Use this address";
 "address.search.privacy.notice" = "Your address will not be shared!";
 "address.search.title" = "Search Address";
-"address.search.placeholder" = "Search for an address";
+"address.search.placeholder" = "Search for an address in Sweden";
 "address.search.searching" = "Searching...";
 "address.search.no.results" = "No addresses found";
+"address.search.no.results.sweden" = "No addresses found in Sweden";
 "address.search.geocoding" = "Getting coordinates...";
+"address.search.sweden.only.notice" = "SpectRoom is currently available in Sweden only.";
+"address.search.outside.sweden" = "Please select a location within Sweden.";
 
 // MARK: - Profile
 "profile.title" = "Profile";
@@ -187,7 +190,9 @@
 "match.modal.title.prefix" = "It's a";
 "match.modal.title.highlight" = "Match!";
 "match.modal.title" = "It's a Match!";
-"match.modal.description" = "You and %@ have liked each other";
+"match.modal.description" = "You and %@ have liked each other!";
+"match.modal.description.prefix" = "You and ";
+"match.modal.description.suffix" = " have liked each other!";
 "match.modal.send.message" = "Send a Message";
 "match.modal.maybe.later" = "Maybe Later";
 
@@ -198,12 +203,13 @@
 "message.notification.later" = "Later";
 
 // MARK: - Search/Discover
-"search.empty.no.more.profiles.line1" = "There are no more profiles to display";
-"search.empty.no.more.profiles.line2" = "time to interact with your matches";
+"search.empty.no.more.profiles.line1" = "You've seen all available profiles for now.";
+"search.empty.no.more.profiles.line2" = "This is a great time to message your matches!";
 "search.empty.matches.prefix" = "You have";
-"search.empty.matches.suffix" = "matches.";
+"search.empty.matches.suffix" = "matches";
 "search.empty.messages.prefix" = "You have";
-"search.empty.messages.suffix" = "messages.";
+"search.empty.messages.suffix" = "messages";
+"search.empty.start.over" = "Review passed profiles";
 "search.online.now" = "Online";
 "search.offline" = "Offline";
 "search.title" = "Discover";
@@ -216,7 +222,9 @@
 "search.new.message" = "New Message";
 "search.distance.km" = "%@ km away";
 "search.distance.m" = "%@ m away";
-"search.match.with" = "%@%% match with";
+"search.match.prefix" = "You have ";
+"search.match.percent.part" = "%d%% match";
+"search.match.suffix" = " with %@";
 
 // MARK: - Profile Edit
 "profile.edit.title" = "Edit Profile";
@@ -229,7 +237,7 @@
 "profile.edit.saving" = "Saving...";
 "profile.edit.age" = "Age";
 "profile.edit.location" = "Location";
-"profile.edit.location.placeholder" = "Select your location";
+"profile.edit.location.placeholder" = "Select your location in Sweden";
 "profile.edit.about.me" = "About Me";
 "profile.edit.character.counter.min" = "Min: %@ Max: 500";
 "profile.edit.character.counter.max" = "Max: %@";
@@ -262,7 +270,7 @@
 "profile.edit.profile.incomplete" = "Profile Incomplete";
 "profile.edit.validation.full.name" = "Enter your full name";
 "profile.edit.validation.age" = "You must be 18 years or older";
-"profile.edit.validation.location" = "Enter your location";
+"profile.edit.validation.location" = "Select a location in Sweden";
 "profile.edit.validation.bio" = "\"About me\" must be at least 30 characters";
 "profile.edit.validation.photos" = "Add at least 3 photos";
 "profile.edit.validation.interests" = "Select at least 3 interests";

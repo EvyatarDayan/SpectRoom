@@ -47,7 +47,9 @@ class AppStateManager: ObservableObject {
     @Published var newMessageSenderId: String = ""
     @Published var shouldOpenConversation = false
     @Published var conversationToOpenSenderId: String? = nil
+    @Published var conversationToOpenProfile: ProfileCard? = nil
     @Published var currentlyOpenConversationSenderId: String? = nil // Track which conversation is currently open
+    @Published var unreadMessageCount: Int = 0
     private var lastMessageId: String?
     
     private let firebaseAuth = FirebaseAuthService.shared
@@ -82,6 +84,7 @@ class AppStateManager: ObservableObject {
                     // Start listening for new messages when authenticated
                     // This will notify users when they receive a new message
                     self?.startListeningForNewMessages()
+                    self?.refreshUnreadMessageCount()
                 } else {
                     // Set offline status before clearing data
                     Task {
@@ -89,6 +92,7 @@ class AppStateManager: ObservableObject {
                     }
                     // Clear user data when not authenticated to prevent stale data
                     self?.currentUser = nil
+                    self?.unreadMessageCount = 0
                     self?.clearMessageConversationsCache() // Clear message conversations cache
                     print("🔐 User logged out - cleared all user data")
                 }
@@ -607,6 +611,38 @@ class AppStateManager: ObservableObject {
     
     // MARK: - New Message Notification
     
+    func refreshUnreadMessageCount() {
+        guard isAuthenticated else {
+            unreadMessageCount = 0
+            return
+        }
+        
+        Task {
+            do {
+                let count = try await firebaseAuth.countUnreadIncomingMessages()
+                await MainActor.run {
+                    self.unreadMessageCount = count
+                }
+            } catch {
+                print("❌ Error loading unread message count: \(error)")
+                await MainActor.run {
+                    self.unreadMessageCount = 0
+                }
+            }
+        }
+    }
+    
+    func markMessagesAsRead(from otherUserId: String) async {
+        do {
+            try await firebaseAuth.markMessagesAsRead(from: otherUserId)
+            await MainActor.run {
+                self.refreshUnreadMessageCount()
+            }
+        } catch {
+            print("❌ Failed to mark messages as read: \(error)")
+        }
+    }
+    
     func startListeningForNewMessages() {
         guard isAuthenticated else {
             print("❌ Cannot start listening for messages - user not authenticated")
@@ -634,12 +670,6 @@ class AppStateManager: ObservableObject {
                     return
                 }
                 
-                // Don't show notification if conversation with this sender is already open
-                if let openSenderId = self?.currentlyOpenConversationSenderId, openSenderId == senderId {
-                    print("💬 Conversation with \(senderName) is already open, skipping notification popup")
-                    return
-                }
-                
                 // Update cache with new message in background
                 Task {
                     do {
@@ -651,16 +681,17 @@ class AppStateManager: ObservableObject {
                     }
                 }
                 
-                // Check if conversation with this sender is currently open
-                let isConversationOpen = self?.currentlyOpenConversationSenderId == senderId
-                
-                // NEVER send push notification if conversation is currently open (regardless of app state)
-                if isConversationOpen {
-                    print("💬 Conversation with \(senderName) is currently open, skipping push notification")
-                    // Just update the message ID to prevent duplicates
+                // If conversation with this sender is already open, mark as read and skip notifications
+                if let openSenderId = self?.currentlyOpenConversationSenderId, openSenderId == senderId {
+                    print("💬 Conversation with \(senderName) is already open, marking messages as read")
                     self?.lastMessageId = messageDocId
+                    Task {
+                        await self?.markMessagesAsRead(from: senderId)
+                    }
                     return
                 }
+                
+                self?.refreshUnreadMessageCount()
                 
                 // Check if app is in background/closed
                 let isAppInBackground = UIApplication.shared.applicationState != .active
@@ -700,6 +731,7 @@ class AppStateManager: ObservableObject {
         newMessageSenderId = ""
         shouldOpenConversation = false
         conversationToOpenSenderId = nil
+        conversationToOpenProfile = nil
         
         print("💬 New message notification dismissed")
     }
@@ -762,6 +794,42 @@ class AppStateManager: ObservableObject {
         }
     }
     
+    /// Optimistically update the messages list after sending a message, then refresh from the server.
+    func recordOutgoingMessage(
+        to recipientId: String,
+        recipientName: String,
+        recipientPhotoURL: String?,
+        content: String,
+        type: MessageType = .text
+    ) {
+        guard let currentUserId = firebaseAuth.auth.currentUser?.uid else { return }
+        let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedContent.isEmpty else { return }
+        
+        let message = Message(
+            conversationId: UUID(),
+            senderId: UUID(),
+            senderFirebaseId: currentUserId,
+            content: trimmedContent,
+            type: type
+        )
+        let messageDisplay = MessageDisplay(
+            message: message,
+            senderName: "You",
+            recipientName: recipientName,
+            senderId: currentUserId,
+            recipientId: recipientId,
+            senderProfilePhotoURL: currentUser?.profilePhotoURL,
+            recipientProfilePhotoURL: recipientPhotoURL
+        )
+        updateConversationInCache(messageDisplay)
+        
+        Task {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            _ = try? await refreshMessageConversationsCache()
+        }
+    }
+    
     /// Clear the message conversations cache (e.g., on logout)
     func clearMessageConversationsCache() {
         cachedMessageConversations = []
@@ -786,7 +854,7 @@ class AppStateManager: ObservableObject {
         let cacheAge = Date().timeIntervalSince(timestamp)
         if cacheAge < 300.0 { // 5 minutes
             print("💬 Returning cached conversation messages for \(otherUserId) (\(cachedMessages.count) messages, \(Int(cacheAge)) seconds old)")
-            return cachedMessages
+            return cachedMessages.deduplicatedConversationMessages()
         } else {
             print("💬 Cache expired for conversation with \(otherUserId) (\(Int(cacheAge)) seconds old)")
             // Remove expired cache
@@ -799,7 +867,7 @@ class AppStateManager: ObservableObject {
     /// Cache conversation messages for a specific user
     func cacheConversationMessages(_ messages: [MessageDisplay], for otherUserId: String) {
         Task { @MainActor in
-            cachedConversationMessages[otherUserId] = messages
+            cachedConversationMessages[otherUserId] = messages.deduplicatedConversationMessages()
             conversationMessagesCacheTimestamp[otherUserId] = Date()
             print("💬 Cached \(messages.count) messages for conversation with \(otherUserId)")
         }
@@ -808,27 +876,20 @@ class AppStateManager: ObservableObject {
     /// Update conversation messages cache when new messages arrive
     func updateConversationMessagesCache(_ newMessages: [MessageDisplay], for otherUserId: String) {
         Task { @MainActor in
-            // If we have cached messages, merge them with new ones
             if var existingMessages = cachedConversationMessages[otherUserId] {
-                // Create a set of existing message IDs for quick lookup
-                let existingIds = Set(existingMessages.map { "\($0.content)_\($0.createdAt.timeIntervalSince1970)" })
+                let existingKeys = Set(existingMessages.map(\.deduplicationKey))
                 
-                // Add only new messages that don't exist in cache
                 for newMessage in newMessages {
-                    let newId = "\(newMessage.content)_\(newMessage.createdAt.timeIntervalSince1970)"
-                    if !existingIds.contains(newId) {
+                    if !existingKeys.contains(newMessage.deduplicationKey) {
                         existingMessages.append(newMessage)
                     }
                 }
                 
-                // Sort by creation date
-                existingMessages.sort { $0.createdAt < $1.createdAt }
-                
-                cachedConversationMessages[otherUserId] = existingMessages
+                let deduplicated = existingMessages.deduplicatedConversationMessages()
+                cachedConversationMessages[otherUserId] = deduplicated
                 conversationMessagesCacheTimestamp[otherUserId] = Date()
-                print("💬 Updated conversation cache for \(otherUserId) with new messages (total: \(existingMessages.count))")
+                print("💬 Updated conversation cache for \(otherUserId) with new messages (total: \(deduplicated.count))")
             } else {
-                // No existing cache, just store the new messages
                 cacheConversationMessages(newMessages, for: otherUserId)
             }
         }

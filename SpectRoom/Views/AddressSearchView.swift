@@ -1,6 +1,47 @@
 import SwiftUI
 import MapKit
 
+enum SwedenLocation {
+    static let region = MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 62.0, longitude: 16.0),
+        span: MKCoordinateSpan(latitudeDelta: 14.0, longitudeDelta: 14.0)
+    )
+    static let countryName = "Sweden"
+    static let countryCode = "SE"
+    
+    static func contains(latitude: Double, longitude: Double) -> Bool {
+        latitude >= 55.3 && latitude <= 69.1 && longitude >= 10.5 && longitude <= 24.2
+    }
+    
+    static func contains(_ coordinate: CLLocationCoordinate2D) -> Bool {
+        contains(latitude: coordinate.latitude, longitude: coordinate.longitude)
+    }
+    
+    static func isSwedenCompletion(_ completion: MKLocalSearchCompletion) -> Bool {
+        let combined = "\(completion.title) \(completion.subtitle)".lowercased()
+        let excludedCountries = [
+            "norway", "norge", "denmark", "danmark", "finland", "suomi",
+            "germany", "deutschland", "france", "frankrike", "spain", "spanien",
+            "italy", "italien", "united states", "usa", "canada", "united kingdom", "uk"
+        ]
+        return !excludedCountries.contains { combined.contains($0) }
+    }
+    
+    static func isSwedenPlacemark(_ placemark: MKPlacemark) -> Bool {
+        if placemark.isoCountryCode?.uppercased() == countryCode {
+            return true
+        }
+        if let coordinate = placemark.location?.coordinate, contains(coordinate) {
+            return true
+        }
+        let combined = [placemark.country, placemark.locality, placemark.administrativeArea]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+        return combined.contains("sweden") || combined.contains("sverige")
+    }
+}
+
 // MARK: - Search Completer Delegate
 class SearchCompleterDelegate: NSObject, MKLocalSearchCompleterDelegate, ObservableObject {
     @Published var searchResults: [MKLocalSearchCompletion] = []
@@ -33,14 +74,16 @@ struct AddressSearchView: View {
     @State private var searchCompleter = MKLocalSearchCompleter()
     @FocusState private var isSearchFieldFocused: Bool
     @State private var isGeocoding = false
-    @State private var mapRegion = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
-        span: MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
-    )
+    @State private var mapRegion = SwedenLocation.region
     @State private var mapAnnotations: [PlaceAnnotation] = []
     @State private var selectedCompletion: MKLocalSearchCompletion?
     @State private var previewCoordinate: CLLocationCoordinate2D?
     @State private var previewAddressText: String = ""
+    @State private var showingSwedenOnlyAlert = false
+    
+    private var filteredSearchResults: [MKLocalSearchCompletion] {
+        searchDelegate.searchResults.filter { SwedenLocation.isSwedenCompletion($0) }
+    }
     
     var body: some View {
         NavigationView {
@@ -96,24 +139,30 @@ struct AddressSearchView: View {
                     .foregroundColor(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal)
+                
+                Text("address.search.sweden.only.notice".localized)
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
 
                 // Search Results
                 Group {
-                    if searchDelegate.isSearching && searchDelegate.searchResults.isEmpty && !searchText.isEmpty {
+                    if searchDelegate.isSearching && filteredSearchResults.isEmpty && !searchText.isEmpty {
                         VStack(spacing: 12) {
                             ProgressView("address.search.searching".localized)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.top, 24)
-                    } else if searchDelegate.searchResults.isEmpty && !searchText.isEmpty {
-                        Text("address.search.no.results".localized)
+                    } else if filteredSearchResults.isEmpty && !searchText.isEmpty {
+                        Text("address.search.no.results.sweden".localized)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.top, 24)
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 12, pinnedViews: []) {
-                                ForEach(searchDelegate.searchResults, id: \.self) { result in
+                                ForEach(filteredSearchResults, id: \.self) { result in
                                     AddressResultRow(
                                         result: result,
                                         isSelected: selectedCompletion.map { isSameCompletion($0, result) } ?? false,
@@ -214,6 +263,11 @@ struct AddressSearchView: View {
                 }
             }
         }
+        .alert("address.search.title".localized, isPresented: $showingSwedenOnlyAlert) {
+            Button("common.ok".localized, role: .cancel) {}
+        } message: {
+            Text("address.search.outside.sweden".localized)
+        }
         .onAppear {
             setupSearchCompleter()
             // Focus the search field immediately when the view appears
@@ -226,10 +280,7 @@ struct AddressSearchView: View {
     private func setupSearchCompleter() {
         searchCompleter.delegate = searchDelegate
         searchCompleter.resultTypes = [.address]
-        searchCompleter.region = MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194), // Default to San Francisco
-            span: MKCoordinateSpan(latitudeDelta: 0.1, longitudeDelta: 0.1)
-        )
+        searchCompleter.region = SwedenLocation.region
     }
     
     private func formatAddress(_ completion: MKLocalSearchCompletion) -> String {
@@ -263,7 +314,17 @@ struct AddressSearchView: View {
                 }
                 
                 if let response = response, let mapItem = response.mapItems.first {
-                    let coordinate = mapItem.placemark.coordinate
+                    let placemark = mapItem.placemark
+                    guard SwedenLocation.isSwedenPlacemark(placemark) else {
+                        selectedCompletion = nil
+                        previewCoordinate = nil
+                        mapAnnotations = []
+                        previewAddressText = ""
+                        showingSwedenOnlyAlert = true
+                        return
+                    }
+                    
+                    let coordinate = placemark.coordinate
                     previewCoordinate = coordinate
                     mapRegion = MKCoordinateRegion(
                         center: coordinate,
@@ -286,15 +347,15 @@ struct AddressSearchView: View {
     
     private func confirmSelection() {
         guard let completion = selectedCompletion else { return }
+        guard let coordinate = previewCoordinate, SwedenLocation.contains(coordinate) else {
+            showingSwedenOnlyAlert = true
+            return
+        }
+        
         let formatted = formatAddress(completion)
         selectedAddress = formatted
-        if let coordinate = previewCoordinate {
-            selectedLatitude = coordinate.latitude
-            selectedLongitude = coordinate.longitude
-        } else {
-            selectedLatitude = nil
-            selectedLongitude = nil
-        }
+        selectedLatitude = coordinate.latitude
+        selectedLongitude = coordinate.longitude
         dismiss()
     }
     

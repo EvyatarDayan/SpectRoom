@@ -33,7 +33,7 @@ struct AboutView: View {
                                 .font(.body)
                                 .foregroundColor(.primary)
                             
-                            Text("We believe that everyone deserves a space where communication styles are understood, sensory needs are respected, and individuality is celebrated — without judgment, pressure, or misunderstanding.")
+                            Text("We believe that everyone deserves a space where communication styles are understood, sensory needs are respected, and individuality is celebrated - without judgment, pressure, or misunderstanding.")
                                 .font(.body)
                                 .foregroundColor(.primary)
                         }
@@ -52,7 +52,7 @@ struct AboutView: View {
                         sectionView(
                             title: "Our mission is simple:",
                             content: """
-                            Create a meaningful, inclusive space where neurodivergent people can connect authentically — and feel safe while doing so.
+                            Create a meaningful, inclusive space where neurodivergent people can connect authentically - and feel safe while doing so.
                             """
                         )
                         
@@ -97,7 +97,7 @@ struct AboutView: View {
                         sectionView(
                             title: "",
                             content: """
-                            From children's educational games to community-driven platforms like SpectRoom, our goal is to create meaningful digital products that leave a positive impact — one app at a time.
+                            From children's educational games to community-driven platforms like SpectRoom, our goal is to create meaningful digital products that leave a positive impact - one app at a time.
                             """
                         )
                         

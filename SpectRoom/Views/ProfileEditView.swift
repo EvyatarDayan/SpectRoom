@@ -1308,7 +1308,14 @@ struct ProfileEditView: View {
     }
     
     private var isLocationValid: Bool {
-        return !location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let trimmedLocation = location.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedLocation.isEmpty else { return false }
+        
+        if let latitude = locationLatitude, let longitude = locationLongitude {
+            return SwedenLocation.contains(latitude: latitude, longitude: longitude)
+        }
+        
+        return true
     }
     
     private var isBioValid: Bool {
@@ -1671,7 +1678,7 @@ struct ProfileEditView: View {
                         displayString: location,
                         city: appState.currentUser?.location.city ?? "",
                         state: appState.currentUser?.location.state ?? "",
-                        country: appState.currentUser?.location.country ?? "",
+                        country: SwedenLocation.countryName,
                         latitude: locationLatitude,
                         longitude: locationLongitude
                     )
@@ -1716,7 +1723,12 @@ struct ProfileEditView: View {
                         email: FirebaseAuthService.shared.auth.currentUser?.email ?? "",
                         bio: bio,
                         interests: Array(selectedInterests),
-                        location: Location(displayString: location),
+                        location: Location(
+                            displayString: location,
+                            country: SwedenLocation.countryName,
+                            latitude: locationLatitude,
+                            longitude: locationLongitude
+                        ),
                         gender: finalGender,
                         interestedIn: finalInterestedIn,
                         lookingFor: finalLookingFor,
@@ -1783,7 +1795,7 @@ struct ProfileEditView: View {
                         "displayString": location,
                         "city": appState.currentUser?.location.city ?? "",
                         "state": appState.currentUser?.location.state ?? "",
-                        "country": appState.currentUser?.location.country ?? "",
+                        "country": SwedenLocation.countryName,
                         "latitude": (locationLatitude ?? NSNull()) as Any,
                         "longitude": (locationLongitude ?? NSNull()) as Any
                     ] as [String: Any],

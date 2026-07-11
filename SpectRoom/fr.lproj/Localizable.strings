@@ -142,6 +142,8 @@
 "matches.matched" = "Correspondance %@";
 "matches.message.button" = "Message";
 "matches.message.label" = "Message";
+"matches.distance.km" = "%@ km";
+"matches.distance.m" = "%@ m";
 "matches.error.no.profile" = "Erreur: Aucun profil sélectionné";
 "matches.error.no.recipient" = "Erreur: Aucun destinataire sélectionné";
 "matches.default.message" = "Salut. J'aime ton profil.";

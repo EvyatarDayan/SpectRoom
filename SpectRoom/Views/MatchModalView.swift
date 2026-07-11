@@ -148,7 +148,7 @@ struct MatchModalView: View {
                         .padding(.vertical, 12)
                         .background(
                             RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.red)
+                                .fill(Color(.systemGray4))
                         )
                 }
             }

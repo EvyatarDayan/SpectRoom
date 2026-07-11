@@ -125,7 +125,7 @@ struct SearchView: View {
                                 programmaticSwipeDirection = "left"
                             }) {
                                 Image(systemName: "xmark")
-                                    .font(.system(size: 24))
+                                    .font(.system(size: 24, weight: .bold))
                                     .foregroundColor(.red)
                                     .floatingCircleButtonStyle(colorScheme: colorScheme)
                             }
@@ -2192,14 +2192,18 @@ struct EmptyStateCard: View {
                     Button(action: {
                         onMatchesTap()
                     }) {
-                        (Text("search.empty.matches.prefix".localized)
-                         + Text(" \(matchesCount)")
-                         + Text(" " + "search.empty.matches.suffix".localized))
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 14)
+                        HStack(spacing: 8) {
+                            Image(systemName: "heart.fill")
+                                .font(.system(size: 17, weight: .bold))
+                            (Text("search.empty.matches.prefix".localized)
+                             + Text(" \(matchesCount)")
+                             + Text(" " + "search.empty.matches.suffix".localized))
+                                .font(.system(size: 17, weight: .bold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 14)
                         .padding(.vertical, 14)
                         .background(Color.blue)
                         .cornerRadius(12)
@@ -2208,31 +2212,33 @@ struct EmptyStateCard: View {
                     Button(action: {
                         onMessagesTap()
                     }) {
-                        (Text("search.empty.messages.prefix".localized)
-                         + Text(" \(messagesCount)")
-                         + Text(" " + "search.empty.messages.suffix".localized))
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 14)
+                        HStack(spacing: 8) {
+                            Image(systemName: "message.fill")
+                                .font(.system(size: 17, weight: .bold))
+                            (Text("search.empty.messages.prefix".localized)
+                             + Text(" \(messagesCount)")
+                             + Text(" " + "search.empty.messages.suffix".localized))
+                                .font(.system(size: 17, weight: .bold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 14)
                         .padding(.vertical, 14)
                         .background(Color.blue)
                         .cornerRadius(12)
                     }
 
-                    HStack {
-                        Spacer()
-                        Button(action: {
-                            onStartOverTap()
-                        }) {
-                            Text("search.empty.start.over".localized)
-                                .font(.footnote.weight(.semibold))
-                                .foregroundColor(.blue)
-                                .padding(.top, 10)
-                        }
-                        .buttonStyle(.plain)
+                    Button(action: {
+                        onStartOverTap()
+                    }) {
+                        Text("search.empty.start.over".localized)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 10)
                     }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 16)

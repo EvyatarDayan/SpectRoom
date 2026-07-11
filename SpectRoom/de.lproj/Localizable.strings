@@ -142,6 +142,8 @@
 "matches.matched" = "Gematched %@";
 "matches.message.button" = "Nachricht";
 "matches.message.label" = "Nachricht";
+"matches.distance.km" = "%@ km";
+"matches.distance.m" = "%@ m";
 "matches.error.no.profile" = "Fehler: Kein Profil ausgewählt";
 "matches.error.no.recipient" = "Fehler: Kein Empfänger ausgewählt";
 "matches.default.message" = "Hey. Ich mag dein Profil.";

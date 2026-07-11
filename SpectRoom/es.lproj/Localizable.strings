@@ -142,6 +142,8 @@
 "matches.matched" = "Coincidencia %@";
 "matches.message.button" = "Mensaje";
 "matches.message.label" = "Mensaje";
+"matches.distance.km" = "%@ km";
+"matches.distance.m" = "%@ m";
 "matches.error.no.profile" = "Error: No se seleccionó ningún perfil";
 "matches.error.no.recipient" = "Error: No se seleccionó ningún destinatario";
 "matches.default.message" = "Hola. Me gusta tu perfil.";

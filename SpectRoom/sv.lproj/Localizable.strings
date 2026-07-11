@@ -142,6 +142,8 @@
 "matches.matched" = "Matchade %@";
 "matches.message.button" = "Meddelande";
 "matches.message.label" = "Meddelande";
+"matches.distance.km" = "%@ km";
+"matches.distance.m" = "%@ m";
 "matches.error.no.profile" = "Fel: Ingen profil vald";
 "matches.error.no.recipient" = "Fel: Ingen mottagare vald";
 "matches.default.message" = "Hej. Jag gillar din profil.";

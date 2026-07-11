@@ -11,8 +11,17 @@ import Foundation
 struct ContentView: View {
     @State private var selectedTab = 2
     @EnvironmentObject var appState: AppStateManager
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showingNewMessageModal = false
     @State private var messageRecipient: ProfileCard?
+    
+    private var isMatchPopupVisible: Bool {
+        appState.showingMatchNotification && appState.newMatchProfile != nil
+    }
+    
+    private var matchPopupDimmingOpacity: Double {
+        colorScheme == .dark ? 0.55 : 0.45
+    }
     
     var body: some View {
         ZStack {
@@ -42,9 +51,17 @@ struct ContentView: View {
                     .ignoresSafeArea(.keyboard, edges: .bottom)
             }
             .ignoresSafeArea(edges: .bottom)
+            
+            if isMatchPopupVisible {
+                Color.black.opacity(matchPopupDimmingOpacity)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
         }
+        .animation(.easeInOut(duration: 0.25), value: isMatchPopupVisible)
         .sheet(isPresented: Binding(
-            get: { appState.showingMatchNotification && appState.newMatchProfile != nil },
+            get: { isMatchPopupVisible },
             set: { if !$0 { appState.dismissMatchNotification() } }
         )) {
             if let matchProfile = appState.newMatchProfile {
@@ -154,7 +171,7 @@ struct CustomFooterMenu: View {
                 }) {
                     VStack(spacing: 3) {
                         ZStack(alignment: .topTrailing) {
-                            Image(systemName: "message")
+                            Image(systemName: "message.fill")
                                 .font(.system(size: 20))
                                 .foregroundColor(selectedTab == 0 ? .blue : .gray)
                             
@@ -172,7 +189,7 @@ struct CustomFooterMenu: View {
                         }
                         
                         Text("nav.messages".localized)
-                            .font(.system(size: 10))
+                            .font(.system(size: 11))
                             .foregroundColor(selectedTab == 0 ? .blue : .gray)
                     }
                     .frame(maxWidth: .infinity)
@@ -185,7 +202,7 @@ struct CustomFooterMenu: View {
                 }) {
                     VStack(spacing: 3) {
                         ZStack(alignment: .topTrailing) {
-                            Image(systemName: "heart")
+                            Image(systemName: "heart.fill")
                                 .font(.system(size: 20))
                                 .foregroundColor(selectedTab == 1 ? .blue : .gray)
                             
@@ -203,7 +220,7 @@ struct CustomFooterMenu: View {
                         }
                         
                         Text("nav.matches".localized)
-                            .font(.system(size: 10))
+                            .font(.system(size: 11))
                             .foregroundColor(selectedTab == 1 ? .blue : .gray)
                     }
                     .frame(maxWidth: .infinity)
@@ -219,10 +236,10 @@ struct CustomFooterMenu: View {
                     selectedTab = 3
                 }) {
                     VStack(spacing: 3) {
-                        Image(systemName: "person")
+                        Image(systemName: "person.fill")
                             .font(.system(size: 20))
                         Text("nav.profile".localized)
-                            .font(.system(size: 10))
+                            .font(.system(size: 11))
                     }
                     .foregroundColor(selectedTab == 3 ? .blue : .gray)
                     .frame(maxWidth: .infinity)
@@ -234,10 +251,10 @@ struct CustomFooterMenu: View {
                     selectedTab = 4
                 }) {
                     VStack(spacing: 3) {
-                        Image(systemName: "gearshape")
+                        Image(systemName: "gearshape.fill")
                             .font(.system(size: 20))
                         Text("nav.settings".localized)
-                            .font(.system(size: 10))
+                            .font(.system(size: 11))
                     }
                     .foregroundColor(selectedTab == 4 ? .blue : .gray)
                     .frame(maxWidth: .infinity)
@@ -257,8 +274,8 @@ struct CustomFooterMenu: View {
                 Button(action: {
                     selectedTab = 2
                 }) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 25))
+                    Image(systemName: "house.fill")
+                        .font(.system(size: 25, weight: .semibold))
                         .foregroundColor(selectedTab == 2 ? .blue : .gray)
                         .floatingCircleButtonStyle(colorScheme: colorScheme)
                 }

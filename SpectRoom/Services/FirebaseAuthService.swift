@@ -846,6 +846,7 @@ class FirebaseAuthService: ObservableObject {
         
         var matches: [MatchDisplay] = []
         var processedUserIds: Set<String> = []
+        let currentUserLocation = try await fetchCurrentUserLocation()
         
         for (index, document) in snapshot.documents.enumerated() {
             let data = document.data()
@@ -869,7 +870,11 @@ class FirebaseAuthService: ObservableObject {
             
             // Fetch the other user's profile information
             do {
-                let otherUserProfile = try await fetchUserProfile(for: otherUserId)
+                let otherUserProfile = try await fetchUserProfile(
+                    for: otherUserId,
+                    currentUserLocation: currentUserLocation,
+                    forMatches: true
+                )
                 let matchDisplay = MatchDisplay(
                     id: document.documentID,
                     otherUser: otherUserProfile,
@@ -890,10 +895,26 @@ class FirebaseAuthService: ObservableObject {
         return matches
     }
     
-    func fetchUserProfile(for userId: String) async throws -> ProfileCard {
+    func fetchUserProfile(for userId: String, currentUserLocation: Location? = nil, forMatches: Bool = false) async throws -> ProfileCard {
         let userDoc = try await db.collection("users").document(userId).getDocument()
         guard let userData = userDoc.data() else {
             throw NSError(domain: "FirebaseAuthService", code: 404, userInfo: [NSLocalizedDescriptionKey: "User not found"])
+        }
+        
+        let resolvedCurrentUserLocation: Location?
+        if let currentUserLocation {
+            resolvedCurrentUserLocation = currentUserLocation
+        } else {
+            resolvedCurrentUserLocation = try await fetchCurrentUserLocation()
+        }
+        
+        let otherUserLocation = Self.parseLocation(from: userData)
+        let distanceString: String
+        if let resolvedCurrentUserLocation,
+           let distanceKm = Self.distance(from: resolvedCurrentUserLocation, to: otherUserLocation) {
+            distanceString = Self.formatDistance(distanceKm, forMatches: forMatches)
+        } else {
+            distanceString = "Matched"
         }
         
         let name = userData["name"] as? String ?? "Unknown"
@@ -924,7 +945,7 @@ class FirebaseAuthService: ObservableObject {
             age: age,
             bio: bio,
             interests: interests,
-            distance: "Matched", // We'll implement distance calculation later
+            distance: distanceString,
             imageURL: profilePhotoURL,
             gender: gender,
             interestedIn: interestedIn,
@@ -1001,7 +1022,7 @@ class FirebaseAuthService: ObservableObject {
                     // Fetch the other user's profile information
                     Task {
                         do {
-                            let otherUserProfile = try await self.fetchUserProfile(for: otherUserId)
+                            let otherUserProfile = try await self.fetchUserProfile(for: otherUserId, forMatches: true)
                             let matchDisplay = MatchDisplay(
                                 id: documentChange.document.documentID,
                                 otherUser: otherUserProfile,
@@ -2033,5 +2054,64 @@ class FirebaseAuthService: ObservableObject {
         try await deleteAllMatches()
         try await deleteAllMessages()
         print("✅ All user interactions deleted successfully")
+    }
+    
+    private func fetchCurrentUserLocation() async throws -> Location? {
+        guard let currentUserId = auth.currentUser?.uid else { return nil }
+        
+        let currentUserDoc = try await db.collection("users").document(currentUserId).getDocument()
+        guard let userData = currentUserDoc.data() else { return nil }
+        
+        return Self.parseLocation(from: userData)
+    }
+}
+
+private extension FirebaseAuthService {
+    static func parseLocation(from userData: [String: Any]) -> Location {
+        let locationData = userData["location"] as? [String: Any] ?? [:]
+        return Location(
+            displayString: locationData["displayString"] as? String ?? "",
+            city: locationData["city"] as? String ?? "",
+            state: locationData["state"] as? String ?? "",
+            country: locationData["country"] as? String ?? "",
+            latitude: locationData["latitude"] as? Double,
+            longitude: locationData["longitude"] as? Double
+        )
+    }
+    
+    static func distance(from sourceLocation: Location, to targetLocation: Location) -> Double? {
+        guard let sourceLat = sourceLocation.latitude,
+              let sourceLon = sourceLocation.longitude,
+              let targetLat = targetLocation.latitude,
+              let targetLon = targetLocation.longitude else {
+            return nil
+        }
+        
+        let earthRadius: Double = 6371
+        let dLat = (targetLat - sourceLat) * .pi / 180.0
+        let dLon = (targetLon - sourceLon) * .pi / 180.0
+        
+        let a = sin(dLat / 2) * sin(dLat / 2) +
+                cos(sourceLat * .pi / 180.0) * cos(targetLat * .pi / 180.0) *
+                sin(dLon / 2) * sin(dLon / 2)
+        let c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        
+        return earthRadius * c
+    }
+    
+    static func formatDistance(_ distanceKm: Double, forMatches: Bool = false) -> String {
+        if distanceKm < 1.0 {
+            let meters = Int(distanceKm * 1000)
+            let key = forMatches ? "matches.distance.m" : "search.distance.m"
+            return String(format: key.localized, "\(meters)")
+        }
+
+        let roundedDistance = round(distanceKm * 10) / 10
+        let key = forMatches ? "matches.distance.km" : "search.distance.km"
+        if roundedDistance == floor(roundedDistance) {
+            return String(format: key.localized, "\(Int(roundedDistance))")
+        }
+
+        return String(format: key.localized, String(format: "%.1f", roundedDistance))
     }
 }

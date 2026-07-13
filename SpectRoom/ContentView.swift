@@ -59,6 +59,9 @@ struct ContentView: View {
                     .transition(.opacity)
             }
         }
+        .onAppear {
+            appState.setMessagesTabActive(selectedTab == 0)
+        }
         .animation(.easeInOut(duration: 0.25), value: isMatchPopupVisible)
         .sheet(isPresented: Binding(
             get: { isMatchPopupVisible },
@@ -131,34 +134,13 @@ struct CustomFooterMenu: View {
     @Binding var selectedTab: Int
     @EnvironmentObject var appState: AppStateManager
     @Environment(\.colorScheme) private var colorScheme
-    @State private var matchCount: Int = 0
-    @State private var viewedMatches: Set<String> = []
     
-    // UserDefaults keys for persisting viewed items
-    private let viewedMatchesKey = "viewedMatches"
-    
-    // Computed property for display count (total matches minus viewed)
     private var displayMatchCount: Int {
-        max(0, matchCount - viewedMatches.count)
+        appState.cachedMatches.count
     }
     
     private var displayUnreadMessageCount: Int {
         max(0, appState.unreadMessageCount)
-    }
-    
-    // Load viewed matches from UserDefaults
-    private func loadViewedMatches() {
-        if let data = UserDefaults.standard.data(forKey: viewedMatchesKey),
-           let decoded = try? JSONDecoder().decode(Set<String>.self, from: data) {
-            viewedMatches = decoded
-        }
-    }
-    
-    // Save viewed matches to UserDefaults
-    private func saveViewedMatches() {
-        if let encoded = try? JSONEncoder().encode(viewedMatches) {
-            UserDefaults.standard.set(encoded, forKey: viewedMatchesKey)
-        }
     }
     
     var body: some View {
@@ -177,13 +159,7 @@ struct CustomFooterMenu: View {
                             
                             // Badge for unread messages - positioned on the icon
                             if displayUnreadMessageCount > 0 {
-                                Text("\(displayUnreadMessageCount)")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(3)
-                                    .frame(minWidth: 16, minHeight: 16)
-                                    .background(Color.red)
-                                    .clipShape(Circle())
+                                UnreadCountBadge(count: displayUnreadMessageCount)
                                     .offset(x: 6, y: -6)
                             }
                         }
@@ -206,7 +182,7 @@ struct CustomFooterMenu: View {
                                 .font(.system(size: 20))
                                 .foregroundColor(selectedTab == 1 ? .blue : .gray)
                             
-                            // Badge for unviewed matches - positioned on the icon
+                            // Badge for total matches - positioned on the icon
                             if displayMatchCount > 0 {
                                 Text("\(displayMatchCount)")
                                     .font(.system(size: 10, weight: .bold))
@@ -286,21 +262,24 @@ struct CustomFooterMenu: View {
             .zIndex(1) // Ensure Discover button is on top
         }
         .onAppear {
-            loadViewedMatches()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 appState.refreshUnreadMessageCount()
-                loadMatchCount()
+                refreshMatchCount()
             }
         }
         .onReceive(appState.newMessageReceivedPublisher) { _ in
             appState.refreshUnreadMessageCount()
         }
+        .onReceive(appState.newMatchReceivedPublisher) { _ in
+            refreshMatchCount()
+        }
         .onChange(of: selectedTab) { newTab in
+            appState.setMessagesTabActive(newTab == 0)
             if newTab == 0 && appState.isAuthenticated {
                 appState.refreshUnreadMessageCount()
             }
             if newTab == 1 && appState.isAuthenticated {
-                loadMatchCount()
+                refreshMatchCount()
             }
         }
         .onChange(of: appState.currentlyOpenConversationSenderId) { _ in
@@ -310,55 +289,25 @@ struct CustomFooterMenu: View {
                 }
             }
         }
-        .onChange(of: appState.viewedMatchProfileId) { matchId in
-            // When a match profile is viewed, mark it as viewed and update count
-            if let matchId = matchId, !viewedMatches.contains(matchId) {
-                viewedMatches.insert(matchId)
-                saveViewedMatches() // Persist to UserDefaults
-                // Reset after processing
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    appState.viewedMatchProfileId = nil
-                }
-            }
-        }
         .onChange(of: appState.showingMatchNotification) { isShowing in
             // When a new match notification appears or is dismissed, refresh match count
             if appState.isAuthenticated {
-                if isShowing {
-                    // Match popup appeared - refresh count after a delay to ensure match is saved
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        loadMatchCount()
-                    }
-                } else {
-                    // Match popup dismissed ("Maybe later" or "Send a message") - refresh count immediately
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        loadMatchCount()
-                    }
+                let delay: TimeInterval = isShowing ? 0.5 : 0.2
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    refreshMatchCount()
                 }
             }
         }
     }
     
-    private func loadMatchCount() {
-        // Only fetch if user is authenticated
-        guard appState.isAuthenticated else {
-            matchCount = 0
-            viewedMatches = []
-            UserDefaults.standard.removeObject(forKey: viewedMatchesKey)
-            return
-        }
+    private func refreshMatchCount() {
+        guard appState.isAuthenticated else { return }
         
         Task {
             do {
-                let count = try await FirebaseAuthService.shared.countMatches()
-                await MainActor.run {
-                    matchCount = count
-                }
+                _ = try await appState.getCachedOrFreshMatches()
             } catch {
                 print("❌ Error loading match count: \(error)")
-                await MainActor.run {
-                    matchCount = 0
-                }
             }
         }
     }

@@ -62,72 +62,86 @@ struct SpectRoomApp: App {
     
     var body: some Scene {
         WindowGroup {
-            Group {
-                if appState.isAuthenticated {
-                    if appState.hasCompletedInitialProfile {
-                        ContentView()
-                            .environmentObject(appState)
-                    } else if appState.isNewSignup {
-                        // New user after signup - must complete profile
-                        ProfileEditView(isMandatoryCompletion: true)
-                            .environmentObject(appState)
-                    } else {
-                        // Existing user with incomplete profile - allow access but encourage completion
-                        ContentView()
-                            .environmentObject(appState)
-                    }
-                } else if appState.hasCompletedOnboarding {
-                    // User has completed onboarding before - show sign-in view
-                    // hasCompletedOnboarding persists across sign-outs, so users won't see onboarding again
-                    AuthenticationView()
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-KeyboardComposerVisualTest") {
+                KeyboardStickyComposerVisualTest()
+            } else {
+                mainRootView
+            }
+            #else
+            mainRootView
+            #endif
+        }
+    }
+    
+    @ViewBuilder
+    private var mainRootView: some View {
+        Group {
+            if appState.isAuthenticated {
+                if appState.hasCompletedInitialProfile {
+                    ContentView()
+                        .environmentObject(appState)
+                } else if appState.isNewSignup {
+                    // New user after signup - must complete profile
+                    ProfileEditView(isMandatoryCompletion: true)
                         .environmentObject(appState)
                 } else {
-                    // New user (first app install) - show welcome wizard
-                    // This should only display once for new users after first app installation
-                    OnboardingView()
+                    // Existing user with incomplete profile - allow access but encourage completion
+                    ContentView()
                         .environmentObject(appState)
                 }
+            } else if appState.hasCompletedOnboarding {
+                // User has completed onboarding before - show sign-in view
+                // hasCompletedOnboarding persists across sign-outs, so users won't see onboarding again
+                AuthenticationView()
+                    .environmentObject(appState)
+            } else {
+                // New user (first app install) - show welcome wizard
+                // This should only display once for new users after first app installation
+                OnboardingView()
+                    .environmentObject(appState)
             }
-            .preferredColorScheme(isDarkMode ? .dark : .light)
-            .onAppear {
-                // Set online status when app first appears and user is authenticated
-                if appState.isAuthenticated {
-                    Task {
-                        await appState.updateAppStateInFirestore(isActive: true)
-                    }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                // Update online status and preload photos when app becomes active
-                if appState.isAuthenticated {
-                    Task {
-                        await appState.updateAppStateInFirestore(isActive: true)
-                        await FirebaseAuthService.shared.syncPhotosFromStorage()
-                    }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-                // Update offline status when app goes to background
-                if appState.isAuthenticated {
-                    Task {
-                        await appState.updateAppStateInFirestore(isActive: false)
-                    }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
-                // Update offline status when app enters background
-                if appState.isAuthenticated {
-                    Task {
-                        await appState.updateAppStateInFirestore(isActive: false)
-                    }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("LanguageChanged"))) { _ in
-                // Trigger view refresh when language changes
-                languageChanged.toggle()
-            }
-            .id(languageChanged) // Force view refresh on language change
         }
+        .preferredColorScheme(isDarkMode ? .dark : .light)
+        .onAppear {
+            // Set online status when app first appears and user is authenticated
+            if appState.isAuthenticated {
+                Task {
+                    await appState.updateAppStateInFirestore(isActive: true)
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            // Update online status and preload photos when app becomes active
+            if appState.isAuthenticated {
+                Task {
+                    await appState.updateAppStateInFirestore(isActive: true)
+                    await FirebaseAuthService.shared.syncPhotosFromStorage()
+                    appState.refreshUnreadMessageCount()
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            if appState.isAuthenticated {
+                appState.syncAppIconBadgeBeforeBackground()
+                Task {
+                    await appState.updateAppStateInFirestore(isActive: false)
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            if appState.isAuthenticated {
+                appState.syncAppIconBadgeBeforeBackground()
+                Task {
+                    await appState.updateAppStateInFirestore(isActive: false)
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("LanguageChanged"))) { _ in
+            // Trigger view refresh when language changes
+            languageChanged.toggle()
+        }
+        .id(languageChanged) // Force view refresh on language change
     }
 }
 
@@ -168,6 +182,45 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         print("❌ Failed to register for remote notifications: \(error.localizedDescription)")
     }
     
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        Messaging.messaging().appDidReceiveMessage(userInfo)
+        syncBadgeCount(from: userInfo)
+        completionHandler(.newData)
+    }
+    
+    private func syncBadgeCount(from userInfo: [AnyHashable: Any]) {
+        if let aps = userInfo["aps"] as? [String: Any] {
+            if let badge = aps["badge"] as? Int {
+                Task { @MainActor in
+                    AppStateManager.shared.unreadMessageCount = badge
+                    NotificationService.shared.setAppIconBadgeCount(badge)
+                }
+                return
+            }
+        }
+        
+        if let badgeString = userInfo["badge"] as? String, let badge = Int(badgeString) {
+            Task { @MainActor in
+                AppStateManager.shared.unreadMessageCount = badge
+                NotificationService.shared.setAppIconBadgeCount(badge)
+            }
+            return
+        }
+        
+        if let gcmOptions = userInfo["gcm.notification"] as? [String: Any],
+           let badgeString = gcmOptions["badge"] as? String,
+           let badge = Int(badgeString) {
+            Task { @MainActor in
+                AppStateManager.shared.unreadMessageCount = badge
+                NotificationService.shared.setAppIconBadgeCount(badge)
+            }
+        }
+    }
+    
     // MARK: - MessagingDelegate
     
     // Handle FCM token refresh
@@ -204,13 +257,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     
     // Handle notification when app is in foreground
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        // Show notification even when app is in foreground
+        syncBadgeCount(from: notification.request.content.userInfo)
+        
+        if NotificationService.shouldSuppressForegroundMessageNotification(userInfo: notification.request.content.userInfo) {
+            completionHandler([])
+            return
+        }
+        
         completionHandler([.banner, .sound, .badge])
     }
     
     // Handle notification tap
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
+        syncBadgeCount(from: userInfo)
         print("📱 Notification tapped, userInfo: \(userInfo)")
         
         if let type = userInfo["type"] as? String {

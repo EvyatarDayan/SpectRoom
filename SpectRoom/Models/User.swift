@@ -19,6 +19,7 @@ struct SpectRoomUser: Identifiable, Codable, Equatable {
     var profilePhotoURL: String? // URL to profile photo
     var photos: [String] // URLs to gallery photos
     var blockedUsers: [BlockedUser] = []
+    var blockedByUsers: [BlockedUser] = []
     var location: Location
     var preferences: UserPreferences
     var isOnline: Bool
@@ -48,6 +49,7 @@ struct SpectRoomUser: Identifiable, Codable, Equatable {
         self.profilePhotoURL = nil
         self.photos = []
         self.blockedUsers = []
+        self.blockedByUsers = []
         self.location = location
         self.preferences = preferences
         self.isOnline = false

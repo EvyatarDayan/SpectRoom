@@ -129,6 +129,11 @@
 "profile.gender" = "Gender";
 "profile.no.one" = "no one";
 "profile.nothing.specific" = "nothing specific";
+"profile.block.title" = "Block this profile";
+"profile.unblock.title" = "Unblock this profile";
+"profile.block.confirm.title" = "Are you sure?";
+"profile.block.confirm.message" = "%@ will not be able to see or communicate with you.";
+"profile.block.confirm.action" = "Block";
 
 // MARK: - Matches
 "matches.title" = "Matches";
@@ -177,6 +182,10 @@
 "messages.type.something" = "Type something...";
 "messages.conversation.with" = "Conversation with %@";
 "messages.no.messages.found" = "No messages found";
+"messages.blocked.alert.title" = "%@ has blocked you.";
+"messages.blocked.alert.detail" = "You can still view previous messages, but you cannot send new ones.";
+"messages.blocked.alert.dont.show.again" = "Don't show this again";
+"messages.conversation.blocked" = "Blocked";
 "messages.error.no.message" = "Error: No message selected";
 "messages.image.saved" = "Image Saved";
 "messages.image.saved.success" = "Image saved to your photo library";

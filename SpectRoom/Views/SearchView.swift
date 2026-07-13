@@ -25,7 +25,20 @@ struct SearchView: View {
     @State private var matchCheckTimer: Timer?
     @State private var matchesCount: Int = 0
     @State private var messagesCount: Int = 0
+    @State private var canReviewPassedProfiles = false
+    @State private var hasCompletedDiscoverLoad = false
     @State private var programmaticSwipeDirection: String? = nil // "left" or "right" for button-triggered swipes
+    @State private var lastFetchedUserDocumentId: String?
+    @State private var hasMoreUsersToLoad = true
+    @State private var isLoadingMoreProfiles = false
+    @State private var cachedSwipeFilter: FirebaseAuthService.SwipeFilterState?
+    @State private var pendingDiscoverProfiles: [ProfileCard] = []
+    
+    private enum DiscoverConstants {
+        static let firestorePageSize = 15
+        static let profilesPerBatch = 8
+        static let prefetchThreshold = 3
+    }
     
     let filterOptions = ["Nearby", "Similar Interests", "Same Age Group", "Online Now"]
     
@@ -35,7 +48,7 @@ struct SearchView: View {
                 VStack(spacing: 0) {
                     // Card stack area
                     ZStack(alignment: .top) {
-                        if isLoading {
+                        if isLoading && profiles.isEmpty {
                             // Loading indicator
                             VStack(spacing: 20) {
                                 ProgressView()
@@ -79,11 +92,21 @@ struct SearchView: View {
                                     .modifier(StackAppearance(depth: index - currentCardIndex))
                                 }
                             }
+                        } else if isLoadingMoreProfiles {
+                            VStack(spacing: 20) {
+                                ProgressView()
+                                    .scaleEffect(1.2)
+                                
+                                Text("search.loading".localized)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
                         } else {
                             // No more profiles - show card with matches and messages count
                             EmptyStateCard(
                                 matchesCount: matchesCount,
                                 messagesCount: messagesCount,
+                                canReviewPassedProfiles: canReviewPassedProfiles,
                                 onMatchesTap: {
                                     selectedTab = 1 // Navigate to Matches tab
                                 },
@@ -95,7 +118,11 @@ struct SearchView: View {
                                 }
                             )
                             .onAppear {
-                                loadMatchesAndMessagesCount()
+                                if hasMoreUsersToLoad {
+                                    prefetchMoreProfilesIfNeeded()
+                                } else {
+                                    loadMatchesAndMessagesCount()
+                                }
                             }
                         }
                     }
@@ -125,9 +152,9 @@ struct SearchView: View {
                                 programmaticSwipeDirection = "left"
                             }) {
                                 Image(systemName: "xmark")
-                                    .font(.system(size: 24, weight: .bold))
+                                    .font(.system(size: 30, weight: .bold))
                                     .foregroundColor(.red)
-                                    .floatingCircleButtonStyle(colorScheme: colorScheme)
+                                    .floatingCircleButtonStyle(colorScheme: colorScheme, size: 76)
                             }
                             
                             Spacer()
@@ -141,9 +168,9 @@ struct SearchView: View {
                                 programmaticSwipeDirection = "right"
                             }) {
                                 Image(systemName: "heart.fill")
-                                    .font(.system(size: 24))
+                                    .font(.system(size: 30))
                                     .foregroundColor(.green)
-                                    .floatingCircleButtonStyle(colorScheme: colorScheme)
+                                    .floatingCircleButtonStyle(colorScheme: colorScheme, size: 76)
                             }
                         }
                         .padding(.horizontal, 260) // Reduced from individual padding
@@ -168,18 +195,27 @@ struct SearchView: View {
 //            .allowsHitTesting(false) // Allow taps to pass through to cards
         }
         .onAppear {
-            // Clear existing profiles and reset card index for refresh
-            profiles = []
-            currentCardIndex = 0
-            isLoading = true
-            // Load fresh data 1 second after opening
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                loadUsersFromDatabase()
+            restoreDiscoverSessionIfAvailable()
+        }
+        .onChange(of: appState.currentUser?.id) { _ in
+            guard appState.currentUser != nil else { return }
+            guard !appState.hasValidDiscoverProfilesCache else { return }
+            guard !hasCompletedDiscoverLoad else { return }
+            loadDiscoverProfilesWhenReady()
+        }
+        .onChange(of: showingProfileModal) { isShowing in
+            guard !isShowing else { return }
+            let previousCount = profiles.count
+            profiles.removeAll { appState.isUserBlocked($0.userId) }
+            if profiles.count != previousCount {
+                if currentCardIndex >= profiles.count {
+                    currentCardIndex = max(0, profiles.count - 1)
+                }
+                syncDiscoverCache()
             }
-            // Disabled to debug duplicate messages issue
-            // startCheckingForMatches()
         }
         .onDisappear {
+            syncDiscoverCache()
             matchCheckTimer?.invalidate()
             matchCheckTimer = nil
         }
@@ -326,150 +362,319 @@ struct SearchView: View {
         
         return isMatch
     }
+
+    private func isUserEligibleForDeck(
+        user: SpectRoomUser,
+        currentUser: SpectRoomUser,
+        likedUserIds: Set<String>,
+        passedUserIds: Set<String>,
+        blockedUserIds: Set<String>,
+        ignorePassedFilter: Bool,
+        requirePassedOnly: Bool = false
+    ) -> Bool {
+        let userId = user.firebaseDocumentId ?? user.id.uuidString
+
+        if blockedUserIds.contains(userId) {
+            return false
+        }
+
+        if likedUserIds.contains(userId) {
+            return false
+        }
+
+        if requirePassedOnly {
+            guard passedUserIds.contains(userId) else { return false }
+        } else if !ignorePassedFilter && passedUserIds.contains(userId) {
+            return false
+        }
+
+        let currentUserLookingFor = Set(currentUser.lookingFor.filter { $0 != "Not sure yet" })
+
+        if currentUserLookingFor.isEmpty {
+            if !matchesGenderPreferences(currentUser: currentUser, otherUser: user) {
+                return false
+            }
+            if !matchesAgePreferences(currentUser: currentUser, otherUser: user) {
+                return false
+            }
+            return true
+        }
+
+        let userLookingFor = Set(user.lookingFor.filter { $0 != "Not sure yet" })
+        if !userLookingFor.isEmpty && currentUserLookingFor.intersection(userLookingFor).isEmpty {
+            return false
+        }
+
+        if !matchesGenderPreferences(currentUser: currentUser, otherUser: user) {
+            return false
+        }
+
+        if !matchesAgePreferences(currentUser: currentUser, otherUser: user) {
+            return false
+        }
+
+        return true
+    }
+
+    private func restoreDiscoverSessionIfAvailable() {
+        if appState.hasValidDiscoverProfilesCache, !appState.cachedDiscoverProfiles.isEmpty {
+            profiles = appState.cachedDiscoverProfiles
+            currentCardIndex = appState.cachedDiscoverCardIndex
+            hasCompletedDiscoverLoad = true
+            isLoading = false
+            print("🔍 SearchView: Restored \(profiles.count) cached profiles at index \(currentCardIndex)")
+            if currentCardIndex >= profiles.count {
+                if hasMoreUsersToLoad {
+                    prefetchMoreProfilesIfNeeded()
+                } else {
+                    loadMatchesAndMessagesCount()
+                }
+            }
+            return
+        }
+
+        if appState.hasValidDiscoverProfilesCache {
+            appState.clearDiscoverProfilesCache()
+        }
+        loadDiscoverProfilesWhenReady()
+    }
+
+    private func loadDiscoverProfilesWhenReady() {
+        guard appState.isAuthenticated else {
+            isLoading = false
+            return
+        }
+
+        guard appState.currentUser != nil else {
+            print("🔍 SearchView: Waiting for current user before loading discover profiles")
+            hasCompletedDiscoverLoad = false
+            isLoading = true
+            return
+        }
+
+        hasCompletedDiscoverLoad = false
+        isLoading = true
+        lastFetchedUserDocumentId = nil
+        hasMoreUsersToLoad = true
+        cachedSwipeFilter = nil
+        pendingDiscoverProfiles = []
+        loadDiscoverProfiles()
+    }
+
+    private func syncDiscoverCache() {
+        guard appState.isAuthenticated, hasCompletedDiscoverLoad, !isLoading, !profiles.isEmpty else { return }
+        appState.updateDiscoverProfilesCache(profiles: profiles, cardIndex: currentCardIndex)
+    }
+
+    private func markDiscoverLoadCompleted() {
+        hasCompletedDiscoverLoad = true
+        isLoading = false
+        syncDiscoverCache()
+    }
     
-    private func loadUsersFromDatabase(ignorePassedFilter: Bool = false, preferServerSwipeData: Bool = false) {
-        print("🔍 SearchView: Starting to load users from database...")
+    private func makeProfileCard(from user: SpectRoomUser, currentUser: SpectRoomUser) -> ProfileCard {
+        let distanceString: String
+        if let distanceKm = calculateDistance(from: currentUser.location, to: user.location) {
+            distanceString = formatDistance(distanceKm)
+        } else {
+            distanceString = String(format: "search.distance.km".localized, "2")
+        }
+        
+        let matchPercentage = ProfileCard.calculateMatchPercentage(
+            interests: user.interests,
+            age: user.age,
+            gender: user.gender,
+            currentUser: currentUser
+        )
+        
+        return ProfileCard(
+            userId: user.firebaseDocumentId ?? user.id.uuidString,
+            name: user.name,
+            age: user.age,
+            bio: user.bio,
+            interests: user.interests,
+            distance: distanceString,
+            imageURL: user.profilePhotoURL,
+            gender: user.gender,
+            interestedIn: user.interestedIn,
+            lookingFor: user.lookingFor,
+            photos: user.photos,
+            lifestyle: user.lifestyle,
+            shareLifestyle: user.shareLifestyle,
+            bodyType: user.bodyType,
+            shareBodyType: user.shareBodyType,
+            preferredAgeMin: user.preferredAgeMin,
+            preferredAgeMax: user.preferredAgeMax,
+            isOnline: user.isOnline,
+            lastSeen: user.lastSeen,
+            idealFirstDate: user.idealFirstDate,
+            shareIdealFirstDate: user.shareIdealFirstDate,
+            energyLevel: user.energyLevel,
+            matchPercentage: matchPercentage
+        )
+    }
+    
+    private func sortProfilesByMatchPercentage(_ items: [ProfileCard]) -> [ProfileCard] {
+        items.sorted {
+            if $0.matchPercentage != $1.matchPercentage {
+                return $0.matchPercentage > $1.matchPercentage
+            }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+    
+    private func appendProfilesFromPendingQueue() {
+        guard !pendingDiscoverProfiles.isEmpty else {
+            hasMoreUsersToLoad = false
+            isLoadingMoreProfiles = false
+            return
+        }
+        
+        let nextBatch = Array(pendingDiscoverProfiles.prefix(DiscoverConstants.profilesPerBatch))
+        pendingDiscoverProfiles.removeFirst(nextBatch.count)
+        profiles.append(contentsOf: nextBatch)
+        hasMoreUsersToLoad = !pendingDiscoverProfiles.isEmpty
+        isLoadingMoreProfiles = false
+        print("✅ SearchView: Appended \(nextBatch.count) profiles from sorted queue (total: \(profiles.count))")
+    }
+    
+    private func loadDiscoverProfiles(
+        ignorePassedFilter: Bool = false,
+        preferServerSwipeData: Bool = false,
+        append: Bool = false
+    ) {
+        if append {
+            guard !isLoadingMoreProfiles, hasMoreUsersToLoad else { return }
+            isLoadingMoreProfiles = true
+            
+            if !pendingDiscoverProfiles.isEmpty {
+                appendProfilesFromPendingQueue()
+                syncDiscoverCache()
+                return
+            }
+        } else {
+            print("🔍 SearchView: Starting paginated profile load...")
+            guard appState.currentUser != nil else {
+                print("⚠️ SearchView: currentUser not ready yet, deferring profile load")
+                hasCompletedDiscoverLoad = false
+                isLoading = true
+                return
+            }
+            isLoading = true
+            lastFetchedUserDocumentId = nil
+            hasMoreUsersToLoad = true
+            pendingDiscoverProfiles = []
+            profiles = []
+            currentCardIndex = 0
+        }
+        
         Task {
             do {
-                // Fetch all users and swipe history in parallel
-                async let usersTask = FirebaseAuthService.shared.fetchAllUsers()
-                async let swipeFilterTask = FirebaseAuthService.shared.fetchSwipeFilterState(preferServer: preferServerSwipeData)
-                
-                let users = try await usersTask
-                let swipeFilter = try await swipeFilterTask
-                let likedUserIds = swipeFilter.likedUserIds
-                let passedUserIds = ignorePassedFilter ? Set<String>() : swipeFilter.passedUserIds
-                
-                print("🔍 SearchView: Received \(users.count) users from Firebase")
-                print("💕 SearchView: Found \(likedUserIds.count) already-liked users to filter out")
-                print("💕 SearchView: Found \(passedUserIds.count) already-passed users to filter out")
-                if ignorePassedFilter {
-                    print("💕 SearchView: Ignoring passed filter after Start over")
+                let swipeFilter: FirebaseAuthService.SwipeFilterState
+                if append, let cachedSwipeFilter {
+                    swipeFilter = cachedSwipeFilter
+                } else {
+                    swipeFilter = try await FirebaseAuthService.shared.fetchSwipeFilterState(preferServer: preferServerSwipeData)
+                    await MainActor.run {
+                        cachedSwipeFilter = swipeFilter
+                    }
                 }
                 
+                guard let currentUser = appState.currentUser else {
+                    await MainActor.run {
+                        hasCompletedDiscoverLoad = false
+                        isLoading = false
+                        isLoadingMoreProfiles = false
+                    }
+                    return
+                }
+                
+                let blockedUserIds = Set(appState.blockedUsers.map(\.id))
+                var collectedProfiles: [ProfileCard] = []
+                var cursor = append ? lastFetchedUserDocumentId : nil
+                var hasMore = true
+                var seenUserIds = Set(profiles.map(\.userId))
+                let minimumProfiles = append ? DiscoverConstants.profilesPerBatch : DiscoverConstants.profilesPerBatch
+                
+                while hasMore && collectedProfiles.count < minimumProfiles {
+                    let page = try await FirebaseAuthService.shared.fetchUsersPage(
+                        limit: DiscoverConstants.firestorePageSize,
+                        startAfterDocumentId: cursor
+                    )
+                    
+                    cursor = page.lastDocumentId
+                    hasMore = page.hasMore
+                    
+                    let eligibleUsers = page.users.filter { user in
+                        let userId = user.firebaseDocumentId ?? user.id.uuidString
+                        guard !seenUserIds.contains(userId) else { return false }
+                        
+                        let isEligible = isUserEligibleForDeck(
+                            user: user,
+                            currentUser: currentUser,
+                            likedUserIds: swipeFilter.likedUserIds,
+                            passedUserIds: swipeFilter.passedUserIds,
+                            blockedUserIds: blockedUserIds,
+                            ignorePassedFilter: ignorePassedFilter
+                        )
+                        
+                        if isEligible {
+                            seenUserIds.insert(userId)
+                        }
+                        
+                        return isEligible
+                    }
+                    
+                    collectedProfiles.append(contentsOf: eligibleUsers.map { makeProfileCard(from: $0, currentUser: currentUser) })
+                }
+                
+                let sortedProfiles = sortProfilesByMatchPercentage(collectedProfiles)
+                
                 await MainActor.run {
-                    if users.isEmpty {
-                        print("⚠️ SearchView: No other users found in database")
-                        profiles = []
-                        isLoading = false
+                    lastFetchedUserDocumentId = cursor
+                    
+                    if append {
+                        profiles.append(contentsOf: sortedProfiles)
+                        hasMoreUsersToLoad = hasMore || !pendingDiscoverProfiles.isEmpty
+                        isLoadingMoreProfiles = false
+                        print("✅ SearchView: Loaded \(sortedProfiles.count) more profiles (total: \(profiles.count))")
                     } else {
-                        // Get current user's "Looking for" preferences (excluding "Not sure yet")
-                        guard let currentUser = FirebaseAuthService.shared.currentUser else {
-                            profiles = []
-                            isLoading = false
-                            return
-                        }
-                        let currentUserLookingFor = Set(currentUser.lookingFor.filter { $0 != "Not sure yet" })
-                        print("🔍 SearchView: Current user looking for: \(currentUserLookingFor)")
+                        profiles = Array(sortedProfiles.prefix(DiscoverConstants.profilesPerBatch))
+                        pendingDiscoverProfiles = Array(sortedProfiles.dropFirst(DiscoverConstants.profilesPerBatch))
+                        hasMoreUsersToLoad = hasMore || !pendingDiscoverProfiles.isEmpty
+                        print("✅ SearchView: Loaded initial \(profiles.count) profiles, \(pendingDiscoverProfiles.count) queued by match %")
+                        markDiscoverLoadCompleted()
                         
-                        // Filter out users that have been liked AND filter by mutual "Looking for" values AND gender/interested in preferences
-                        let filteredUsers = users.filter { user in
-                            let userId = user.firebaseDocumentId ?? user.id.uuidString
-                            
-                            // Exclude already-liked users
-                            if likedUserIds.contains(userId) {
-                                print("💕 SearchView: Filtering out already-liked user: \(user.name) (\(userId))")
-                                return false
-                            }
-                            
-                            // Exclude already-passed users until Start over is used
-                            if passedUserIds.contains(userId) {
-                                print("💕 SearchView: Filtering out already-passed user: \(user.name) (\(userId))")
-                                return false
-                            }
-                            
-                            // Filter by mutual "Looking for" values (excluding "Not sure yet")
-                            // If current user has no preferences (only "Not sure yet"), show all users
-                            if currentUserLookingFor.isEmpty {
-                                // Still need to check gender and age preferences even if no "Looking for" preferences
-                                if !matchesGenderPreferences(currentUser: currentUser, otherUser: user) {
-                                    return false
-                                }
-                                if !matchesAgePreferences(currentUser: currentUser, otherUser: user) {
-                                    return false
-                                }
-                                return true
-                            }
-                            
-                            let userLookingFor = Set(user.lookingFor.filter { $0 != "Not sure yet" })
-                            let hasMutualLookingFor = !currentUserLookingFor.intersection(userLookingFor).isEmpty
-                            
-                            if !hasMutualLookingFor {
-                                print("🔍 SearchView: Filtering out user \(user.name) - no mutual 'Looking for' values. Current user: \(currentUserLookingFor), Other user: \(userLookingFor)")
-                                return false
-                            }
-                            
-                            // Check gender and interested in preferences match
-                            if !matchesGenderPreferences(currentUser: currentUser, otherUser: user) {
-                                print("🔍 SearchView: Filtering out user \(user.name) - gender/interested in preferences don't match")
-                                return false
-                            }
-                            
-                            // Check age preferences match
-                            if !matchesAgePreferences(currentUser: currentUser, otherUser: user) {
-                                print("🔍 SearchView: Filtering out user \(user.name) - age preferences don't match")
-                                return false
-                            }
-                            
-                            return true
-                        }
-                        
-                        profiles = filteredUsers.map { user in
-                            // Calculate distance from current user to this user
-                            let distanceString: String
-                            if let distanceKm = calculateDistance(from: currentUser.location, to: user.location) {
-                                distanceString = formatDistance(distanceKm)
-                            } else {
-                                // If coordinates are not available, fallback to "Location not set" or "2 km away" placeholder
-                                distanceString = String(format: "search.distance.km".localized, "2") // Placeholder if location data is not available
-                            }
-                            
-                            let profileCard = ProfileCard(
-                                userId: user.firebaseDocumentId ?? user.id.uuidString, // Use Firebase document ID if available
-                                name: user.name,
-                                age: user.age,
-                                bio: user.bio,
-                                interests: user.interests,
-                                distance: distanceString,
-                                imageURL: user.profilePhotoURL,
-                                gender: user.gender,
-                                interestedIn: user.interestedIn,
-                                lookingFor: user.lookingFor,
-                                photos: user.photos,
-                                lifestyle: user.lifestyle,
-                                shareLifestyle: user.shareLifestyle,
-                                bodyType: user.bodyType,
-                                shareBodyType: user.shareBodyType,
-                                preferredAgeMin: user.preferredAgeMin,
-                                preferredAgeMax: user.preferredAgeMax,
-                                isOnline: user.isOnline,
-                                lastSeen: user.lastSeen,
-                                idealFirstDate: user.idealFirstDate,
-                                shareIdealFirstDate: user.shareIdealFirstDate,
-                                energyLevel: user.energyLevel
-                            )
-                            print("🔍 SearchView: Created profile card for \(user.name) (\(user.email)) with userId: \(user.firebaseDocumentId ?? user.id.uuidString), distance: \(distanceString)")
-                            return profileCard
-                        }
-                        print("✅ SearchView: Successfully loaded \(profiles.count) profiles (filtered from \(users.count) total)")
-                        isLoading = false
-                        
-                        // Load matches and messages count if no profiles available
-                        if profiles.isEmpty {
+                        if profiles.isEmpty && !hasMoreUsersToLoad {
                             loadMatchesAndMessagesCount()
                         }
                     }
+                    
+                    syncDiscoverCache()
                 }
             } catch {
-                print("❌ SearchView: Error loading users: \(error)")
-                print("❌ SearchView: Error details: \(error.localizedDescription)")
+                print("❌ SearchView: Error loading users: \(error.localizedDescription)")
                 await MainActor.run {
+                    if !append {
+                        profiles = []
+                        pendingDiscoverProfiles = []
+                        hasCompletedDiscoverLoad = false
+                    }
                     isLoading = false
-                    profiles = []
-                    print("⚠️ SearchView: Set profiles to empty array due to error")
+                    isLoadingMoreProfiles = false
                 }
             }
         }
+    }
+    
+    private func prefetchMoreProfilesIfNeeded() {
+        let remainingCards = profiles.count - currentCardIndex
+        guard remainingCards <= DiscoverConstants.prefetchThreshold,
+              hasMoreUsersToLoad,
+              !isLoadingMoreProfiles,
+              !isLoading else { return }
+        
+        loadDiscoverProfiles(append: true)
     }
     
     private func loadSampleProfiles() {
@@ -488,23 +693,34 @@ struct SearchView: View {
         
         Task {
             do {
-                // Record the swipe action
                 try await FirebaseAuthService.shared.recordSwipe(to: profile.userId, action: .like)
                 
-                // Check if this creates a match
-                let isMatch = try await FirebaseAuthService.shared.checkForMatch(with: profile.userId)
+                guard let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid else {
+                    await MainActor.run { moveToNextCard() }
+                    return
+                }
+                
+                let matchId = FirebaseAuthService.shared.matchDocumentId(
+                    for: currentUserId,
+                    and: profile.userId
+                )
+                
+                var isMatch = try await FirebaseAuthService.shared.checkForMatch(with: profile.userId)
+                
+                if !isMatch {
+                    // Cloud Function may create the match shortly after the swipe is saved.
+                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                    isMatch = try await FirebaseAuthService.shared.matchExists(with: profile.userId)
+                }
                 
                 await MainActor.run {
                     if isMatch {
-                        // Match created - let the listener handle showing the popup for both users
-                        // Don't show popup here, just wait for the listener to trigger
-                        print("💕 Match created with \(profile.name)! - listener will show popup")
-                        // Move to next card immediately since popup will be handled by listener
-                        moveToNextCard()
+                        print("💕 Match with \(profile.name)! Showing popup")
+                        appState.presentMatchNotification(otherUser: profile, matchId: matchId)
                     } else {
                         print("💕 Liked \(profile.name), but no match yet")
-                        moveToNextCard()
                     }
+                    moveToNextCard()
                 }
             } catch {
                 print("❌ Error handling swipe right: \(error)")
@@ -539,46 +755,14 @@ struct SearchView: View {
     private func moveToNextCard() {
         withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
             currentCardIndex += 1
-            
-            // Load counts when we reach the end of profiles
-            if currentCardIndex >= profiles.count && !profiles.isEmpty {
-                loadMatchesAndMessagesCount()
-            }
         }
-    }
-    
-    private func calculateMatchPercentage(for profile: ProfileCard) -> Int {
-        guard let currentUser = FirebaseAuthService.shared.currentUser else { return 0 }
+        syncDiscoverCache()
         
-        var matchScore = 0
-        var totalFactors = 0
-        
-        // 1. Interests match (40% weight)
-        let currentUserInterests = Set(currentUser.interests)
-        let profileInterests = Set(profile.interests)
-        let commonInterests = currentUserInterests.intersection(profileInterests)
-        let interestsMatch = commonInterests.count > 0 ? Double(commonInterests.count) / Double(max(currentUserInterests.count, profileInterests.count)) : 0.0
-        matchScore += Int(interestsMatch * 40)
-        totalFactors += 40
-        
-        // 2. Age compatibility (30% weight)
-        let currentUserAge = currentUser.age
-        let profileAge = profile.age
-        let ageDifference = abs(currentUserAge - profileAge)
-        let ageMatch = max(0, 1.0 - Double(ageDifference) / 20.0) // Decreases by 5% per year difference, max 20 years
-        matchScore += Int(ageMatch * 30)
-        totalFactors += 30
-        
-        // 3. Gender preferences (30% weight)
-        let currentUserInterestedIn = Set(currentUser.interestedIn)
-        let profileGender = profile.gender
-        let genderMatch = currentUserInterestedIn.contains(profileGender) ? 1.0 : 0.0
-        matchScore += Int(genderMatch * 30)
-        totalFactors += 30
-        
-        // Calculate final percentage
-        let percentage = totalFactors > 0 ? Int((Double(matchScore) / Double(totalFactors)) * 100) : 0
-        return min(max(percentage, 15), 95) // Ensure it's between 15% and 95%
+        if currentCardIndex >= profiles.count && !profiles.isEmpty && !hasMoreUsersToLoad {
+            loadMatchesAndMessagesCount()
+        } else {
+            prefetchMoreProfilesIfNeeded()
+        }
     }
     
     private func startCheckingForMatches() {
@@ -645,28 +829,60 @@ struct SearchView: View {
     private func loadMatchesAndMessagesCount() {
         Task {
             do {
-                // Fetch matches count
-                let matches = try await FirebaseAuthService.shared.fetchMatches()
+                async let matchesTask = FirebaseAuthService.shared.fetchMatches()
+                async let unreadCountTask = FirebaseAuthService.shared.countUnreadIncomingMessages()
+                async let swipeFilterTask = FirebaseAuthService.shared.fetchSwipeFilterState(preferServer: true)
+
+                let matches = try await matchesTask
+                let unreadCount = try await unreadCountTask
+                let swipeFilter = try await swipeFilterTask
+
+                let reviewablePassedCount: Int
+                if let currentUser = FirebaseAuthService.shared.currentUser {
+                    let passedUsers = try await FirebaseAuthService.shared.fetchUsers(
+                        byIds: Array(swipeFilter.passedUserIds)
+                    )
+                    let blockedUserIds = Set(appState.blockedUsers.map(\.id))
+                    reviewablePassedCount = passedUsers.filter { user in
+                        isUserEligibleForDeck(
+                            user: user,
+                            currentUser: currentUser,
+                            likedUserIds: swipeFilter.likedUserIds,
+                            passedUserIds: swipeFilter.passedUserIds,
+                            blockedUserIds: blockedUserIds,
+                            ignorePassedFilter: true,
+                            requirePassedOnly: true
+                        )
+                    }.count
+                } else {
+                    reviewablePassedCount = 0
+                }
+
                 await MainActor.run {
                     matchesCount = matches.count
-                }
-                
-                // Fetch only unread incoming messages count (not sent messages or already read messages)
-                let unreadCount = try await FirebaseAuthService.shared.countUnreadIncomingMessages()
-                await MainActor.run {
                     messagesCount = unreadCount
+                    canReviewPassedProfiles = reviewablePassedCount > 0
                 }
                 
-                print("📊 Loaded counts: \(matchesCount) matches, \(messagesCount) unread messages")
+                print("📊 Loaded counts: \(matches.count) matches, \(unreadCount) unread messages, \(reviewablePassedCount) reviewable passed profiles")
             } catch {
                 print("❌ Error loading matches/messages count: \(error)")
+                await MainActor.run {
+                    canReviewPassedProfiles = false
+                }
             }
         }
     }
 
     private func resetUnlikedProfiles() {
-        guard !isLoading else { return }
+        guard !isLoading, canReviewPassedProfiles else { return }
         isLoading = true
+        hasCompletedDiscoverLoad = false
+        appState.clearDiscoverProfilesCache()
+        lastFetchedUserDocumentId = nil
+        hasMoreUsersToLoad = true
+        cachedSwipeFilter = nil
+        pendingDiscoverProfiles = []
 
         Task {
             do {
@@ -675,7 +891,7 @@ struct SearchView: View {
                     currentCardIndex = 0
                     profiles = []
                 }
-                loadUsersFromDatabase(ignorePassedFilter: true, preferServerSwipeData: true)
+                loadDiscoverProfiles(ignorePassedFilter: true, preferServerSwipeData: true)
             } catch {
                 print("❌ Error resetting passed profiles: \(error)")
                 await MainActor.run {
@@ -695,40 +911,10 @@ struct SwipeableProfileCard: View {
     let onTap: () -> Void
     
     private let cardWidth = UIScreen.main.bounds.width - 60
-    
-    private func calculateMatchPercentage(for profile: ProfileCard) -> Int {
-        guard let currentUser = FirebaseAuthService.shared.currentUser else { return 0 }
-        
-        var matchScore = 0
-        var totalFactors = 0
-        
-        // 1. Interests match (40% weight)
-        let currentUserInterests = Set(currentUser.interests)
-        let profileInterests = Set(profile.interests)
-        let commonInterests = currentUserInterests.intersection(profileInterests)
-        let interestsMatch = commonInterests.count > 0 ? Double(commonInterests.count) / Double(max(currentUserInterests.count, profileInterests.count)) : 0.0
-        matchScore += Int(interestsMatch * 40)
-        totalFactors += 40
-        
-        // 2. Age compatibility (30% weight)
-        let currentUserAge = currentUser.age
-        let profileAge = profile.age
-        let ageDifference = abs(currentUserAge - profileAge)
-        let ageMatch = max(0, 1.0 - Double(ageDifference) / 20.0) // Decreases by 5% per year difference, max 20 years
-        matchScore += Int(ageMatch * 30)
-        totalFactors += 30
-        
-        // 3. Gender preferences (30% weight)
-        let currentUserInterestedIn = Set(currentUser.interestedIn)
-        let profileGender = profile.gender
-        let genderMatch = currentUserInterestedIn.contains(profileGender) ? 1.0 : 0.0
-        matchScore += Int(genderMatch * 30)
-        totalFactors += 30
-        
-        // Calculate final percentage
-        let percentage = totalFactors > 0 ? Int((Double(matchScore) / Double(totalFactors)) * 100) : 0
-        return min(max(percentage, 15), 95) // Ensure it's between 15% and 95%
-    }
+    private let cardHeight: CGFloat = 500
+    private let cardContentTopPadding: CGFloat = 24
+    private let cardContentBottomPadding: CGFloat = 20
+    private let photoAreaHeight: CGFloat = 276
     
     // MARK: - Helper function to extract first name
     private func firstName(from fullName: String) -> String {
@@ -747,7 +933,7 @@ struct SwipeableProfileCard: View {
             // Card background with fixed width
             RoundedRectangle(cornerRadius: 20)
                 .fill(Color(.secondarySystemGroupedBackground))
-                .frame(width: cardWidth, height: 500)
+                .frame(width: cardWidth, height: cardHeight)
                 .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
             
             VStack(spacing: 0) {
@@ -779,7 +965,7 @@ struct SwipeableProfileCard: View {
                                 )
                         }
                     }
-                    .frame(width: cardWidth - 32, height: 300) // Fixed width: card width minus padding (16 * 2)
+                    .frame(width: cardWidth - 32, height: photoAreaHeight) // Fixed width: card width minus padding (16 * 2)
                     .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: 20))
                     .padding(.horizontal, 16) // Padding creates space inside the card
@@ -855,9 +1041,9 @@ struct SwipeableProfileCard: View {
                     }
                     .frame(width: cardWidth) // Full card width for positioning
                 }
-                .frame(height: 300) // Fixed height for photo area
-                .padding(.top, 16) // Consistent vertical padding at top
-                .padding(.bottom, 12) // Consistent vertical padding after photo
+                .frame(height: photoAreaHeight) // Fixed height for photo area
+                .padding(.top, cardContentTopPadding)
+                .padding(.bottom, 16)
                 
                 // Bio and match % sections
                 VStack(alignment: .leading, spacing: 12) {
@@ -895,7 +1081,7 @@ struct SwipeableProfileCard: View {
                             )
                         
                         VStack(spacing: 6) {
-                            let matchPercentage = calculateMatchPercentage(for: profile)
+                            let matchPercentage = profile.matchPercentage
                             let profileFirstName = firstName(from: profile.name)
                             
                             (Text("search.match.prefix".localized)
@@ -914,7 +1100,7 @@ struct SwipeableProfileCard: View {
                     .frame(height: 80)
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 12)
+                .padding(.bottom, cardContentBottomPadding)
             }
             .frame(width: cardWidth)
             
@@ -942,7 +1128,7 @@ struct SwipeableProfileCard: View {
                 }
             }
         }
-        .frame(width: cardWidth, height: 500)
+        .frame(width: cardWidth, height: cardHeight)
         .offset(CGSize(
             width: dragOffset.width + programmaticDragOffset.width,
             height: dragOffset.height + programmaticDragOffset.height
@@ -1170,6 +1356,7 @@ struct UserProfileModal: View {
     @State private var selectedPhotoIndex = 0
     @State private var photosCarouselIndex = 0
     @State private var refreshedProfile: ProfileCard?
+    @State private var showingBlockConfirmation = false
     
     init(profile: ProfileCard) {
         self.profile = profile
@@ -1213,6 +1400,8 @@ struct UserProfileModal: View {
                     
                     // Gender & Preferences Section
                     genderPreferencesSection
+                    
+                    blockProfileSection
                 }
                 .padding(.horizontal)
                 .padding(.top, 16)
@@ -1277,6 +1466,56 @@ struct UserProfileModal: View {
                 .presentationBackground(.clear)
             }
         }
+        .alert("profile.block.confirm.title".localized, isPresented: $showingBlockConfirmation) {
+            Button("common.cancel".localized, role: .cancel) {}
+            Button("profile.block.confirm.action".localized, role: .destructive) {
+                appState.blockUser(userId: displayProfile.userId, name: displayProfile.name)
+            }
+        } message: {
+            Text(String(format: "profile.block.confirm.message".localized, firstName(from: displayProfile.name)))
+        }
+    }
+    
+    private var isProfileBlocked: Bool {
+        appState.isUserBlocked(displayProfile.userId)
+    }
+    
+    private var blockToggleBinding: Binding<Bool> {
+        Binding(
+            get: { isProfileBlocked },
+            set: { newValue in
+                if newValue {
+                    showingBlockConfirmation = true
+                } else {
+                    appState.unblockUser(userId: displayProfile.userId)
+                }
+            }
+        )
+    }
+    
+    private var blockProfileSection: some View {
+        HStack {
+            Image(systemName: "hand.raised.circle.fill")
+                .foregroundColor(.red)
+                .font(.title2)
+            Text(isProfileBlocked ? "profile.unblock.title".localized : "profile.block.title".localized)
+                .font(.headline)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+            Spacer()
+            Toggle("", isOn: blockToggleBinding)
+                .scaleEffect(0.8, anchor: .trailing)
+                .frame(width: 46, height: 28, alignment: .trailing)
+        }
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+    }
+    
+    private func firstName(from fullName: String) -> String {
+        let components = fullName.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
+        return components.first.map(String.init) ?? fullName
     }
     
     // MARK: - Refresh Profile
@@ -1315,7 +1554,8 @@ struct UserProfileModal: View {
                 lastSeen: refreshed.lastSeen,
                 idealFirstDate: refreshed.idealFirstDate,
                 shareIdealFirstDate: refreshed.shareIdealFirstDate,
-                energyLevel: refreshed.energyLevel
+                energyLevel: refreshed.energyLevel,
+                matchPercentage: profile.matchPercentage
             )
             
             await MainActor.run {
@@ -1975,6 +2215,8 @@ struct NewMessageModal: View {
     @EnvironmentObject private var appState: AppStateManager
     @State private var messageText: String = ""
     @State private var showingPreMessageOptions = false
+    @State private var isBlockedByRecipient = false
+    @State private var showingBlockedAlert = false
     
     init(profile: ProfileCard, isExistingConversation: Bool) {
         self.profile = profile
@@ -2030,6 +2272,8 @@ struct NewMessageModal: View {
                             .background(Color.blue.opacity(0.1))
                             .cornerRadius(8)
                         }
+                        .disabled(isBlockedByRecipient)
+                        .opacity(isBlockedByRecipient ? 0.5 : 1)
                     }
                     
                     TextEditor(text: $messageText)
@@ -2041,6 +2285,8 @@ struct NewMessageModal: View {
                             RoundedRectangle(cornerRadius: 12)
                                 .stroke(Color(.systemGray4), lineWidth: 1)
                         )
+                        .disabled(isBlockedByRecipient)
+                        .opacity(isBlockedByRecipient ? 0.5 : 1)
                 }
                 .padding(.horizontal, 20)
                 
@@ -2060,7 +2306,8 @@ struct NewMessageModal: View {
                         .background(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.gray : Color.blue)
                         .cornerRadius(12)
                 }
-                .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isBlockedByRecipient)
+                .opacity(isBlockedByRecipient ? 0.5 : 1)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)
             }
@@ -2081,8 +2328,8 @@ struct NewMessageModal: View {
                             .foregroundColor(.secondary)
                     }
                 }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("profile.edit.cancel".localized) {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("common.done".localized) {
                         dismiss()
                     }
                 }
@@ -2097,13 +2344,51 @@ struct NewMessageModal: View {
                 }
             )
         }
+        .overlay {
+            if showingBlockedAlert {
+                BlockedUserAlertOverlay(
+                    firstName: firstName(from: profile.name),
+                    onDismiss: { dontShowAgain in
+                        if dontShowAgain {
+                            appState.suppressBlockedAlert(for: profile.userId)
+                        }
+                        showingBlockedAlert = false
+                    }
+                )
+            }
+        }
         .onAppear {
             print("💬 NewMessageModal appeared for: \(profile.name)")
             print("💬 Profile userId: \(profile.userId), isExistingConversation: \(isExistingConversation)")
             print("💬 Modal appeared - messageText will be set: \(!isExistingConversation)")
-            if !isExistingConversation {
-                messageText = "matches.default.message".localized
-                print("💬 Default message text set: \(messageText)")
+            Task {
+                await checkBlockStatus()
+            }
+        }
+    }
+    
+    private func checkBlockStatus() async {
+        do {
+            let blocked = try await FirebaseAuthService.shared.isBlockedBy(userId: profile.userId)
+            print("🚫 Block status for \(profile.userId): blocked=\(blocked)")
+            await MainActor.run {
+                isBlockedByRecipient = blocked
+                if blocked {
+                    messageText = ""
+                    if appState.shouldShowBlockedAlert(for: profile.userId) {
+                        showingBlockedAlert = true
+                    }
+                } else if !isExistingConversation {
+                    messageText = "matches.default.message".localized
+                    print("💬 Default message text set: \(messageText)")
+                }
+            }
+        } catch {
+            print("⚠️ Unable to check block status for \(profile.userId): \(error.localizedDescription)")
+            await MainActor.run {
+                if !isExistingConversation {
+                    messageText = "matches.default.message".localized
+                }
             }
         }
     }
@@ -2115,8 +2400,18 @@ struct NewMessageModal: View {
     }
     
     private func sendMessage() async {
+        guard !isBlockedByRecipient else { return }
         let trimmedMessage = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedMessage.isEmpty else { return }
+        
+        await MainActor.run {
+            appState.recordOutgoingMessage(
+                to: profile.userId,
+                recipientName: profile.name,
+                recipientPhotoURL: profile.imageURL,
+                content: trimmedMessage
+            )
+        }
         
         do {
             let messageId = try await FirebaseAuthService.shared.sendMessage(
@@ -2127,12 +2422,6 @@ struct NewMessageModal: View {
             print("✅ Message sent successfully with ID: \(messageId)")
             
             await MainActor.run {
-                appState.recordOutgoingMessage(
-                    to: profile.userId,
-                    recipientName: profile.name,
-                    recipientPhotoURL: profile.imageURL,
-                    content: trimmedMessage
-                )
                 dismiss()
             }
             
@@ -2146,6 +2435,7 @@ struct NewMessageModal: View {
 struct EmptyStateCard: View {
     let matchesCount: Int
     let messagesCount: Int
+    let canReviewPassedProfiles: Bool
     let onMatchesTap: () -> Void
     let onMessagesTap: () -> Void
     let onStartOverTap: () -> Void
@@ -2234,11 +2524,12 @@ struct EmptyStateCard: View {
                     }) {
                         Text("search.empty.start.over".localized)
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.blue)
+                            .foregroundColor(canReviewPassedProfiles ? .blue : .gray)
                             .frame(maxWidth: .infinity)
                             .padding(.top, 10)
                     }
                     .buttonStyle(.plain)
+                    .disabled(!canReviewPassedProfiles)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 16)

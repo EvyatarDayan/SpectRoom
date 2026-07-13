@@ -56,6 +56,7 @@ struct MatchesView: View {
         }
         .onAppear {
             loadMatches()
+            appState.refreshBlockedByUsers()
         }
         .sheet(isPresented: Binding(
             get: {
@@ -178,6 +179,7 @@ private extension MatchesView {
                         onTap: { openProfile(for: match) },
                         onMessage: { openMessage(for: match) }
                     )
+                    .environmentObject(appState)
                 }
             }
             .padding(gridPadding)
@@ -227,6 +229,7 @@ struct MatchGridCard: View {
     let cardWidth: CGFloat
     let onTap: () -> Void
     let onMessage: () -> Void
+    @EnvironmentObject private var appState: AppStateManager
 
     private let photoInset: CGFloat = 8
     private let photoAspectRatio: CGFloat = 300 / 333
@@ -329,6 +332,16 @@ struct MatchGridCard: View {
             .padding(.top, photoInset)
         }
         .frame(width: cardWidth, height: photoHeight + photoInset, alignment: .top)
+        .overlay {
+            if isBlockedMatch {
+                BlockedProfileLabel(dimmed: false, slanted: false)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private var isBlockedMatch: Bool {
+        appState.isMessagingBlocked(with: profile.userId)
     }
 
     private var messageButton: some View {
@@ -387,4 +400,5 @@ struct MatchGridCard: View {
 
 #Preview {
     MatchesView(selectedTab: .constant(1))
+        .environmentObject(AppStateManager.shared)
 }

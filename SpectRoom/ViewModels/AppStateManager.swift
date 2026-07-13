@@ -22,7 +22,12 @@ class AppStateManager: ObservableObject {
     @Published var conversations: [Conversation] = []
     @Published var cachedMatches: [MatchDisplay] = [] // Cache for matches list
     @Published var cachedMessageConversations: [MessageDisplay] = [] // Cache for message conversations list
+    @Published var cachedDiscoverProfiles: [ProfileCard] = []
+    @Published var cachedDiscoverCardIndex: Int = 0
+    private var isDiscoverProfilesCacheValid = false
     @Published var blockedUsers: [BlockedUser] = []
+    @Published var blockedByUsers: [BlockedUser] = []
+    @Published private(set) var suppressedBlockedAlertUserIds: Set<String> = []
     @Published var authErrorMessage: String?
     private var lastMatchesUpdate: Date?
     private var lastMessageConversationsUpdate: Date?
@@ -49,7 +54,9 @@ class AppStateManager: ObservableObject {
     @Published var conversationToOpenSenderId: String? = nil
     @Published var conversationToOpenProfile: ProfileCard? = nil
     @Published var currentlyOpenConversationSenderId: String? = nil // Track which conversation is currently open
+    @Published private(set) var isMessagesTabActive = false
     @Published var unreadMessageCount: Int = 0
+    @Published var conversationUnreadCounts: [String: Int] = [:]
     private var lastMessageId: String?
     
     private let firebaseAuth = FirebaseAuthService.shared
@@ -94,6 +101,10 @@ class AppStateManager: ObservableObject {
                     self?.currentUser = nil
                     self?.unreadMessageCount = 0
                     self?.clearMessageConversationsCache() // Clear message conversations cache
+                    self?.clearDiscoverProfilesCache()
+                    Task { @MainActor in
+                        NotificationService.shared.setAppIconBadgeCount(0)
+                    }
                     print("🔐 User logged out - cleared all user data")
                 }
             }
@@ -108,8 +119,12 @@ class AppStateManager: ObservableObject {
                 if let user = newUser {
                     print("🔄 AppStateManager: Updated currentUser with \(user.photos.count) photos")
                     self?.blockedUsers = user.blockedUsers
+                    self?.blockedByUsers = user.blockedByUsers
+                    self?.loadSuppressedBlockedAlerts()
                 } else {
                     self?.blockedUsers = []
+                    self?.blockedByUsers = []
+                    self?.suppressedBlockedAlertUserIds = []
                 }
             }
             .store(in: &cancellables)
@@ -219,7 +234,9 @@ class AppStateManager: ObservableObject {
                     lastMatchesUpdate = nil
                     conversations = []
                     blockedUsers = []
+                    blockedByUsers = []
                     clearMessageConversationsCache() // Clear message conversations cache
+                    clearDiscoverProfilesCache()
                     // NOTE: hasCompletedOnboarding is NOT reset here - it persists across sign-outs
                     // This ensures users go to sign-in view, not onboarding view, when they sign out
                     saveAppState()
@@ -368,6 +385,27 @@ class AppStateManager: ObservableObject {
             }
         }
     }
+
+    // MARK: - Discover Profiles Cache
+    var hasValidDiscoverProfilesCache: Bool {
+        isDiscoverProfilesCacheValid
+    }
+
+    func updateDiscoverProfilesCache(profiles: [ProfileCard], cardIndex: Int) {
+        guard !profiles.isEmpty else {
+            clearDiscoverProfilesCache()
+            return
+        }
+        cachedDiscoverProfiles = profiles
+        cachedDiscoverCardIndex = cardIndex
+        isDiscoverProfilesCacheValid = true
+    }
+
+    func clearDiscoverProfilesCache() {
+        cachedDiscoverProfiles = []
+        cachedDiscoverCardIndex = 0
+        isDiscoverProfilesCacheValid = false
+    }
     
     // MARK: - Conversations
     func addConversation(_ conversation: Conversation) {
@@ -411,6 +449,7 @@ class AppStateManager: ObservableObject {
            let user = try? decoder.decode(SpectRoomUser.self, from: userData) {
             currentUser = user
             blockedUsers = user.blockedUsers
+            blockedByUsers = user.blockedByUsers
             print("📱 Loaded user from UserDefaults with \(user.photos.count) photos")
         }
         
@@ -453,7 +492,9 @@ class AppStateManager: ObservableObject {
                     matches = []
                     conversations = []
                     blockedUsers = []
+                    blockedByUsers = []
                     clearMessageConversationsCache() // Clear message conversations cache
+                    clearDiscoverProfilesCache()
                     saveAppState()
                     print("🔄 All app state reset - app will start fresh")
                 }
@@ -468,6 +509,7 @@ class AppStateManager: ObservableObject {
                     matches = []
                     conversations = []
                     clearMessageConversationsCache()
+                    clearDiscoverProfilesCache()
                     saveAppState()
                 }
             }
@@ -477,6 +519,64 @@ class AppStateManager: ObservableObject {
     func isUserBlocked(_ userId: String) -> Bool {
         blockedUsers.contains(where: { $0.id == userId })
     }
+    
+    func isBlockedByUser(_ userId: String) -> Bool {
+        blockedByUsers.contains(where: { $0.id == userId })
+    }
+    
+    func isMessagingBlocked(with userId: String) -> Bool {
+        isUserBlocked(userId) || isBlockedByUser(userId)
+    }
+    
+    func shouldShowBlockedAlert(for userId: String) -> Bool {
+        !suppressedBlockedAlertUserIds.contains(userId)
+    }
+    
+    func suppressBlockedAlert(for userId: String) {
+        suppressedBlockedAlertUserIds.insert(userId)
+        persistSuppressedBlockedAlerts()
+    }
+    
+    func unsuppressBlockedAlert(for userId: String) {
+        suppressedBlockedAlertUserIds.remove(userId)
+        persistSuppressedBlockedAlerts()
+    }
+    
+    private var suppressedBlockedAlertsStorageKey: String? {
+        guard let uid = firebaseAuth.auth.currentUser?.uid else { return nil }
+        return "suppressedBlockedAlertUserIds_\(uid)"
+    }
+    
+    func loadSuppressedBlockedAlerts() {
+        guard let key = suppressedBlockedAlertsStorageKey else {
+            suppressedBlockedAlertUserIds = []
+            return
+        }
+        let ids = UserDefaults.standard.stringArray(forKey: key) ?? []
+        suppressedBlockedAlertUserIds = Set(ids)
+    }
+    
+    private func persistSuppressedBlockedAlerts() {
+        guard let key = suppressedBlockedAlertsStorageKey else { return }
+        UserDefaults.standard.set(Array(suppressedBlockedAlertUserIds), forKey: key)
+    }
+    
+    func refreshBlockedByUsers() {
+        Task {
+            do {
+                let users = try await firebaseAuth.fetchBlockedByUsers()
+                await MainActor.run {
+                    self.blockedByUsers = users
+                    if var current = self.currentUser {
+                        current.blockedByUsers = users
+                        self.currentUser = current
+                    }
+                }
+            } catch {
+                print("⚠️ Unable to refresh blockedBy users: \(error.localizedDescription)")
+            }
+        }
+    }
 
     func blockUser(userId: String, name: String) {
         guard !isUserBlocked(userId) else { return }
@@ -485,6 +585,10 @@ class AppStateManager: ObservableObject {
         Task {
             await MainActor.run {
                 self.blockedUsers.append(blockedUser)
+                self.cachedDiscoverProfiles.removeAll { $0.userId == userId }
+                if self.cachedDiscoverCardIndex >= self.cachedDiscoverProfiles.count {
+                    self.cachedDiscoverCardIndex = max(0, self.cachedDiscoverProfiles.count - 1)
+                }
                 if var current = self.currentUser {
                     current.blockedUsers = self.blockedUsers
                     self.currentUser = current
@@ -502,6 +606,7 @@ class AppStateManager: ObservableObject {
 
     func unblockUser(userId: String) {
         guard isUserBlocked(userId) else { return }
+        unsuppressBlockedAlert(for: userId)
 
         Task {
             await MainActor.run {
@@ -545,49 +650,39 @@ class AppStateManager: ObservableObject {
         print("💕 Starting to listen for new matches...")
         
         firebaseAuth.listenForNewMatches { [weak self] matchDisplay in
-            DispatchQueue.main.async {
-                print("💕 New match received: \(matchDisplay.otherUser.name)")
-                print("💕 Match ID: \(matchDisplay.id)")
-                print("💕 Current showingMatchNotification state: \(self?.showingMatchNotification ?? false)")
-                print("💕 Last match ID: \(self?.lastMatchId ?? "nil")")
-                
-                // Prevent duplicate notifications for the same match
-                guard self?.lastMatchId != matchDisplay.id else {
-                    print("💕 Duplicate match notification, ignoring")
-                    return
-                }
-                
-                // Only show notification if not already showing one
-                guard self?.showingMatchNotification != true else {
-                    print("💕 Match notification already showing, ignoring new match")
-                    return
-                }
-                
-                // Check if app is in background/closed
-                let isAppInBackground = UIApplication.shared.applicationState != .active
-                
-                // Show in-app notification if app is active (foreground)
-                // Cloud Function will handle push notifications when app is closed
-                if !isAppInBackground {
-                    // Show notification for both users via the listener
-                    // Add a small delay to ensure match is fully synced before showing popup
-                    // This helps ensure both users get the popup properly
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        self?.lastMatchId = matchDisplay.id
-                        self?.newMatchProfile = matchDisplay.otherUser
-                        self?.showingMatchNotification = true
-                        print("💕 Match notification set to show for: \(matchDisplay.otherUser.name)")
-                        self?.updateMatchesCache(with: matchDisplay)
-                    }
-                } else {
-                    // App is closed/backgrounded
-                    // Cloud Function will send push notification automatically
-                    // Just update the match ID to prevent duplicates
-                    self?.lastMatchId = matchDisplay.id
-                    print("💕 App is closed/backgrounded - Cloud Function will send push notification for match: \(matchDisplay.otherUser.name)")
-                    self?.updateMatchesCache(with: matchDisplay)
-                }
+            self?.handleIncomingMatchNotification(matchDisplay)
+        }
+    }
+    
+    func presentMatchNotification(otherUser: ProfileCard, matchId: String) {
+        let matchDisplay = MatchDisplay(
+            id: matchId,
+            otherUser: otherUser,
+            matchedAt: Date()
+        )
+        handleIncomingMatchNotification(matchDisplay)
+    }
+    
+    private func handleIncomingMatchNotification(_ matchDisplay: MatchDisplay) {
+        DispatchQueue.main.async { [weak self] in
+            print("💕 New match received: \(matchDisplay.otherUser.name)")
+            print("💕 Match ID: \(matchDisplay.id)")
+            
+            guard self?.lastMatchId != matchDisplay.id else {
+                print("💕 Duplicate match notification, ignoring")
+                return
             }
+            
+            guard self?.showingMatchNotification != true else {
+                print("💕 Match notification already showing, ignoring new match")
+                return
+            }
+            
+            self?.lastMatchId = matchDisplay.id
+            self?.newMatchProfile = matchDisplay.otherUser
+            self?.showingMatchNotification = true
+            self?.updateMatchesCache(with: matchDisplay)
+            print("💕 Match notification set to show for: \(matchDisplay.otherUser.name)")
         }
     }
     
@@ -614,20 +709,83 @@ class AppStateManager: ObservableObject {
     func refreshUnreadMessageCount() {
         guard isAuthenticated else {
             unreadMessageCount = 0
+            conversationUnreadCounts = [:]
+            syncAppIconBadge()
             return
         }
         
         Task {
             do {
-                let count = try await firebaseAuth.countUnreadIncomingMessages()
+                async let totalUnreadTask = firebaseAuth.countUnreadIncomingMessages()
+                async let perConversationTask = firebaseAuth.fetchUnreadCountsBySender()
+                let (totalUnread, perConversation) = try await (totalUnreadTask, perConversationTask)
                 await MainActor.run {
-                    self.unreadMessageCount = count
+                    self.unreadMessageCount = totalUnread
+                    self.conversationUnreadCounts = perConversation
+                    self.syncAppIconBadge()
                 }
             } catch {
                 print("❌ Error loading unread message count: \(error)")
                 await MainActor.run {
                     self.unreadMessageCount = 0
+                    self.syncAppIconBadge()
                 }
+            }
+        }
+    }
+    
+    private func syncAppIconBadge() {
+        let count = unreadMessageCount
+        Task { @MainActor in
+            NotificationService.shared.setAppIconBadgeCount(count)
+        }
+    }
+    
+    /// Sync badge immediately when leaving the app so it persists on the home screen icon.
+    func syncAppIconBadgeBeforeBackground() {
+        guard isAuthenticated else { return }
+        
+        let cachedTotal = conversationUnreadCounts.values.reduce(0, +)
+        if cachedTotal > unreadMessageCount {
+            unreadMessageCount = cachedTotal
+        }
+        syncAppIconBadge()
+        
+        var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "SyncAppIconBadge") {
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+        }
+        
+        guard backgroundTaskID != .invalid else { return }
+        
+        Task {
+            do {
+                let totalUnread = try await firebaseAuth.countUnreadIncomingMessages()
+                await MainActor.run {
+                    self.unreadMessageCount = totalUnread
+                    NotificationService.shared.setAppIconBadgeCount(totalUnread)
+                }
+            } catch {
+                print("❌ Failed to sync app icon badge before background: \(error)")
+            }
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+        }
+    }
+    
+    func refreshConversationUnreadCounts() {
+        guard isAuthenticated else {
+            conversationUnreadCounts = [:]
+            return
+        }
+        
+        Task {
+            do {
+                let counts = try await firebaseAuth.fetchUnreadCountsBySender()
+                await MainActor.run {
+                    self.conversationUnreadCounts = counts
+                }
+            } catch {
+                print("❌ Error loading conversation unread counts: \(error)")
             }
         }
     }
@@ -636,10 +794,48 @@ class AppStateManager: ObservableObject {
         do {
             try await firebaseAuth.markMessagesAsRead(from: otherUserId)
             await MainActor.run {
+                let clearedCount = self.conversationUnreadCounts[otherUserId] ?? 0
+                var counts = self.conversationUnreadCounts
+                counts[otherUserId] = 0
+                self.conversationUnreadCounts = counts
+                self.unreadMessageCount = max(0, self.unreadMessageCount - clearedCount)
+                self.syncAppIconBadge()
                 self.refreshUnreadMessageCount()
             }
         } catch {
             print("❌ Failed to mark messages as read: \(error)")
+        }
+    }
+    
+    func shouldSuppressMessageNotification(for senderId: String) -> Bool {
+        if isMessagesTabActive {
+            return true
+        }
+        if let openSenderId = currentlyOpenConversationSenderId, openSenderId == senderId {
+            return true
+        }
+        return false
+    }
+    
+    func setMessagesTabActive(_ isActive: Bool) {
+        guard isMessagesTabActive != isActive else { return }
+        isMessagesTabActive = isActive
+        Task {
+            await syncMessagesTabStateToFirestore(isActive: isActive)
+        }
+    }
+    
+    private func syncMessagesTabStateToFirestore(isActive: Bool) async {
+        guard firebaseAuth.auth.currentUser != nil else { return }
+        
+        do {
+            try await firebaseAuth.updateUserData([
+                "messagesTabActive": isActive,
+                "appStateUpdatedAt": Date().timeIntervalSince1970
+            ])
+            print("📱 Updated messages tab state in Firestore: \(isActive ? "active" : "inactive")")
+        } catch {
+            print("❌ Failed to update messages tab state: \(error)")
         }
     }
     
@@ -651,8 +847,31 @@ class AppStateManager: ObservableObject {
         
         print("💬 Starting to listen for new messages...")
         
-        firebaseAuth.listenForNewMessages { [weak self] senderId, senderName, senderPhotoURL, messageDocId in
+        firebaseAuth.listenForNewMessages { [weak self] senderId, senderName, senderPhotoURL, messageDocId, content, type, voiceDuration, createdAt, hasProfile in
             DispatchQueue.main.async {
+                if !hasProfile {
+                    print("💬 New message preview from: \(senderId), content: \(content.prefix(20))...")
+                    self?.applyIncomingMessagePreview(
+                        senderId: senderId,
+                        senderName: senderName.isEmpty ? nil : senderName,
+                        senderPhotoURL: senderPhotoURL,
+                        content: content,
+                        type: type,
+                        voiceDuration: voiceDuration,
+                        createdAt: createdAt
+                    )
+                    self?.incrementUnreadCount(for: senderId)
+                    
+                    if let openSenderId = self?.currentlyOpenConversationSenderId, openSenderId == senderId {
+                        print("💬 Conversation with \(senderId) is already open, marking messages as read")
+                        self?.lastMessageId = messageDocId
+                        Task {
+                            await self?.markMessagesAsRead(from: senderId)
+                        }
+                    }
+                    return
+                }
+                
                 print("💬 New message received from: \(senderName)")
                 print("💬 Sender ID: \(senderId), Message Doc ID: \(messageDocId)")
                 print("💬 Current showingNewMessageNotification state: \(self?.showingNewMessageNotification ?? false)")
@@ -670,24 +889,10 @@ class AppStateManager: ObservableObject {
                     return
                 }
                 
-                // Update cache with new message in background
-                Task {
-                    do {
-                        if let conversation = try await FirebaseAuthService.shared.fetchLatestMessageFromSender(senderId: senderId) {
-                            self?.updateConversationInCache(conversation)
-                        }
-                    } catch {
-                        print("❌ Failed to update cache for new message: \(error)")
-                    }
-                }
-                
-                // If conversation with this sender is already open, mark as read and skip notifications
-                if let openSenderId = self?.currentlyOpenConversationSenderId, openSenderId == senderId {
-                    print("💬 Conversation with \(senderName) is already open, marking messages as read")
+                // If user is on Messages tab or already viewing this chat, skip notifications
+                if self?.shouldSuppressMessageNotification(for: senderId) == true {
+                    print("💬 Suppressing message notification for \(senderName) (messages tab or open conversation)")
                     self?.lastMessageId = messageDocId
-                    Task {
-                        await self?.markMessagesAsRead(from: senderId)
-                    }
                     return
                 }
                 
@@ -705,10 +910,14 @@ class AppStateManager: ObservableObject {
                         
                         let hasPermission = await NotificationService.shared.checkNotificationPermission()
                         if hasPermission && NotificationService.shared.areNotificationsEnabled() {
+                            let badgeCount = await MainActor.run {
+                                self?.unreadMessageCount ?? 0
+                            }
                             NotificationService.shared.sendNewMessageNotification(
                                 senderName: senderName,
-                                messageContent: messageContent ?? "New message",
-                                senderId: senderId
+                                messageContent: messageContent ?? content,
+                                senderId: senderId,
+                                badgeCount: badgeCount
                             )
                             print("📱 Push notification sent for message from: \(senderName)")
                         }
@@ -746,6 +955,7 @@ class AppStateManager: ObservableObject {
            Date().timeIntervalSince(lastUpdate) < 30.0,
            !cachedMessageConversations.isEmpty {
             print("💬 Returning cached conversations (\(cachedMessageConversations.count) items, updated \(Date().timeIntervalSince(lastUpdate)) seconds ago)")
+            refreshConversationUnreadCounts()
             return cachedMessageConversations
         }
         
@@ -757,11 +967,16 @@ class AppStateManager: ObservableObject {
     /// Refresh the message conversations cache from Firebase
     func refreshMessageConversationsCache() async throws -> [MessageDisplay] {
         print("💬 Refreshing message conversations cache...")
-        let latestMessages = try await FirebaseAuthService.shared.fetchLatestMessagesFromEachUser()
+        async let latestMessagesTask = firebaseAuth.fetchLatestMessagesFromEachUser()
+        async let unreadCountsTask = firebaseAuth.fetchUnreadCountsBySender()
+        
+        let latestMessages = try await latestMessagesTask
+        let unreadCounts = try await unreadCountsTask
         let sortedMessages = latestMessages.sorted { $0.createdAt > $1.createdAt }
         
         await MainActor.run {
             cachedMessageConversations = sortedMessages
+            conversationUnreadCounts = unreadCounts
             print("💬 Cache updated with \(sortedMessages.count) conversations")
             lastMessageConversationsUpdate = Date()
         }
@@ -769,32 +984,89 @@ class AppStateManager: ObservableObject {
         return sortedMessages
     }
     
-    /// Update a single conversation in the cache (when a new message arrives)
+    /// Update a single conversation in the cache (when a new message arrives or is sent)
+    @MainActor
     func updateConversationInCache(_ conversation: MessageDisplay) {
-        Task {
-            await MainActor.run {
-                if let index = cachedMessageConversations.firstIndex(where: { conv in
-                    let otherUserId = conv.senderName == "You" ? conv.recipientId : conv.senderId
-                    let newOtherUserId = conversation.senderName == "You" ? conversation.recipientId : conversation.senderId
-                    return otherUserId == newOtherUserId
-                }) {
-                    let existing = cachedMessageConversations[index]
-                    if conversation.createdAt >= existing.createdAt {
-                        cachedMessageConversations[index] = conversation
-                        print("💬 Updated conversation in cache: \(conversation.recipientName)")
-                    }
-                } else {
-                    cachedMessageConversations.append(conversation)
-                    print("💬 Added new conversation to cache: \(conversation.recipientName)")
-                }
-                cachedMessageConversations.sort { $0.createdAt > $1.createdAt }
-                lastMessageConversationsUpdate = Date()
-                newMessageReceivedSubject.send(conversation)
+        let newOtherUserId = otherUserId(for: conversation)
+        var updated = cachedMessageConversations
+        
+        if let index = updated.firstIndex(where: { otherUserId(for: $0) == newOtherUserId }) {
+            let existing = updated[index]
+            guard conversation.createdAt >= existing.createdAt else {
+                return
             }
+            updated[index] = conversation
+            print("💬 Updated conversation in cache: \(conversation.recipientName)")
+        } else {
+            updated.append(conversation)
+            print("💬 Added new conversation to cache: \(conversation.recipientName)")
         }
+        
+        cachedMessageConversations = updated.sorted { $0.createdAt > $1.createdAt }
+        lastMessageConversationsUpdate = Date()
+        newMessageReceivedSubject.send(conversation)
+    }
+    
+    @MainActor
+    func applyIncomingMessagePreview(
+        senderId: String,
+        senderName: String?,
+        senderPhotoURL: String?,
+        content: String,
+        type: MessageType,
+        voiceDuration: TimeInterval?,
+        createdAt: Date
+    ) {
+        guard let currentUserId = firebaseAuth.auth.currentUser?.uid else { return }
+        
+        let resolvedName = senderName
+            ?? cachedMessageConversations.first(where: { otherUserId(for: $0) == senderId }).map { conversation in
+                conversation.senderName == "You" ? conversation.recipientName : conversation.senderName
+            }
+            ?? "Unknown User"
+        let cachedPhotoURL = cachedMessageConversations.first(where: { otherUserId(for: $0) == senderId }).flatMap { conversation in
+            conversation.senderName == "You" ? conversation.recipientProfilePhotoURL : conversation.senderProfilePhotoURL
+        }
+        let resolvedPhotoURL = senderPhotoURL ?? cachedPhotoURL
+        
+        let message = Message(
+            conversationId: UUID(),
+            senderId: UUID(),
+            senderFirebaseId: senderId,
+            content: content,
+            createdAt: createdAt,
+            type: type,
+            voiceDuration: voiceDuration
+        )
+        let messageDisplay = MessageDisplay(
+            message: message,
+            senderName: resolvedName,
+            recipientName: "You",
+            senderId: senderId,
+            recipientId: currentUserId,
+            senderProfilePhotoURL: resolvedPhotoURL,
+            recipientProfilePhotoURL: currentUser?.profilePhotoURL
+        )
+        updateConversationInCache(messageDisplay)
+    }
+    
+    @MainActor
+    private func incrementUnreadCount(for senderId: String) {
+        guard currentlyOpenConversationSenderId != senderId else { return }
+        var counts = conversationUnreadCounts
+        counts[senderId, default: 0] += 1
+        conversationUnreadCounts = counts
+        unreadMessageCount += 1
+        syncAppIconBadge()
+        refreshUnreadMessageCount()
+    }
+    
+    private func otherUserId(for conversation: MessageDisplay) -> String {
+        conversation.senderName == "You" ? conversation.recipientId : conversation.senderId
     }
     
     /// Optimistically update the messages list after sending a message, then refresh from the server.
+    @MainActor
     func recordOutgoingMessage(
         to recipientId: String,
         recipientName: String,
@@ -833,6 +1105,7 @@ class AppStateManager: ObservableObject {
     /// Clear the message conversations cache (e.g., on logout)
     func clearMessageConversationsCache() {
         cachedMessageConversations = []
+        conversationUnreadCounts = [:]
         lastMessageConversationsUpdate = nil
         cachedConversationMessages = [:]
         conversationMessagesCacheTimestamp = [:]
@@ -914,12 +1187,22 @@ class AppStateManager: ObservableObject {
         
         do {
             let now = Date()
-            let state: [String: Any] = [
+            var state: [String: Any] = [
                 "appIsActive": isActive,
                 "appStateUpdatedAt": now.timeIntervalSince1970,
                 "isOnline": isActive,
                 "lastSeen": now.timeIntervalSince1970
             ]
+            
+            // Clear stale in-app state when app is backgrounded or closed
+            if !isActive {
+                state["openConversationUserId"] = NSNull()
+                state["messagesTabActive"] = false
+                await MainActor.run {
+                    self.isMessagesTabActive = false
+                }
+            }
+            
             try await firebaseAuth.updateUserData(state)
             
             // Also update local user object

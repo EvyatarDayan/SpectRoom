@@ -60,6 +60,21 @@ exports.sendmessagenotification = functions.firestore
       
       const senderName = senderDoc.exists ? (senderDoc.data().name || 'Someone') : 'Someone';
       
+      // Count total unread messages for the app icon badge
+      const incomingSnapshot = await admin.firestore()
+        .collection('users')
+        .doc(recipientId)
+        .collection('incomingMessages')
+        .get();
+      
+      let unreadCount = 0;
+      incomingSnapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.isRead === false) {
+          unreadCount += 1;
+        }
+      });
+      
       // Prepare notification payload
       const messageBody = messageType === 'image' ? '📷 Photo' : (content.length > 50 ? content.substring(0, 50) + '...' : content);
       
@@ -67,12 +82,25 @@ exports.sendmessagenotification = functions.firestore
         notification: {
           title: `New message from ${senderName}`,
           body: messageBody,
-          sound: 'default',
+        },
+        apns: {
+          payload: {
+            aps: {
+              badge: unreadCount,
+              sound: 'default',
+            },
+          },
+        },
+        android: {
+          notification: {
+            notificationCount: unreadCount,
+          },
         },
         data: {
           type: 'message',
           senderId: senderId,
           messageId: context.params.messageId,
+          badge: String(unreadCount),
         },
         token: fcmToken,
       };
@@ -166,9 +194,30 @@ exports.sendmatchnotification = functions.firestore
 After fixing the functions, deploy them:
 
 ```bash
-firebase deploy --only functions:sendmessagenotification
-firebase deploy --only functions:sendmatchnotification
+cd "/Users/evyatardayan/Desktop/My projects/swift/SpectRoom"
+firebase deploy --only functions:sendMessageNotification
 ```
 
+## App Icon Badge Troubleshooting
+
+If the badge does not appear when the app is closed, check these items in order:
+
+1. **Deploy the updated cloud function** (badge code only works after deploy)
+2. **APNs key in Firebase Console** → Project Settings → Cloud Messaging → Apple app configuration
+3. **Test on a real iPhone** (not the simulator — push badges do not work on simulator)
+4. **Notification permission granted** including badge (iOS Settings → SpectRoom → Notifications → Badges ON)
+5. **Recipient has `fcmToken` in Firestore** under `users/{userId}/fcmToken` (open app once while logged in)
+6. **Build type matches APNs environment**:
+   - Debug/Xcode run → `SpectRoom.entitlements` uses `development`
+   - TestFlight/App Store → `SpectRoom-Release.entitlements` uses `production`
+7. **Stale `openConversationUserId`** — fixed: app now clears this when backgrounded; cloud function only skips push when app is active AND chat is open
+
+### Verify push is being sent
+
+In Firebase Console → Functions → `sendMessageNotification` → Logs, look for:
+- `✅ Message notification sent successfully (badge: N)` — working
+- `No FCM token for recipient` — recipient needs to open the app while logged in
+- `APNs authentication error` — upload APNs .p8 key in Firebase Console
+- `Conversation with ... is open and app is active, skipping` — expected only when user is actively in that chat
 
 

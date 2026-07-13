@@ -88,6 +88,7 @@ struct MessagesView: View {
                         ConversationRow(conversation: conversation) {
                             handleConversationTap(conversation)
                         }
+                        .environmentObject(appState)
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
@@ -118,12 +119,13 @@ struct MessagesView: View {
                 isLoading = false
             }
         }
-        .onReceive(appState.newMessageReceivedPublisher) { conversation in
-            let sorted = sortedConversations(appState.cachedMessageConversations)
-            conversations = sorted
+        .onReceive(appState.newMessageReceivedPublisher) { newMessage in
+            conversations = mergeConversation(newMessage, into: conversations)
         }
         .onAppear {
             loadConversationsFromCache()
+            appState.refreshBlockedByUsers()
+            appState.refreshConversationUnreadCounts()
             // If we have a conversation to open and we're just appearing, try to open it
             if let senderId = appState.conversationToOpenSenderId, !senderId.isEmpty {
                 print("💬 MessagesView appeared with conversationToOpenSenderId: \(senderId)")
@@ -351,6 +353,22 @@ struct MessagesView: View {
     
     private func sortedConversations(_ list: [MessageDisplay]) -> [MessageDisplay] {
         list.sorted { $0.createdAt > $1.createdAt }
+    }
+    
+    private func mergeConversation(_ newMessage: MessageDisplay, into list: [MessageDisplay]) -> [MessageDisplay] {
+        let newOtherUserId = newMessage.senderName == "You" ? newMessage.recipientId : newMessage.senderId
+        var updated = list
+        if let index = updated.firstIndex(where: {
+            let otherUserId = $0.senderName == "You" ? $0.recipientId : $0.senderId
+            return otherUserId == newOtherUserId
+        }) {
+            if newMessage.createdAt >= updated[index].createdAt {
+                updated[index] = newMessage
+            }
+        } else {
+            updated.append(newMessage)
+        }
+        return sortedConversations(updated)
     }
     
     private func handleConversationTap(_ conversation: MessageDisplay) {
@@ -602,91 +620,57 @@ struct MessagesView: View {
 struct ConversationRow: View {
     let conversation: MessageDisplay
     let onTap: () -> Void
+    @EnvironmentObject private var appState: AppStateManager
     
     var body: some View {
         let _ = print("💬 ConversationRow: Rendering row for \(conversation.recipientName), content: \(conversation.content.prefix(20))...")
-        HStack(spacing: 12) {
-            // Profile image with frame
-            if let profilePhotoURL = otherUserProfilePhotoURL, !profilePhotoURL.isEmpty {
-                Circle()
-                    .fill(Color.gray.opacity(0.1))
-                    .frame(width: 50, height: 50)
-                    .overlay(
-                        CachedAsyncImage(url: URL(string: profilePhotoURL)) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            Circle()
-                                .fill(Color.blue.opacity(0.2))
-                                .overlay(
-                                    Text(String(otherUserName.prefix(1)).uppercased())
-                                        .font(.title2)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(.blue)
-                                )
-                        }
-                        .frame(width: 44, height: 44)
-                        .clipShape(Circle())
-                    )
-                    .overlay(
-                        Circle()
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                    )
-            } else {
-                Circle()
-                    .fill(Color.gray.opacity(0.1))
-                    .frame(width: 50, height: 50)
-                    .overlay(
-                        Circle()
-                            .fill(Color.blue.opacity(0.2))
-                            .frame(width: 44, height: 44)
-                            .overlay(
-                                Text(String(otherUserName.prefix(1)).uppercased())
-                                    .font(.title2)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.blue)
-                            )
-                    )
-                    .overlay(
-                        Circle()
-                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                    )
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(otherUserName)
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-                    
-                    Spacer()
-                    
-                    Text(conversation.createdAt.timeAgoDisplay())
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+        ZStack {
+            HStack(spacing: 12) {
+                profilePhoto
+                    .overlay(alignment: .topTrailing) {
+                        UnreadCountBadge(count: unreadCount)
+                            .offset(x: 6, y: -6)
+                    }
                 
-                HStack {
-                    Text(previewText)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(otherUserName)
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                        
+                        Spacer()
+                        
+                        Text(conversation.createdAt.timeAgoDisplay())
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                     
-                    Spacer()
-                    
-                    // Show direction indicator
-                    Image(systemName: conversation.senderName == "You" ? "paperplane.fill" : "envelope.fill")
-                        .foregroundColor(conversation.senderName == "You" ? .blue : .green)
-                        .font(.caption)
+                    HStack {
+                        Text(previewText)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                        
+                        Spacer()
+                        
+                        Image(systemName: conversation.senderName == "You" ? "paperplane.fill" : "envelope.fill")
+                            .foregroundColor(conversation.senderName == "You" ? .blue : .green)
+                            .font(.caption)
+                    }
                 }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .background(Color(.secondarySystemGroupedBackground))
+            .cornerRadius(12)
+            
+            if isBlockedConversation {
+                BlockedProfileLabel()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(false)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 16)
-        .background(Color(.secondarySystemGroupedBackground))
-        .cornerRadius(12)
         .contentShape(Rectangle())
         .onTapGesture {
             onTap()
@@ -698,6 +682,68 @@ struct ConversationRow: View {
             return conversation.recipientName
         } else {
             return conversation.senderName
+        }
+    }
+    
+    private var otherUserId: String {
+        conversation.senderName == "You" ? conversation.recipientId : conversation.senderId
+    }
+    
+    private var isBlockedConversation: Bool {
+        appState.isMessagingBlocked(with: otherUserId)
+    }
+    
+    private var unreadCount: Int {
+        appState.conversationUnreadCounts[otherUserId] ?? 0
+    }
+    
+    @ViewBuilder
+    private var profilePhoto: some View {
+        if let profilePhotoURL = otherUserProfilePhotoURL, !profilePhotoURL.isEmpty {
+            Circle()
+                .fill(Color.gray.opacity(0.1))
+                .frame(width: 50, height: 50)
+                .overlay(
+                    CachedAsyncImage(url: URL(string: profilePhotoURL)) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Circle()
+                            .fill(Color.blue.opacity(0.2))
+                            .overlay(
+                                Text(String(otherUserName.prefix(1)).uppercased())
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.blue)
+                            )
+                    }
+                    .frame(width: 44, height: 44)
+                    .clipShape(Circle())
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                )
+        } else {
+            Circle()
+                .fill(Color.gray.opacity(0.1))
+                .frame(width: 50, height: 50)
+                .overlay(
+                    Circle()
+                        .fill(Color.blue.opacity(0.2))
+                        .frame(width: 44, height: 44)
+                        .overlay(
+                            Text(String(otherUserName.prefix(1)).uppercased())
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.blue)
+                        )
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                )
         }
     }
     
@@ -779,6 +825,14 @@ struct MessageConversationModal: View {
     @State private var tempFileURL: URL?
     @State private var pendingAutoPlay = false
     @State private var showElapsedTime = false
+    @State private var isBlockedByRecipient = false
+    @State private var showingBlockedAlert = false
+    @State private var hasMoreOlderMessages = false
+    @State private var isLoadingOlderMessages = false
+    @State private var cachedMessagesPool: [MessageDisplay] = []
+    @State private var shouldScrollToBottom = false
+    
+    private let conversationPageSize = 10
     
     init(message: MessageDisplay, conversationMessages: Binding<[MessageDisplay]>) {
         self.message = message
@@ -794,38 +848,40 @@ struct MessageConversationModal: View {
         }
     }
     
+    private var otherUserId: String {
+        message.senderName == "You" ? message.recipientId : message.senderId
+    }
+    
+    private var otherUserName: String {
+        message.senderName == "You" ? message.recipientName : message.senderName
+    }
+    
     var body: some View {
         let _ = print("💬 MessageConversationModal body being computed, message: \(message.recipientName), isLoadingMessages: \(isLoadingMessages)")
-        NavigationView {
+        NavigationStack {
             ZStack {
-                // Background image - render first to display immediately
                 Image(colorScheme == .dark ? "ColorsDark" : "Colors")
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .ignoresSafeArea()
                 
-            VStack(spacing: 0) {
-                    // Fixed top spacer - this creates a non-scrollable buffer zone above messages
-                    Color.clear
-                        .frame(height: 120) // Status bar + navigation bar area + button area
-                    
-                if isLoadingMessages {
-                    // Loading State
-                    VStack(spacing: 20) {
-                        Spacer()
-                        ProgressView()
-                            .scaleEffect(1.5)
-                            Text("messages.loading.conversation".localized)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
-                } else {
-                    // Messages List
-                    if conversationMessages.isEmpty {
+                KeyboardStickyChatLayout {
+                    conversationHeaderBar
+                } messages: {
+                    if isLoadingMessages {
                         VStack(spacing: 20) {
                             Spacer()
-                                Text("messages.no.messages.found".localized)
+                            ProgressView()
+                                .scaleEffect(1.5)
+                            Text("messages.loading.conversation".localized)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                        }
+                    } else if conversationMessages.isEmpty {
+                        VStack(spacing: 20) {
+                            Spacer()
+                            Text("messages.no.messages.found".localized)
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                             Spacer()
@@ -833,181 +889,65 @@ struct MessageConversationModal: View {
                     } else {
                         ScrollViewReader { proxy in
                             ScrollView {
-                                    LazyVStack(spacing: 12) {
-                                        ForEach(conversationMessages) { msg in
-                                            MessageBubble(
-                                                message: msg,
-                                                currentUserProfilePhotoURL: currentUserProfilePhotoURL,
-                                                otherUserProfilePhotoURL: otherUserProfilePhotoURL,
-                                                conversationMessages: conversationMessages,
-                                                showingConversationPhotoViewer: $showingConversationPhotoViewer,
-                                                selectedPhotoIndex: $selectedPhotoIndex
-                                            )
-                                            .id(msg.id)
+                                LazyVStack(spacing: 12) {
+                                    if isLoadingOlderMessages {
+                                        ProgressView()
+                                            .padding(.vertical, 8)
+                                    }
+                                    
+                                    ForEach(conversationMessages) { msg in
+                                        MessageBubble(
+                                            message: msg,
+                                            currentUserProfilePhotoURL: currentUserProfilePhotoURL,
+                                            otherUserProfilePhotoURL: otherUserProfilePhotoURL,
+                                            conversationMessages: conversationMessages,
+                                            showingConversationPhotoViewer: $showingConversationPhotoViewer,
+                                            selectedPhotoIndex: $selectedPhotoIndex
+                                        )
+                                        .id(msg.id)
+                                        .onAppear {
+                                            if msg.id == conversationMessages.first?.id {
+                                                loadOlderMessagesIfNeeded()
+                                            }
                                         }
                                     }
-                                    .padding(.horizontal, 16)
-                                    .padding(.top, 20) // Padding for messages list
-                                    .padding(.bottom, 8) // Minimal space for input area
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.top, 12)
+                                .padding(.bottom, 12)
                             }
-                                .scrollContentBackground(.hidden) // Ensure transparent background
-                                .scrollIndicators(.hidden) // Hide scroll indicators for cleaner look
+                            .scrollContentBackground(.hidden)
+                            .scrollIndicators(.hidden)
+                            .scrollDismissesKeyboard(.interactively)
                             .onAppear {
-                                // Add a small delay to ensure messages are rendered before scrolling
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                    if let lastMessage = conversationMessages.last {
-                                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                                    }
+                                    scrollToBottomIfNeeded(proxy: proxy)
                                 }
                             }
                             .onChange(of: conversationMessages.count) { _ in
-                                if let lastMessage = conversationMessages.last {
-                                    withAnimation(.easeInOut(duration: 0.3)) {
-                                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                                    }
-                                }
+                                scrollToBottomIfNeeded(proxy: proxy)
                             }
                         }
                     }
+                } composer: {
+                    if !isLoadingMessages && !isBlockedByRecipient {
+                        messageComposer
+                    }
                 }
-                
-                // Reply Input (only show when messages are loaded)
-                if !isLoadingMessages {
-                    HStack(spacing: 12) {
-//                            // Text input field with rounded corners and light gray background
-//                            TextField("messages.type.something".localized, text: $replyText)
-//                                .focused($isTextFieldFocused)
-//                            .disabled(isSendingReply)
-//                                .padding(.horizontal, 16)
-//                                .padding(.vertical, 12)
-//                                .background(Color(.red))
-//                                .cornerRadius(24)
-                        
-                            // Camera button
-//                        Button(action: {
-//                                showingImagePicker = true
-//                            }) {
-//                                Image(systemName: "camera")
-//                                    .font(.system(size: 20))
-//                                    .foregroundColor(Color(.systemGray))
-//                                    .frame(width: 44, height: 44)
-//                                    .background(Color(.systemGray6))
-//                                    .clipShape(Circle())
-//                            }
-                            
-                            // Microphone button with tap & hold recording
-                            Circle()
-                                .fill(Color(.clear))
-                                .frame(width: 44, height: 44)
-//                                .overlay(
-//                                    Image(systemName: isRecording ? "mic.fill" : "mic")
-//                                        .font(.system(size: 20))
-//                                        .foregroundColor(isRecording ? .red : Color(.systemGray))
-//                                )
-                                .overlay(
-                                    Circle()
-                                        .stroke(isRecording ? Color.red.opacity(0.4) : Color.clear, lineWidth: 2)
-                                )
-                                .onLongPressGesture(minimumDuration: 0.2, maximumDistance: 60, pressing: { pressing in
-                                    if pressing {
-                                        if !isRecording {
-                                            startRecording()
-                                        }
-                                    } else {
-                                        if isRecording {
-                                            stopRecording()
-                                        }
-                                    }
-                                }, perform: {})
+            }
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        .overlay {
+            if showingBlockedAlert {
+                BlockedUserAlertOverlay(
+                    firstName: firstName(from: otherUserName),
+                    onDismiss: { dontShowAgain in
+                        if dontShowAgain {
+                            appState.suppressBlockedAlert(for: otherUserId)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                        .padding(.bottom, 80)
-                        .background(Color.clear)
-                     }
-                }
-             }
-         }
-         .navigationTitle(conversationTitle)
-         .navigationBarTitleDisplayMode(.inline)
-         .toolbarBackground(.hidden, for: .navigationBar)
-         .toolbarColorScheme(.dark, for: .navigationBar)
-         .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: {
-                        refreshMessagesOnly()
-                        // Restart the auto-refresh timer
-                        stopAutoRefresh()
-                        startAutoRefresh()
-                    }) {
-                        Image(systemName: "arrow.clockwise")
-                            .foregroundColor(.blue)
+                        showingBlockedAlert = false
                     }
-                }
-            
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("common.done".localized) {
-                    dismiss()
-                }
-            }
-            
-            // Keyboard toolbar with Send button
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button(action: {
-                    sendReply()
-                }) {
-                    if isSendingReply {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    } else {
-                        Text("messages.send".localized)
-                            .fontWeight(.semibold)
-                    }
-                }
-                .disabled(replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSendingReply)
-                .foregroundColor(replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .gray : .blue)
-            }
-        }
-        .safeAreaInset(edge: .top) {
-            HStack {
-                Button(action: {
-                    showingPreMessageOptions = true
-                }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "text.bubble")
-                            .font(.system(size: 14))
-                        Text("matches.pre.message.button".localized)
-                            .font(.subheadline)
-                    }
-                    .foregroundColor(.blue)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.blue.opacity(0.1))
-                    .cornerRadius(8)
-                }
-                Spacer()
-                Button("common.done".localized) {
-                    dismiss()
-                }
-                .font(.headline)
-                .foregroundColor(.blue)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 2)
-//                .background(.ultraThinMaterial)
-//                .clipShape(Capsule())
-//                .shadow(color: Color.black.opacity(0.2), radius: 4, x: 0, y: 2)
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 18)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !isLoadingMessages {
-                messageComposer
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 12)
-                    .background(.ultraThinMaterial)
+                )
             }
         }
         .onAppear {
@@ -1015,16 +955,14 @@ struct MessageConversationModal: View {
             print("💬 Message senderId: \(message.senderId), recipientId: \(message.recipientId)")
             print("💬 Modal appeared - conversationMessages count: \(conversationMessages.count)")
             
-            // Determine the other user's ID
-            let otherUserId = message.senderName == "You" ? message.recipientId : message.senderId
+            let otherUserId = otherUserId
             
-            // Set the currently open conversation ID immediately
             appState.currentlyOpenConversationSenderId = otherUserId
             print("💬 Set currentlyOpenConversationSenderId to: \(otherUserId) (from modal onAppear)")
             
-            // Store in Firestore so Cloud Function can check if conversation is open
             Task {
                 await updateConversationOpenStateInFirestore(userId: otherUserId, isOpen: true)
+                await checkBlockStatus()
             }
             
             loadConversationMessages()
@@ -1126,50 +1064,159 @@ struct MessageConversationModal: View {
         }
     }
     
-    private var messageComposer: some View {
-        HStack(spacing: 12) {
-            TextField("messages.type.something".localized, text: $replyText)
-                .focused($isTextFieldFocused)
-                .disabled(isSendingReply)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(Color(.systemGray6))
-                .cornerRadius(24)
+    private var conversationHeaderBar: some View {
+        HStack {
+            Button(action: {
+                showingPreMessageOptions = true
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "text.bubble")
+                        .font(.system(size: 14))
+                    Text("matches.pre.message.button".localized)
+                        .font(.subheadline)
+                }
+                .foregroundColor(.blue)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.blue.opacity(0.1))
+                .cornerRadius(8)
+            }
+            .disabled(isBlockedByRecipient)
+            .opacity(isBlockedByRecipient ? 0.5 : 1)
             
+            Spacer()
+            
+            Text(conversationTitle)
+                .font(.headline)
+                .lineLimit(1)
+            
+            Spacer()
+            
+            Button("common.done".localized) {
+                dismiss()
+            }
+            .font(.headline)
+            .foregroundColor(.blue)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+        .background(.ultraThinMaterial)
+    }
+    
+    private var hasComposerText: Bool {
+        !replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    
+    private var messageComposer: some View {
+        HStack(alignment: .bottom, spacing: 8) {
             Button(action: {
                 showingImagePicker = true
             }) {
-                Image(systemName: "folder")
-                    .font(.system(size: 20))
-                    .foregroundColor(.blue)
-                    .frame(width: 44, height: 44)
-                    .background(Color(.systemGray6))
-                    .clipShape(Circle())
+                Image(systemName: "plus")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundColor(.primary)
+                    .frame(width: 34, height: 34)
             }
+            .disabled(isBlockedByRecipient)
             
-            Circle()
-                .fill(Color(.systemGray6))
-                .frame(width: 44, height: 44)
-                .overlay(
-                    Image(systemName: isRecording ? "mic.fill" : "mic")
-                        .font(.system(size: 20))
-                        .foregroundColor(isRecording ? .red : .blue)
-                )
-                .overlay(
-                    Circle()
-                        .stroke(isRecording ? Color.red.opacity(0.4) : Color.clear, lineWidth: 2)
-                )
-                .onLongPressGesture(minimumDuration: 0.2, maximumDistance: 60, pressing: { pressing in
-                    if pressing {
-                        if !isRecording {
-                            startRecording()
-                        }
-                    } else {
-                        if isRecording {
-                            stopRecording()
+            TextField("messages.type.something".localized, text: $replyText, axis: .vertical)
+                .lineLimit(1...5)
+                .focused($isTextFieldFocused)
+                .disabled(isSendingReply || isBlockedByRecipient)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(minHeight: 38)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            
+            if hasComposerText {
+                Button(action: {
+                    sendReply()
+                }) {
+                    Group {
+                        if isSendingReply {
+                            ProgressView()
+                                .scaleEffect(0.85)
+                        } else {
+                            Image(systemName: "paperplane.fill")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(.white)
                         }
                     }
-                }, perform: {})
+                    .frame(width: 34, height: 34)
+                    .background(Color.green)
+                    .clipShape(Circle())
+                }
+                .disabled(isSendingReply || isBlockedByRecipient)
+            } else {
+                Button(action: {
+                    showingImagePicker = true
+                }) {
+                    Image(systemName: "camera")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(.primary)
+                        .frame(width: 34, height: 34)
+                }
+                .disabled(isBlockedByRecipient)
+                
+                microphoneButton
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .frame(maxWidth: .infinity)
+        .opacity(isBlockedByRecipient ? 0.5 : 1)
+    }
+    
+    private var microphoneButton: some View {
+        Image(systemName: isRecording ? "mic.fill" : "mic")
+            .font(.system(size: 20, weight: .medium))
+            .foregroundColor(isRecording ? .red : .primary)
+            .frame(width: 34, height: 34)
+            .overlay(
+                Circle()
+                    .stroke(isRecording ? Color.red.opacity(0.4) : Color.clear, lineWidth: 2)
+            )
+            .opacity(isBlockedByRecipient ? 0.5 : 1)
+            .allowsHitTesting(!isBlockedByRecipient)
+            .onLongPressGesture(minimumDuration: 0.2, maximumDistance: 60, pressing: { pressing in
+                if pressing {
+                    if !isRecording {
+                        startRecording()
+                    }
+                } else {
+                    if isRecording {
+                        stopRecording()
+                    }
+                }
+            }, perform: {})
+    }
+    
+    private func firstName(from fullName: String) -> String {
+        let components = fullName.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
+        return components.first.map(String.init) ?? fullName
+    }
+    
+    private func checkBlockStatus() async {
+        do {
+            let blocked = try await FirebaseAuthService.shared.isBlockedBy(userId: otherUserId)
+            print("🚫 Block status for \(otherUserId): blocked=\(blocked)")
+            await MainActor.run {
+                isBlockedByRecipient = blocked
+                if blocked {
+                    replyText = ""
+                    if appState.shouldShowBlockedAlert(for: otherUserId) {
+                        showingBlockedAlert = true
+                    }
+                    appState.refreshBlockedByUsers()
+                }
+            }
+        } catch {
+            print("⚠️ Unable to check block status for \(otherUserId): \(error.localizedDescription)")
         }
     }
     
@@ -1180,26 +1227,23 @@ struct MessageConversationModal: View {
         return formatter.string(from: time) ?? "0:00"
     }
     
+    private func scrollToBottomIfNeeded(proxy: ScrollViewProxy) {
+        guard shouldScrollToBottom, let lastMessage = conversationMessages.last else { return }
+        withAnimation(.easeInOut(duration: 0.3)) {
+            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+        }
+        shouldScrollToBottom = false
+    }
+    
     private func loadConversationMessages() {
         print("💬 MessageConversationModal: Loading conversation messages for: \(message.content)")
-        print("💬 MessageConversationModal: Current isLoadingMessages: \(isLoadingMessages)")
-        print("💬 MessageConversationModal: Current conversationMessages count: \(conversationMessages.count)")
         
-        // Determine the other user's ID
-        let otherUserId: String
-        if message.senderName == "You" {
-            otherUserId = message.recipientId
-        } else {
-            otherUserId = message.senderId
-        }
-        
-        print("💬 MessageConversationModal: Other user ID: \(otherUserId)")
-        
-        // Check cache first
+        // Check cache first — show only the latest page instantly
         if let cachedMessages = appState.getCachedConversationMessages(for: otherUserId) {
-            print("💬 MessageConversationModal: Using cached messages (\(cachedMessages.count) messages)")
+            let deduplicated = cachedMessages.deduplicatedConversationMessages()
+            print("💬 MessageConversationModal: Using cached messages (\(deduplicated.count) messages)")
+            
             Task {
-                // Mark all incoming messages from this user as read when conversation first opens
                 if !hasMarkedAsRead {
                     await appState.markMessagesAsRead(from: otherUserId)
                     await MainActor.run {
@@ -1208,11 +1252,13 @@ struct MessageConversationModal: View {
                 }
                 
                 await MainActor.run {
-                    conversationMessages = cachedMessages.deduplicatedConversationMessages()
+                    cachedMessagesPool = deduplicated
+                    conversationMessages = Array(deduplicated.suffix(conversationPageSize))
+                    hasMoreOlderMessages = deduplicated.count > conversationPageSize
                     isLoadingMessages = false
                     previousMessageCount = conversationMessages.count
+                    shouldScrollToBottom = true
                     
-                    // Fetch profile photos if needed
                     if currentUserProfilePhotoURL == nil || otherUserProfilePhotoURL == nil {
                         Task {
                             await fetchProfilePhotosIfNeeded(otherUserId: otherUserId)
@@ -1220,16 +1266,13 @@ struct MessageConversationModal: View {
                     }
                 }
                 
-                // Refresh from DB in background to get any new messages
                 await refreshConversationMessagesInBackground(otherUserId: otherUserId)
             }
             return
         }
         
-        // No cache available, fetch from DB
         Task {
             do {
-                // Mark all incoming messages from this user as read when conversation first opens
                 if !hasMarkedAsRead {
                     await appState.markMessagesAsRead(from: otherUserId)
                     await MainActor.run {
@@ -1237,50 +1280,95 @@ struct MessageConversationModal: View {
                     }
                 }
                 
-                print("💬 MessageConversationModal: Calling fetchConversationMessages...")
-                let messages = try await FirebaseAuthService.shared.fetchConversationMessages(with: otherUserId)
-                print("💬 MessageConversationModal: Received \(messages.count) messages from Firebase")
+                let page = try await FirebaseAuthService.shared.fetchConversationMessagesPage(
+                    with: otherUserId,
+                    limit: conversationPageSize
+                )
                 
-                // Cache the messages
-                appState.cacheConversationMessages(messages, for: otherUserId)
-                
-                // Fetch profile photos only once (not on every refresh)
                 if currentUserProfilePhotoURL == nil || otherUserProfilePhotoURL == nil {
-                    print("💬 MessageConversationModal: Fetching profile photos...")
                     await fetchProfilePhotosIfNeeded(otherUserId: otherUserId)
                 }
                 
                 await MainActor.run {
-                    // Ensure messages are sorted chronologically (oldest at top, newest at bottom)
-                    conversationMessages = messages.sorted { $0.createdAt < $1.createdAt }
+                    conversationMessages = page.messages
+                    cachedMessagesPool = page.messages
+                    hasMoreOlderMessages = page.hasMoreOlder
                     isLoadingMessages = false
-                    
-                    // Initialize previous message count after initial load
                     previousMessageCount = conversationMessages.count
-                    
-                    print("💬 MessageConversationModal: Conversation messages loaded and sorted:")
-                    print("💬 MessageConversationModal: Final conversationMessages count: \(conversationMessages.count)")
-                    for (index, msg) in conversationMessages.enumerated() {
-                        print("💬 \(index + 1). \(msg.senderName): \(msg.content) - \(msg.createdAt.formattedTimestamp())")
-                    }
+                    shouldScrollToBottom = true
+                    appState.cacheConversationMessages(conversationMessages, for: otherUserId)
                 }
             } catch {
                 print("❌ MessageConversationModal: Error loading conversation messages: \(error)")
                 await MainActor.run {
-                    // Ensure fallback message is also properly sorted
                     conversationMessages = [message].sorted { $0.createdAt < $1.createdAt }
+                    cachedMessagesPool = conversationMessages
+                    hasMoreOlderMessages = false
                     isLoadingMessages = false
-                    print("💬 MessageConversationModal: Using fallback message, isLoadingMessages set to false")
+                    shouldScrollToBottom = true
                 }
             }
         }
         
-        // Add a timeout to prevent infinite loading
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
             if isLoadingMessages {
                 print("⚠️ MessageConversationModal: Loading timeout reached, showing fallback")
                 conversationMessages = [message].sorted { $0.createdAt < $1.createdAt }
+                cachedMessagesPool = conversationMessages
+                hasMoreOlderMessages = false
                 isLoadingMessages = false
+                shouldScrollToBottom = true
+            }
+        }
+    }
+    
+    private func loadOlderMessagesIfNeeded() {
+        guard hasMoreOlderMessages, !isLoadingOlderMessages, !isLoadingMessages else { return }
+        isLoadingOlderMessages = true
+        
+        if let oldestVisible = conversationMessages.first,
+           let oldestIndex = cachedMessagesPool.firstIndex(where: { $0.deduplicationKey == oldestVisible.deduplicationKey }),
+           oldestIndex > 0 {
+            let startIndex = max(0, oldestIndex - conversationPageSize)
+            let olderMessages = Array(cachedMessagesPool[startIndex..<oldestIndex])
+            
+            conversationMessages = olderMessages + conversationMessages
+            hasMoreOlderMessages = startIndex > 0
+            isLoadingOlderMessages = false
+            appState.cacheConversationMessages(cachedMessagesPool, for: otherUserId)
+            return
+        }
+        
+        Task {
+            do {
+                let beforeDate = conversationMessages.first?.createdAt
+                let page = try await FirebaseAuthService.shared.fetchConversationMessagesPage(
+                    with: otherUserId,
+                    limit: conversationPageSize,
+                    before: beforeDate
+                )
+                
+                await MainActor.run {
+                    if page.messages.isEmpty {
+                        hasMoreOlderMessages = false
+                    } else {
+                        let existingKeys = Set(conversationMessages.map(\.deduplicationKey))
+                        let uniqueOlder = page.messages.filter { !existingKeys.contains($0.deduplicationKey) }
+                        conversationMessages = uniqueOlder + conversationMessages
+                        
+                        var mergedPool = uniqueOlder + cachedMessagesPool
+                        mergedPool = mergedPool.deduplicatedConversationMessages()
+                        cachedMessagesPool = mergedPool
+                        hasMoreOlderMessages = page.hasMoreOlder
+                        appState.cacheConversationMessages(cachedMessagesPool, for: otherUserId)
+                    }
+                    isLoadingOlderMessages = false
+                }
+            } catch {
+                print("❌ MessageConversationModal: Error loading older messages: \(error)")
+                await MainActor.run {
+                    isLoadingOlderMessages = false
+                }
             }
         }
     }
@@ -1312,49 +1400,60 @@ struct MessageConversationModal: View {
     }
     
     private func refreshConversationMessagesInBackground(otherUserId: String) async {
-            do {
-                print("💬 MessageConversationModal: Calling fetchConversationMessagesContentOnly...")
-                let messageContent = try await FirebaseAuthService.shared.fetchConversationMessagesContentOnly(with: otherUserId)
-                print("💬 MessageConversationModal: Received \(messageContent.count) message content from Firebase")
+        do {
+            let newestTimestamp = await MainActor.run {
+                conversationMessages.last?.createdAt ?? cachedMessagesPool.last?.createdAt
+            }
+            
+            if let newestTimestamp {
+                let newerMessages = try await FirebaseAuthService.shared.fetchConversationMessagesNewerThan(
+                    with: otherUserId,
+                    since: newestTimestamp
+                )
+                
+                guard !newerMessages.isEmpty else { return }
                 
                 await MainActor.run {
-                // Store previous count before update
-                let oldCount = conversationMessages.count
-                
-                    // Update only the message content, preserve existing MessageDisplay objects
-                    updateMessageContentOnly(with: messageContent)
-                
-                // Update cache with latest messages (replace to avoid stale duplicates)
-                appState.cacheConversationMessages(conversationMessages, for: otherUserId)
-                
-                // Check if new messages arrived (from the other user)
-                let newCount = conversationMessages.count
-                if newCount > oldCount {
-                    // Check if any of the new messages are from the other user (not "You")
-                    let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid ?? ""
-                    let hasNewIncomingMessage = conversationMessages.suffix(newCount - oldCount).contains { msg in
-                        msg.senderId != currentUserId
-                    }
+                    let oldCount = conversationMessages.count
+                    let existingKeys = Set(conversationMessages.map(\.deduplicationKey))
+                    let uniqueNew = newerMessages.filter { !existingKeys.contains($0.deduplicationKey) }
                     
+                    guard !uniqueNew.isEmpty else { return }
+                    
+                    conversationMessages.append(contentsOf: uniqueNew)
+                    cachedMessagesPool = (cachedMessagesPool + uniqueNew).deduplicatedConversationMessages()
+                    shouldScrollToBottom = true
+                    appState.cacheConversationMessages(cachedMessagesPool, for: otherUserId)
+                    
+                    let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid ?? ""
+                    let hasNewIncomingMessage = uniqueNew.contains { $0.senderId != currentUserId }
                     if hasNewIncomingMessage {
                         SoundService.shared.playNewMessageSound()
-                        print("🔊 Played new message sound for incoming message in conversation")
                         Task {
                             await appState.markMessagesAsRead(from: otherUserId)
                         }
                     }
-                }
-                
-                // Update previous count
-                previousMessageCount = newCount
                     
-                    print("💬 MessageConversationModal: Message content refreshed (profile photos unchanged)")
-                    print("💬 MessageConversationModal: Final conversationMessages count: \(conversationMessages.count)")
-                    print("💬 MessageConversationModal: Profile photos still cached - Current: \(currentUserProfilePhotoURL != nil), Other: \(otherUserProfilePhotoURL != nil)")
+                    previousMessageCount = oldCount + uniqueNew.count
                 }
-            } catch {
-                print("❌ MessageConversationModal: Error refreshing message content: \(error)")
+                return
             }
+            
+            let page = try await FirebaseAuthService.shared.fetchConversationMessagesPage(
+                with: otherUserId,
+                limit: conversationPageSize
+            )
+            
+            await MainActor.run {
+                conversationMessages = page.messages
+                cachedMessagesPool = page.messages
+                hasMoreOlderMessages = page.hasMoreOlder
+                appState.cacheConversationMessages(cachedMessagesPool, for: otherUserId)
+                previousMessageCount = conversationMessages.count
+            }
+        } catch {
+            print("❌ MessageConversationModal: Error refreshing message content: \(error)")
+        }
     }
     
     private func fetchProfilePhotosIfNeeded(otherUserId: String) async {
@@ -1432,20 +1531,21 @@ struct MessageConversationModal: View {
     }
     
     private func sendReply() {
+        guard !isBlockedByRecipient else { return }
         guard !replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
         isSendingReply = true
         let trimmedContent = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        updateConversationListAfterOutgoingMessage(content: trimmedContent, type: .text, voiceDuration: nil)
+        shouldScrollToBottom = true
         
         Task {
             do {
                 // Determine recipient ID based on message type
                 let recipientId: String
                 if message.senderName == "You" {
-                    // This is a sent message, so we're replying to the recipient
                     recipientId = message.recipientId
                 } else {
-                    // This is an incoming message, so we're replying to the sender
                     recipientId = message.senderId
                 }
                 
@@ -1456,18 +1556,11 @@ struct MessageConversationModal: View {
                 
                 print("✅ Reply sent successfully with ID: \(messageId)")
                 
-                    await MainActor.run {
-                        updateConversationListAfterOutgoingMessage(content: trimmedContent, type: .text, voiceDuration: nil)
-                        replyText = ""
-                        isSendingReply = false
-                        // Don't dismiss the modal - let user continue the conversation
-                        // Modal will only close when user taps "Done"
-                        
-                        // Update cache and refresh the conversation to show the new message
-                        let otherUserId = message.senderName == "You" ? message.recipientId : message.senderId
-                        // Refresh will update the cache automatically
-                        refreshMessagesOnly()
-                    }
+                await MainActor.run {
+                    replyText = ""
+                    isSendingReply = false
+                    refreshMessagesOnly()
+                }
                 
             } catch {
                 print("❌ Error sending reply: \(error)")
@@ -1479,6 +1572,7 @@ struct MessageConversationModal: View {
     }
     
     private func sendImageMessage(image: UIImage) {
+        guard !isBlockedByRecipient else { return }
         guard let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid else {
             print("❌ Cannot send image - user not authenticated")
             return
@@ -1532,6 +1626,7 @@ struct MessageConversationModal: View {
     }
     
     private func startRecording() {
+        guard !isBlockedByRecipient else { return }
         // Remove any existing preview and file before starting a new recording
         if showRecordingPreview {
             discardRecording()
@@ -1625,6 +1720,7 @@ struct MessageConversationModal: View {
     }
     
     private func sendVoiceMessage(audioURL: URL, duration: TimeInterval) {
+        guard !isBlockedByRecipient else { return }
         guard !isSendingVoice else { return }
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
             discardRecording()
@@ -1655,6 +1751,11 @@ struct MessageConversationModal: View {
                 await MainActor.run {
                     isSendingVoice = false
                     discardRecording()
+                    updateConversationListAfterOutgoingMessage(
+                        content: remoteURL,
+                        type: .voice,
+                        voiceDuration: duration
+                    )
                     refreshMessagesOnly()
                 }
             } catch {
@@ -1687,6 +1788,9 @@ struct MessageConversationModal: View {
             senderProfilePhotoURL: currentUserProfilePhotoURL,
             recipientProfilePhotoURL: otherUserProfilePhotoURL
         )
+        conversationMessages.append(messageDisplay)
+        cachedMessagesPool = (cachedMessagesPool + [messageDisplay]).deduplicatedConversationMessages()
+        appState.cacheConversationMessages(cachedMessagesPool, for: otherUserId)
         appState.updateConversationInCache(messageDisplay)
     }
 }

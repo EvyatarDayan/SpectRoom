@@ -129,6 +129,11 @@
 "profile.gender" = "Kön";
 "profile.no.one" = "ingen";
 "profile.nothing.specific" = "inget specifikt";
+"profile.block.title" = "Blockera denna profil";
+"profile.unblock.title" = "Avblockera denna profil";
+"profile.block.confirm.title" = "Är du säker?";
+"profile.block.confirm.message" = "%@ kommer inte att kunna se eller kommunicera med dig.";
+"profile.block.confirm.action" = "Blockera";
 
 // MARK: - Matches
 "matches.title" = "Matchningar";
@@ -177,6 +182,10 @@
 "messages.type.something" = "Skriv något...";
 "messages.conversation.with" = "Konversation med %@";
 "messages.no.messages.found" = "Inga meddelanden hittades";
+"messages.blocked.alert.title" = "%@ har blockerat dig.";
+"messages.blocked.alert.detail" = "Du kan fortfarande se tidigare meddelanden, men du kan inte skicka nya.";
+"messages.blocked.alert.dont.show.again" = "Visa inte igen";
+"messages.conversation.blocked" = "Blockerad";
 "messages.error.no.message" = "Fel: Inget meddelande valt";
 "messages.image.saved" = "Bild Sparad";
 "messages.image.saved.success" = "Bild sparad i ditt fotobibliotek";

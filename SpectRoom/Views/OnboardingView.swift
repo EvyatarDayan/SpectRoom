@@ -118,8 +118,6 @@ struct OnboardingView: View {
                 showingLanguageModal = true
             }) {
                 HStack(spacing: 6) {
-                    Image(systemName: "globe")
-                        .font(.headline)
                     Text(currentLanguageFlag)
                         .font(.headline)
                     Text(currentLanguageName)

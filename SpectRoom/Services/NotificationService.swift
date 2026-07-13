@@ -12,6 +12,12 @@ import UIKit
 class NotificationService: NSObject, ObservableObject {
     static let shared = NotificationService()
     
+    static func shouldSuppressForegroundMessageNotification(userInfo: [AnyHashable: Any]) -> Bool {
+        guard (userInfo["type"] as? String) == "message" else { return false }
+        let senderId = userInfo["senderId"] as? String ?? ""
+        return AppStateManager.shared.shouldSuppressMessageNotification(for: senderId)
+    }
+    
     private override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
@@ -26,6 +32,25 @@ class NotificationService: NSObject, ObservableObject {
     /// Check if notifications are enabled in app settings
     func areNotificationsEnabled() -> Bool {
         return UserDefaults.standard.bool(forKey: "notificationsEnabled")
+    }
+    
+    /// Update the app icon badge (home screen) with the total unread message count.
+    @MainActor
+    func setAppIconBadgeCount(_ count: Int) {
+        let badgeCount = max(0, count)
+        
+        if #available(iOS 16.0, *) {
+            UNUserNotificationCenter.current().setBadgeCount(badgeCount) { error in
+                if let error = error {
+                    print("❌ Failed to set app icon badge: \(error.localizedDescription)")
+                } else {
+                    print("📱 App icon badge set to \(badgeCount)")
+                }
+            }
+        } else {
+            UIApplication.shared.applicationIconBadgeNumber = badgeCount
+            print("📱 App icon badge set to \(badgeCount)")
+        }
     }
     
     /// Send a local push notification for a new match
@@ -66,7 +91,7 @@ class NotificationService: NSObject, ObservableObject {
     }
     
     /// Send a local push notification for a new message
-    func sendNewMessageNotification(senderName: String, messageContent: String, senderId: String) {
+    func sendNewMessageNotification(senderName: String, messageContent: String, senderId: String, badgeCount: Int) {
         guard areNotificationsEnabled() else {
             print("📱 Notifications disabled in settings, skipping push notification")
             return
@@ -83,7 +108,7 @@ class NotificationService: NSObject, ObservableObject {
             content.title = "New message from \(senderName)"
             content.body = messageContent.count > 50 ? String(messageContent.prefix(50)) + "..." : messageContent
             content.sound = .default
-            content.badge = NSNumber(value: UIApplication.shared.applicationIconBadgeNumber + 1)
+            content.badge = NSNumber(value: badgeCount)
             content.userInfo = ["type": "message", "senderId": senderId]
             
             // Schedule notification immediately
@@ -95,6 +120,9 @@ class NotificationService: NSObject, ObservableObject {
             
             do {
                 try await UNUserNotificationCenter.current().add(request)
+                await MainActor.run {
+                    setAppIconBadgeCount(badgeCount)
+                }
                 print("📱 Push notification sent for message from: \(senderName)")
             } catch {
                 print("❌ Failed to send message notification: \(error.localizedDescription)")
@@ -127,6 +155,13 @@ class NotificationService: NSObject, ObservableObject {
 extension NotificationService: UNUserNotificationCenterDelegate {
     // Handle notification when app is in foreground
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let userInfo = notification.request.content.userInfo
+        
+        if NotificationService.shouldSuppressForegroundMessageNotification(userInfo: userInfo) {
+            completionHandler([])
+            return
+        }
+        
         // Show notification even when app is in foreground
         completionHandler([.banner, .sound, .badge])
     }

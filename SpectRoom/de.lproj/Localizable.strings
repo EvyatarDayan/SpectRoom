@@ -129,6 +129,11 @@
 "profile.gender" = "Geschlecht";
 "profile.no.one" = "niemand";
 "profile.nothing.specific" = "nichts Bestimmtes";
+"profile.block.title" = "Dieses Profil blockieren";
+"profile.unblock.title" = "Dieses Profil entsperren";
+"profile.block.confirm.title" = "Bist du sicher?";
+"profile.block.confirm.message" = "%@ kann dich nicht mehr sehen oder mit dir kommunizieren.";
+"profile.block.confirm.action" = "Blockieren";
 
 // MARK: - Matches
 "matches.title" = "Matches";
@@ -177,6 +182,10 @@
 "messages.type.something" = "Etwas eingeben...";
 "messages.conversation.with" = "Unterhaltung mit %@";
 "messages.no.messages.found" = "Keine Nachrichten gefunden";
+"messages.blocked.alert.title" = "%@ hat dich blockiert.";
+"messages.blocked.alert.detail" = "Du kannst bisherige Nachrichten weiterhin ansehen, aber keine neuen senden.";
+"messages.blocked.alert.dont.show.again" = "Nicht mehr anzeigen";
+"messages.conversation.blocked" = "Blockiert";
 "messages.error.no.message" = "Fehler: Keine Nachricht ausgewählt";
 "messages.image.saved" = "Bild Gespeichert";
 "messages.image.saved.success" = "Bild in Ihrer Fotobibliothek gespeichert";

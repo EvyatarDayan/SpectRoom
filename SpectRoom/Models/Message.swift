@@ -167,6 +167,11 @@ extension Array where Element == MessageDisplay {
     }
 }
 
+struct ConversationMessagesPage {
+    let messages: [MessageDisplay]
+    let hasMoreOlder: Bool
+}
+
 extension Date {
     func timeAgoDisplay() -> String {
         let formatter = RelativeDateTimeFormatter()

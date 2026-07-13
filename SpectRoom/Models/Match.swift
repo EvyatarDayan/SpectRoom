@@ -135,5 +135,87 @@ struct ProfileCard {
     let idealFirstDate: [String]
     let shareIdealFirstDate: Bool
     let energyLevel: Int
+    let matchPercentage: Int
+    
+    init(
+        userId: String,
+        name: String,
+        age: Int,
+        bio: String,
+        interests: [String],
+        distance: String,
+        imageURL: String?,
+        gender: String,
+        interestedIn: [String],
+        lookingFor: [String],
+        photos: [String],
+        lifestyle: String,
+        shareLifestyle: Bool,
+        bodyType: String,
+        shareBodyType: Bool,
+        preferredAgeMin: Int,
+        preferredAgeMax: Int,
+        isOnline: Bool,
+        lastSeen: Date,
+        idealFirstDate: [String],
+        shareIdealFirstDate: Bool,
+        energyLevel: Int,
+        matchPercentage: Int = 0
+    ) {
+        self.userId = userId
+        self.name = name
+        self.age = age
+        self.bio = bio
+        self.interests = interests
+        self.distance = distance
+        self.imageURL = imageURL
+        self.gender = gender
+        self.interestedIn = interestedIn
+        self.lookingFor = lookingFor
+        self.photos = photos
+        self.lifestyle = lifestyle
+        self.shareLifestyle = shareLifestyle
+        self.bodyType = bodyType
+        self.shareBodyType = shareBodyType
+        self.preferredAgeMin = preferredAgeMin
+        self.preferredAgeMax = preferredAgeMax
+        self.isOnline = isOnline
+        self.lastSeen = lastSeen
+        self.idealFirstDate = idealFirstDate
+        self.shareIdealFirstDate = shareIdealFirstDate
+        self.energyLevel = energyLevel
+        self.matchPercentage = matchPercentage
+    }
+    
+    static func calculateMatchPercentage(
+        interests: [String],
+        age: Int,
+        gender: String,
+        currentUser: SpectRoomUser
+    ) -> Int {
+        var matchScore = 0
+        var totalFactors = 0
+        
+        let currentUserInterests = Set(currentUser.interests)
+        let profileInterests = Set(interests)
+        let commonInterests = currentUserInterests.intersection(profileInterests)
+        let interestsMatch = commonInterests.count > 0
+            ? Double(commonInterests.count) / Double(max(currentUserInterests.count, profileInterests.count))
+            : 0.0
+        matchScore += Int(interestsMatch * 40)
+        totalFactors += 40
+        
+        let ageDifference = abs(currentUser.age - age)
+        let ageMatch = max(0, 1.0 - Double(ageDifference) / 20.0)
+        matchScore += Int(ageMatch * 30)
+        totalFactors += 30
+        
+        let genderMatch = Set(currentUser.interestedIn).contains(gender) ? 1.0 : 0.0
+        matchScore += Int(genderMatch * 30)
+        totalFactors += 30
+        
+        let percentage = totalFactors > 0 ? Int((Double(matchScore) / Double(totalFactors)) * 100) : 0
+        return min(max(percentage, 15), 95)
+    }
 }
 

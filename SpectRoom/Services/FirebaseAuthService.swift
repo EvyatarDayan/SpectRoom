@@ -19,6 +19,7 @@ class FirebaseAuthService: ObservableObject {
     
     let auth = Auth.auth()
     private let db = Firestore.firestore()
+    private var matchesListener: ListenerRegistration?
     
     private init() {
         // Listen for authentication state changes
@@ -204,9 +205,31 @@ class FirebaseAuthService: ObservableObject {
                         let blockedAt = blockedAtInterval.map { Date(timeIntervalSince1970: $0) }
                         return BlockedUser(id: document.documentID, name: name, blockedAt: blockedAt)
                     }
+                    
+                    await syncBlockedByMirrors(
+                        for: userWithPhotos.blockedUsers,
+                        blockerName: userWithPhotos.name
+                    )
                 } catch {
                     userWithPhotos.blockedUsers = []
                     print("⚠️ Failed to load blocked users for \(userID): \(error.localizedDescription)")
+                }
+
+                do {
+                    let blockedBySnapshot = try await db.collection("users")
+                        .document(userID)
+                        .collection("blockedBy")
+                        .getDocuments()
+                    userWithPhotos.blockedByUsers = blockedBySnapshot.documents.compactMap { document in
+                        let data = document.data()
+                        let name = data["name"] as? String ?? "Unknown"
+                        let blockedAtInterval = data["blockedAt"] as? TimeInterval
+                        let blockedAt = blockedAtInterval.map { Date(timeIntervalSince1970: $0) }
+                        return BlockedUser(id: document.documentID, name: name, blockedAt: blockedAt)
+                    }
+                } catch {
+                    userWithPhotos.blockedByUsers = []
+                    print("⚠️ Failed to load blockedBy users for \(userID): \(error.localizedDescription)")
                 }
                 await MainActor.run {
                     self.currentUser = userWithPhotos
@@ -300,113 +323,168 @@ class FirebaseAuthService: ObservableObject {
         }
     }
     
-    // MARK: - Fetch All Users for Search
-    func fetchAllUsers() async throws -> [SpectRoomUser] {
-        print("🔍 Starting to fetch all users from database...")
-        let snapshot = try await db.collection("users").getDocuments()
-        print("🔍 Found \(snapshot.documents.count) total documents in users collection")
-        
-        var users: [SpectRoomUser] = []
+    // MARK: - Fetch Users for Search
+    
+    struct UsersPage {
+        let users: [SpectRoomUser]
+        let lastDocumentId: String?
+        let hasMore: Bool
+    }
+    
+    func fetchUsersPage(limit: Int = 15, startAfterDocumentId: String? = nil) async throws -> UsersPage {
         let currentUserID = auth.currentUser?.uid
-        print("🔍 Current user ID: \(currentUserID ?? "nil")")
         
-        for document in snapshot.documents {
-            let userData = document.data()
-            let documentID = document.documentID
-            print("🔍 Processing document ID: \(documentID)")
+        let snapshot: QuerySnapshot
+        do {
+            var query: Query = db.collection("users")
+                .order(by: FieldPath.documentID())
+                .limit(to: limit)
             
-            // Skip current user
-            if documentID == currentUserID {
-                print("🔍 Skipping current user: \(documentID)")
-                continue
+            if let startAfterDocumentId {
+                let previousDoc = try await db.collection("users").document(startAfterDocumentId).getDocument()
+                if previousDoc.exists {
+                    query = query.start(afterDocument: previousDoc)
+                }
             }
             
-            let userName = userData["name"] as? String ?? "Unknown"
-            let userEmail = userData["email"] as? String ?? "No email"
-            print("🔍 Adding user: \(userName) (\(userEmail))")
-            
-            // Parse location data
-            let locationData = userData["location"] as? [String: Any] ?? [:]
-            let lifestyle = userData["lifestyle"] as? String ?? ""
-            
-            let location = Location(
-                displayString: locationData["displayString"] as? String ?? "",
-                city: locationData["city"] as? String ?? "",
-                state: locationData["state"] as? String ?? "",
-                country: locationData["country"] as? String ?? "",
-                latitude: locationData["latitude"] as? Double,
-                longitude: locationData["longitude"] as? Double
-            )
-            
-            // Parse interests
-            let interests = userData["interests"] as? [String] ?? []
-            
-            // Parse gender and preferences
-            let gender = userData["gender"] as? String ?? ""
-            let interestedIn = userData["interestedIn"] as? [String] ?? []
-            let lookingFor = userData["lookingFor"] as? [String] ?? []
-            let preferredAgeMin = userData["preferredAgeMin"] as? Int ?? 18
-            let preferredAgeMax = userData["preferredAgeMax"] as? Int ?? 80
-            
-            // Parse date of birth
-            let dateOfBirth: Date?
-            if let timestamp = userData["dateOfBirth"] as? TimeInterval {
-                dateOfBirth = Date(timeIntervalSince1970: timestamp)
-            } else {
-                dateOfBirth = nil
-            }
-            
-            let shareLifestyle = userData["shareLifestyle"] as? Bool ?? false
-            let bodyType = userData["bodyType"] as? String ?? ""
-            let shareBodyType = userData["shareBodyType"] as? Bool ?? false
-            let idealFirstDate = userData["idealFirstDate"] as? [String] ?? []
-            let shareIdealFirstDate = userData["shareIdealFirstDate"] as? Bool ?? false
-            let energyLevel = userData["energyLevel"] as? Int ?? 2
-            
-            // Load isOnline and lastSeen from Firebase
-            let isOnline = userData["isOnline"] as? Bool ?? false
-            let lastSeenInterval = userData["lastSeen"] as? TimeInterval
-            let lastSeen = lastSeenInterval.map { Date(timeIntervalSince1970: $0) } ?? Date()
-            
-            let user = SpectRoomUser(
-                name: userData["name"] as? String ?? "",
-                age: userData["age"] as? Int ?? 0,
-                email: userData["email"] as? String ?? "",
-                bio: userData["bio"] as? String ?? "",
-                interests: interests,
-                location: location,
-                preferences: UserPreferences(),
-                gender: gender,
-                interestedIn: interestedIn,
-                lookingFor: lookingFor,
-                preferredAgeMin: preferredAgeMin,
-                preferredAgeMax: preferredAgeMax,
-                lifestyle: lifestyle,
-                shareLifestyle: shareLifestyle,
-                bodyType: bodyType,
-                shareBodyType: shareBodyType,
-                idealFirstDate: idealFirstDate,
-                shareIdealFirstDate: shareIdealFirstDate,
-                energyLevel: energyLevel
-            )
-            
-            // Set photos, profile photo, date of birth, and online status
-            var userWithPhotos = user
-            userWithPhotos.photos = userData["photos"] as? [String] ?? []
-            userWithPhotos.profilePhotoURL = userData["profilePhotoURL"] as? String
-            userWithPhotos.dateOfBirth = dateOfBirth
-            userWithPhotos.firebaseDocumentId = documentID // Set Firebase document ID
-            userWithPhotos.isOnline = isOnline
-            userWithPhotos.lastSeen = lastSeen
-            
-            users.append(userWithPhotos)
+            snapshot = try await query.getDocuments()
+        } catch {
+            print("⚠️ Paginated users fetch failed, falling back to full read: \(error.localizedDescription)")
+            snapshot = try await db.collection("users").getDocuments()
         }
         
-        print("🔍 Successfully fetched \(users.count) users from database")
-        for user in users {
-            print("🔍 User: \(user.name) (\(user.email))")
+        let users = snapshot.documents.compactMap { document in
+            parseSpectRoomUser(documentID: document.documentID, userData: document.data(), excludingUserId: currentUserID)
         }
+        
+        let lastDocumentId = snapshot.documents.last?.documentID
+        let hasMore = snapshot.documents.count == limit
+        
+        return UsersPage(users: users, lastDocumentId: lastDocumentId, hasMore: hasMore)
+    }
+    
+    func fetchUsers(byIds userIds: [String]) async throws -> [SpectRoomUser] {
+        guard !userIds.isEmpty else { return [] }
+        
+        let currentUserID = auth.currentUser?.uid
+        var users: [SpectRoomUser] = []
+        
+        var startIndex = userIds.startIndex
+        while startIndex < userIds.endIndex {
+            let endIndex = userIds.index(startIndex, offsetBy: 10, limitedBy: userIds.endIndex) ?? userIds.endIndex
+            let chunk = Array(userIds[startIndex..<endIndex])
+            let snapshot = try await db.collection("users")
+                .whereField(FieldPath.documentID(), in: chunk)
+                .getDocuments()
+            
+            for document in snapshot.documents {
+                if let user = parseSpectRoomUser(
+                    documentID: document.documentID,
+                    userData: document.data(),
+                    excludingUserId: currentUserID
+                ) {
+                    users.append(user)
+                }
+            }
+            
+            startIndex = endIndex
+        }
+        
         return users
+    }
+    
+    func fetchAllUsers() async throws -> [SpectRoomUser] {
+        var allUsers: [SpectRoomUser] = []
+        var cursor: String?
+        var hasMore = true
+        
+        while hasMore {
+            let page = try await fetchUsersPage(limit: 50, startAfterDocumentId: cursor)
+            allUsers.append(contentsOf: page.users)
+            cursor = page.lastDocumentId
+            hasMore = page.hasMore
+        }
+        
+        print("🔍 Fetched \(allUsers.count) users from database")
+        return allUsers
+    }
+    
+    private func parseSpectRoomUser(
+        documentID: String,
+        userData: [String: Any],
+        excludingUserId: String?
+    ) -> SpectRoomUser? {
+        if documentID == excludingUserId {
+            return nil
+        }
+        
+        let locationData = userData["location"] as? [String: Any] ?? [:]
+        let lifestyle = userData["lifestyle"] as? String ?? ""
+        
+        let location = Location(
+            displayString: locationData["displayString"] as? String ?? "",
+            city: locationData["city"] as? String ?? "",
+            state: locationData["state"] as? String ?? "",
+            country: locationData["country"] as? String ?? "",
+            latitude: locationData["latitude"] as? Double,
+            longitude: locationData["longitude"] as? Double
+        )
+        
+        let interests = userData["interests"] as? [String] ?? []
+        let gender = userData["gender"] as? String ?? ""
+        let interestedIn = userData["interestedIn"] as? [String] ?? []
+        let lookingFor = userData["lookingFor"] as? [String] ?? []
+        let preferredAgeMin = userData["preferredAgeMin"] as? Int ?? 18
+        let preferredAgeMax = userData["preferredAgeMax"] as? Int ?? 80
+        
+        let dateOfBirth: Date?
+        if let timestamp = userData["dateOfBirth"] as? TimeInterval {
+            dateOfBirth = Date(timeIntervalSince1970: timestamp)
+        } else {
+            dateOfBirth = nil
+        }
+        
+        let shareLifestyle = userData["shareLifestyle"] as? Bool ?? false
+        let bodyType = userData["bodyType"] as? String ?? ""
+        let shareBodyType = userData["shareBodyType"] as? Bool ?? false
+        let idealFirstDate = userData["idealFirstDate"] as? [String] ?? []
+        let shareIdealFirstDate = userData["shareIdealFirstDate"] as? Bool ?? false
+        let energyLevel = userData["energyLevel"] as? Int ?? 2
+        let isOnline = userData["isOnline"] as? Bool ?? false
+        let lastSeenInterval = userData["lastSeen"] as? TimeInterval
+        let lastSeen = lastSeenInterval.map { Date(timeIntervalSince1970: $0) } ?? Date()
+        
+        let user = SpectRoomUser(
+            name: userData["name"] as? String ?? "",
+            age: userData["age"] as? Int ?? 0,
+            email: userData["email"] as? String ?? "",
+            bio: userData["bio"] as? String ?? "",
+            interests: interests,
+            location: location,
+            preferences: UserPreferences(),
+            gender: gender,
+            interestedIn: interestedIn,
+            lookingFor: lookingFor,
+            preferredAgeMin: preferredAgeMin,
+            preferredAgeMax: preferredAgeMax,
+            lifestyle: lifestyle,
+            shareLifestyle: shareLifestyle,
+            bodyType: bodyType,
+            shareBodyType: shareBodyType,
+            idealFirstDate: idealFirstDate,
+            shareIdealFirstDate: shareIdealFirstDate,
+            energyLevel: energyLevel
+        )
+        
+        var userWithPhotos = user
+        userWithPhotos.photos = userData["photos"] as? [String] ?? []
+        userWithPhotos.profilePhotoURL = userData["profilePhotoURL"] as? String
+        userWithPhotos.dateOfBirth = dateOfBirth
+        userWithPhotos.firebaseDocumentId = documentID
+        userWithPhotos.isOnline = isOnline
+        userWithPhotos.lastSeen = lastSeen
+        
+        return userWithPhotos
     }
     
     // MARK: - Sync Photos from Storage
@@ -504,6 +582,47 @@ class FirebaseAuthService: ObservableObject {
     
     // MARK: - Blocked Users
     
+    private func blockedByMirrorData(blockerName: String, blockedAt: Date) -> [String: Any] {
+        [
+            "name": blockerName,
+            "blockedAt": blockedAt.timeIntervalSince1970
+        ]
+    }
+    
+    private func syncBlockedByMirror(blockedUserId: String, blockerName: String, blockedAt: Date) async throws {
+        guard let currentUserId = auth.currentUser?.uid else { return }
+        
+        try await db.collection("users")
+            .document(blockedUserId)
+            .collection("blockedBy")
+            .document(currentUserId)
+            .setData(blockedByMirrorData(blockerName: blockerName, blockedAt: blockedAt))
+    }
+    
+    private func removeBlockedByMirror(blockedUserId: String) async throws {
+        guard let currentUserId = auth.currentUser?.uid else { return }
+        
+        try await db.collection("users")
+            .document(blockedUserId)
+            .collection("blockedBy")
+            .document(currentUserId)
+            .delete()
+    }
+    
+    private func syncBlockedByMirrors(for blockedUsers: [BlockedUser], blockerName: String) async {
+        for blockedUser in blockedUsers {
+            do {
+                try await syncBlockedByMirror(
+                    blockedUserId: blockedUser.id,
+                    blockerName: blockerName,
+                    blockedAt: blockedUser.blockedAt ?? Date()
+                )
+            } catch {
+                print("⚠️ Failed to sync blockedBy mirror for \(blockedUser.id): \(error.localizedDescription)")
+            }
+        }
+    }
+    
     func blockUser(userId: String, name: String) async throws {
         guard let currentUserId = auth.currentUser?.uid else {
             throw NSError(
@@ -524,6 +643,9 @@ class FirebaseAuthService: ObservableObject {
             .collection("blockedUsers")
             .document(userId)
             .setData(data)
+        
+        let blockerName = await MainActor.run { self.currentUser?.name ?? "Someone" }
+        try await syncBlockedByMirror(blockedUserId: userId, blockerName: blockerName, blockedAt: blockedAt)
         
         await MainActor.run {
             if var current = self.currentUser,
@@ -549,11 +671,48 @@ class FirebaseAuthService: ObservableObject {
             .document(userId)
             .delete()
         
+        try await removeBlockedByMirror(blockedUserId: userId)
+        
         await MainActor.run {
             if var current = self.currentUser {
                 current.blockedUsers.removeAll { $0.id == userId }
                 self.currentUser = current
             }
+        }
+    }
+    
+    func isBlockedBy(userId otherUserId: String) async throws -> Bool {
+        guard let currentUserId = auth.currentUser?.uid else {
+            throw NSError(
+                domain: "FirebaseAuthService",
+                code: 401,
+                userInfo: [NSLocalizedDescriptionKey: "User not authenticated"]
+            )
+        }
+        
+        let document = try await db.collection("users")
+            .document(currentUserId)
+            .collection("blockedBy")
+            .document(otherUserId)
+            .getDocument()
+        
+        return document.exists
+    }
+    
+    func fetchBlockedByUsers() async throws -> [BlockedUser] {
+        guard let currentUserId = auth.currentUser?.uid else { return [] }
+        
+        let snapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("blockedBy")
+            .getDocuments()
+        
+        return snapshot.documents.compactMap { document in
+            let data = document.data()
+            let name = data["name"] as? String ?? "Unknown"
+            let blockedAtInterval = data["blockedAt"] as? TimeInterval
+            let blockedAt = blockedAtInterval.map { Date(timeIntervalSince1970: $0) }
+            return BlockedUser(id: document.documentID, name: name, blockedAt: blockedAt)
         }
     }
     
@@ -646,6 +805,64 @@ class FirebaseAuthService: ObservableObject {
         try await fetchSwipeFilterState(preferServer: preferServer).passedUserIds
     }
     
+    private func isPositiveSwipe(_ action: SwipeType?) -> Bool {
+        action == .like || action == .superLike
+    }
+    
+    private func latestSwipeAction(from fromUserId: String, to toUserId: String) async throws -> SwipeType? {
+        let snapshot = try await db.collection("users")
+            .document(fromUserId)
+            .collection("swipes")
+            .whereField("toUserId", isEqualTo: toUserId)
+            .getDocuments()
+        
+        var latestAction: String?
+        var latestCreatedAt: TimeInterval = 0
+        
+        for document in snapshot.documents {
+            let data = document.data()
+            guard let action = data["action"] as? String else { continue }
+            let createdAt = data["createdAt"] as? TimeInterval ?? 0
+            if createdAt >= latestCreatedAt {
+                latestCreatedAt = createdAt
+                latestAction = action
+            }
+        }
+        
+        guard let latestAction, let swipeType = SwipeType(rawValue: latestAction) else {
+            return nil
+        }
+        return swipeType
+    }
+    
+    func hasMutualLike(currentUserId: String, with otherUserId: String) async throws -> Bool {
+        async let currentUserActionTask = latestSwipeAction(from: currentUserId, to: otherUserId)
+        async let otherUserActionTask = latestSwipeAction(from: otherUserId, to: currentUserId)
+        
+        let currentUserAction = try await currentUserActionTask
+        let otherUserAction = try await otherUserActionTask
+        
+        let isMutual = isPositiveSwipe(currentUserAction) && isPositiveSwipe(otherUserAction)
+        print("💕 Mutual like check \(currentUserId) <-> \(otherUserId): current=\(currentUserAction?.rawValue ?? "none"), other=\(otherUserAction?.rawValue ?? "none"), mutual=\(isMutual)")
+        return isMutual
+    }
+    
+    func matchExists(with targetUserId: String) async throws -> Bool {
+        guard let currentUserId = auth.currentUser?.uid else { return false }
+        let matchId = matchDocumentId(for: currentUserId, and: targetUserId)
+        let snapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("matches")
+            .document(matchId)
+            .getDocument()
+        return snapshot.exists
+    }
+    
+    func matchDocumentId(for userId1: String, and userId2: String) -> String {
+        let sortedIds = [userId1, userId2].sorted()
+        return "\(sortedIds[0])_\(sortedIds[1])"
+    }
+    
     func checkForMatch(with targetUserId: String) async throws -> Bool {
         guard let currentUserId = auth.currentUser?.uid else {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
@@ -653,28 +870,25 @@ class FirebaseAuthService: ObservableObject {
         
         print("💕 Checking for match between \(currentUserId) and \(targetUserId)")
         
-        // Check if target user has swiped right on current user
-        let targetUserSwipesRef = db.collection("users").document(targetUserId).collection("swipes")
-        let targetUserSwipesSnapshot = try await targetUserSwipesRef.whereField("toUserId", isEqualTo: currentUserId).getDocuments()
-        
-        var targetUserLikedCurrentUser = false
-        for document in targetUserSwipesSnapshot.documents {
-            let data = document.data()
-            if let action = data["action"] as? String, action == SwipeType.like.rawValue {
-                targetUserLikedCurrentUser = true
-                break
-            }
+        guard try await hasMutualLike(currentUserId: currentUserId, with: targetUserId) else {
+            print("💕 No mutual like yet between \(currentUserId) and \(targetUserId)")
+            return false
         }
         
-        print("💕 Target user liked current user: \(targetUserLikedCurrentUser)")
+        let matchId = matchDocumentId(for: currentUserId, and: targetUserId)
+        let existingMatch = try await db.collection("users")
+            .document(currentUserId)
+            .collection("matches")
+            .document(matchId)
+            .getDocument()
         
-        if targetUserLikedCurrentUser {
-            // Create a match
-            try await createMatch(with: targetUserId)
+        if existingMatch.exists {
+            print("💕 Match already exists between \(currentUserId) and \(targetUserId)")
             return true
         }
         
-        return false
+        try await createMatch(with: targetUserId, matchId: matchId)
+        return true
     }
     
     func checkIfConversationExists(with userId: String) async throws -> Bool {
@@ -748,6 +962,27 @@ class FirebaseAuthService: ObservableObject {
         return unreadCount
     }
     
+    func fetchUnreadCountsBySender() async throws -> [String: Int] {
+        guard let currentUserId = auth.currentUser?.uid else {
+            throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let incomingSnapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("incomingMessages")
+            .getDocuments()
+        
+        var unreadCounts: [String: Int] = [:]
+        for document in incomingSnapshot.documents {
+            let data = document.data()
+            let isRead = data["isRead"] as? Bool ?? false
+            guard !isRead, let senderId = data["senderId"] as? String else { continue }
+            unreadCounts[senderId, default: 0] += 1
+        }
+        
+        return unreadCounts
+    }
+    
     func countUnreadMessagesFromUser(_ otherUserId: String) async throws -> Int {
         guard let currentUserId = auth.currentUser?.uid else {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
@@ -804,30 +1039,46 @@ class FirebaseAuthService: ObservableObject {
         print("💬 Marked messages as read from user: \(otherUserId)")
     }
     
-    private func createMatch(with targetUserId: String) async throws {
+    private func createMatch(with targetUserId: String, matchId: String) async throws {
         guard let currentUserId = auth.currentUser?.uid else {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
         
+        guard try await hasMutualLike(currentUserId: currentUserId, with: targetUserId) else {
+            print("💕 Skipping match creation - mutual like requirement not met")
+            return
+        }
+        
         print("💕 Creating match between \(currentUserId) and \(targetUserId)")
         
-        let matchId = UUID().uuidString
+        let sortedIds = [currentUserId, targetUserId].sorted()
         let matchData: [String: Any] = [
             "id": matchId,
-            "user1Id": currentUserId,
-            "user2Id": targetUserId,
+            "user1Id": sortedIds[0],
+            "user2Id": sortedIds[1],
             "matchedAt": Date().timeIntervalSince1970,
             "isActive": true,
             "lastMessageAt": NSNull(),
             "conversationId": UUID().uuidString
         ]
         
-        // Save match to both users' matches collections
         let currentUserMatchRef = db.collection("users").document(currentUserId).collection("matches").document(matchId)
         let targetUserMatchRef = db.collection("users").document(targetUserId).collection("matches").document(matchId)
         
-        try await currentUserMatchRef.setData(matchData)
-        try await targetUserMatchRef.setData(matchData)
+        let existingForCurrentUser = try await currentUserMatchRef.getDocument()
+        let existingForTargetUser = try await targetUserMatchRef.getDocument()
+        
+        if existingForCurrentUser.exists && existingForTargetUser.exists {
+            print("💕 Match document already exists for both users")
+            return
+        }
+        
+        if !existingForCurrentUser.exists {
+            try await currentUserMatchRef.setData(matchData)
+        }
+        if !existingForTargetUser.exists {
+            try await targetUserMatchRef.setData(matchData)
+        }
         
         print("✅ Match created successfully")
     }
@@ -965,17 +1216,24 @@ class FirebaseAuthService: ObservableObject {
         )
     }
     
+    func stopListeningForMatches() {
+        matchesListener?.remove()
+        matchesListener = nil
+        print("💕 Stopped listening for new matches")
+    }
+    
     func listenForNewMatches(completion: @escaping (MatchDisplay) -> Void) {
         guard let currentUserId = auth.currentUser?.uid else {
             print("❌ User not authenticated for match listening")
             return
         }
         
+        stopListeningForMatches()
         print("💕 Starting to listen for new matches for user: \(currentUserId)")
         
         let matchesRef = db.collection("users").document(currentUserId).collection("matches")
         
-        matchesRef.addSnapshotListener { snapshot, error in
+        matchesListener = matchesRef.addSnapshotListener { snapshot, error in
             if let error = error {
                 print("❌ Error listening for matches: \(error)")
                 return
@@ -1012,10 +1270,9 @@ class FirebaseAuthService: ObservableObject {
                     let timeDifference = Date().timeIntervalSince(matchTime)
                     print("💕 Match created \(timeDifference) seconds ago")
                     
-                    // Only trigger notification for recently created matches (within last 10 seconds)
-                    // This ensures we notify for newly created matches, not old ones when listener first starts
-                    guard timeDifference < 10.0 else {
-                        print("💕 Match is older than 10 seconds, skipping notification (likely initial listener setup)")
+                    // Only trigger notification for recently created matches (within last 30 seconds)
+                    guard timeDifference < 30.0 else {
+                        print("💕 Match is older than 30 seconds, skipping notification (likely initial listener setup)")
                         continue
                     }
                     
@@ -1043,7 +1300,7 @@ class FirebaseAuthService: ObservableObject {
         }
     }
     
-    func listenForNewMessages(completion: @escaping (String, String, String?, String) -> Void) {
+    func listenForNewMessages(completion: @escaping (String, String, String?, String, String, MessageType, TimeInterval?, Date, Bool) -> Void) {
         guard let currentUserId = auth.currentUser?.uid else {
             print("❌ User not authenticated for message listening")
             return
@@ -1105,19 +1362,57 @@ class FirebaseAuthService: ObservableObject {
                     let messageDocId = documentChange.document.documentID
                     print("💬 New message from sender: \(senderId), created \(timeDifference) seconds ago, document ID: \(messageDocId)")
                     
-                    // Fetch sender's profile information
+                    let content = data["content"] as? String ?? ""
+                    let typeString = data["type"] as? String ?? "text"
+                    let messageType = MessageType(rawValue: typeString) ?? .text
+                    let voiceDuration = data["voiceDuration"] as? TimeInterval
+                    
+                    DispatchQueue.main.async {
+                        completion(
+                            senderId,
+                            "",
+                            nil,
+                            messageDocId,
+                            content,
+                            messageType,
+                            voiceDuration,
+                            messageTime,
+                            false
+                        )
+                    }
+                    
+                    // Fetch sender's profile information for notifications
                     Task {
                         do {
                             let senderProfile = try await self.fetchUserProfile(for: senderId)
                             print("💬 Calling completion with sender: \(senderProfile.name)")
                             await MainActor.run {
-                                completion(senderId, senderProfile.name, senderProfile.imageURL, messageDocId)
+                                completion(
+                                    senderId,
+                                    senderProfile.name,
+                                    senderProfile.imageURL,
+                                    messageDocId,
+                                    content,
+                                    messageType,
+                                    voiceDuration,
+                                    messageTime,
+                                    true
+                                )
                             }
                         } catch {
                             print("❌ Error fetching sender profile for new message: \(error)")
-                            // Use sender ID as fallback name
                             await MainActor.run {
-                                completion(senderId, "Unknown User", nil, messageDocId)
+                                completion(
+                                    senderId,
+                                    "Unknown User",
+                                    nil,
+                                    messageDocId,
+                                    content,
+                                    messageType,
+                                    voiceDuration,
+                                    messageTime,
+                                    true
+                                )
                             }
                         }
                     }
@@ -1131,6 +1426,14 @@ class FirebaseAuthService: ObservableObject {
     func sendMessage(to recipientId: String, content: String) async throws -> String {
         guard let currentUserId = auth.currentUser?.uid else {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        if try await isBlockedBy(userId: recipientId) {
+            throw NSError(
+                domain: "FirebaseAuthService",
+                code: 403,
+                userInfo: [NSLocalizedDescriptionKey: "You have been blocked by this user"]
+            )
         }
         
         print("💬 Sending message from \(currentUserId) to \(recipientId)")
@@ -1167,6 +1470,14 @@ class FirebaseAuthService: ObservableObject {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
         
+        if try await isBlockedBy(userId: recipientId) {
+            throw NSError(
+                domain: "FirebaseAuthService",
+                code: 403,
+                userInfo: [NSLocalizedDescriptionKey: "You have been blocked by this user"]
+            )
+        }
+        
         print("💬 Sending image message from \(currentUserId) to \(recipientId)")
         
         let messageId = UUID().uuidString
@@ -1199,6 +1510,14 @@ class FirebaseAuthService: ObservableObject {
     func sendVoiceMessage(to recipientId: String, audioURL: String, duration: TimeInterval) async throws -> String {
         guard let currentUserId = auth.currentUser?.uid else {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        if try await isBlockedBy(userId: recipientId) {
+            throw NSError(
+                domain: "FirebaseAuthService",
+                code: 403,
+                userInfo: [NSLocalizedDescriptionKey: "You have been blocked by this user"]
+            )
         }
         
         print("🎙️ Sending voice message from \(currentUserId) to \(recipientId)")
@@ -1485,110 +1804,151 @@ class FirebaseAuthService: ObservableObject {
         return nil
     }
     
-    // Fetch all messages between current user and another user
-    func fetchConversationMessages(with otherUserId: String) async throws -> [MessageDisplay] {
+    // Fetch a page of conversation messages (newest first, returned oldest-first for display)
+    func fetchConversationMessagesPage(
+        with otherUserId: String,
+        limit: Int = 10,
+        before: Date? = nil
+    ) async throws -> ConversationMessagesPage {
         guard let currentUserId = auth.currentUser?.uid else {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
         
-        print("💬 Fetching conversation messages between \(currentUserId) and \(otherUserId)")
+        print("💬 Fetching conversation page (limit: \(limit), before: \(before?.formattedTimestamp() ?? "nil")) with \(otherUserId)")
         
-        var allMessages: [MessageDisplay] = []
+        async let otherUserNameTask = fetchSenderName(for: otherUserId)
+        async let otherUserPhotoTask = fetchUserProfilePhotoURL(for: otherUserId)
+        async let currentUserPhotoTask = fetchUserProfilePhotoURL(for: currentUserId)
+        async let sentDocsTask = fetchFilteredMessageDocuments(
+            collection: "sentMessages",
+            filterField: "recipientId",
+            filterValue: otherUserId,
+            userId: currentUserId,
+            limit: limit,
+            before: before
+        )
+        async let incomingDocsTask = fetchFilteredMessageDocuments(
+            collection: "incomingMessages",
+            filterField: "senderId",
+            filterValue: otherUserId,
+            userId: currentUserId,
+            limit: limit,
+            before: before
+        )
         
-        // Fetch sent messages to this user
-        let sentSnapshot = try await db.collection("users").document(currentUserId).collection("sentMessages").getDocuments()
-        for document in sentSnapshot.documents {
-            let data = document.data()
-            guard let content = data["content"] as? String,
-                  let senderId = data["senderId"] as? String,
-                  let recipientId = data["recipientId"] as? String,
-                  let createdAt = data["createdAt"] as? TimeInterval else { continue }
-            
-            // Only include messages to/from the other user
-            if (senderId == currentUserId && recipientId == otherUserId) {
-                let messageTypeString = data["type"] as? String ?? "text"
-                let messageType = MessageType(rawValue: messageTypeString) ?? .text
-                    let voiceDuration = data["voiceDuration"] as? TimeInterval
-                
-                let message = Message(
-                    conversationId: UUID(),
-                    senderId: UUID(uuidString: senderId) ?? UUID(),
-                    senderFirebaseId: senderId,
-                    content: content,
-                        createdAt: Date(timeIntervalSince1970: createdAt),
-                        type: messageType,
-                        voiceDuration: voiceDuration
-                )
-                
-                let recipientName = try await fetchRecipientName(for: recipientId)
-                let recipientProfilePhotoURL = try await fetchUserProfilePhotoURL(for: recipientId)
-                let messageDisplay = MessageDisplay(
-                    message: message,
-                    senderName: "You",
-                    recipientName: recipientName,
-                    senderId: senderId,
-                    recipientId: recipientId,
-                    senderProfilePhotoURL: nil, // Current user's profile photo not needed for sent messages
-                    recipientProfilePhotoURL: recipientProfilePhotoURL
-                )
-                
-                allMessages.append(messageDisplay)
+        let otherUserName = try await otherUserNameTask
+        let otherUserPhoto = try await otherUserPhotoTask
+        let currentUserPhoto = try await currentUserPhotoTask
+        let sentDocs = try await sentDocsTask
+        let incomingDocs = try await incomingDocsTask
+        
+        var merged: [(createdAt: TimeInterval, display: MessageDisplay)] = []
+        
+        for document in sentDocs {
+            if let display = messageDisplay(
+                from: document.data(),
+                currentUserId: currentUserId,
+                otherUserId: otherUserId,
+                otherUserName: otherUserName,
+                otherUserPhotoURL: otherUserPhoto,
+                currentUserPhotoURL: currentUserPhoto,
+                isOutgoing: true
+            ) {
+                merged.append((display.createdAt.timeIntervalSince1970, display))
             }
         }
         
-        // Fetch incoming messages from this user
-        let incomingSnapshot = try await db.collection("users").document(currentUserId).collection("incomingMessages").getDocuments()
-        for document in incomingSnapshot.documents {
-            let data = document.data()
-            guard let content = data["content"] as? String,
-                  let senderId = data["senderId"] as? String,
-                  let recipientId = data["recipientId"] as? String,
-                  let createdAt = data["createdAt"] as? TimeInterval else { continue }
-            
-            // Only include messages from/to the other user
-            if (senderId == otherUserId && recipientId == currentUserId) {
-                let messageTypeString = data["type"] as? String ?? "text"
-                let messageType = MessageType(rawValue: messageTypeString) ?? .text
-                let voiceDuration = data["voiceDuration"] as? TimeInterval
-                
-                let message = Message(
-                    conversationId: UUID(),
-                    senderId: UUID(uuidString: senderId) ?? UUID(),
-                    senderFirebaseId: senderId,
-                    content: content,
-                    createdAt: Date(timeIntervalSince1970: createdAt),
-                    type: messageType,
-                    voiceDuration: voiceDuration
-                )
-                
-                let senderName = try await fetchSenderName(for: senderId)
-                let senderProfilePhotoURL = try await fetchUserProfilePhotoURL(for: senderId)
-                let messageDisplay = MessageDisplay(
-                    message: message,
-                    senderName: senderName,
-                    recipientName: "You",
-                    senderId: senderId,
-                    recipientId: recipientId,
-                    senderProfilePhotoURL: senderProfilePhotoURL,
-                    recipientProfilePhotoURL: nil // Current user's profile photo not needed for incoming messages
-                )
-                
-                allMessages.append(messageDisplay)
+        for document in incomingDocs {
+            if let display = messageDisplay(
+                from: document.data(),
+                currentUserId: currentUserId,
+                otherUserId: otherUserId,
+                otherUserName: otherUserName,
+                otherUserPhotoURL: otherUserPhoto,
+                currentUserPhotoURL: currentUserPhoto,
+                isOutgoing: false
+            ) {
+                merged.append((display.createdAt.timeIntervalSince1970, display))
             }
         }
         
-        // Sort messages by creation date (oldest first, newest at bottom)
-        allMessages.sort { $0.createdAt < $1.createdAt }
+        merged.sort { $0.createdAt > $1.createdAt }
+        let pageMessages = Array(merged.prefix(limit)).map(\.display).sorted { $0.createdAt < $1.createdAt }
+        let hasMoreOlder = merged.count > limit || sentDocs.count == limit || incomingDocs.count == limit
         
-        print("💬 Message order after sorting:")
-        for (index, msg) in allMessages.enumerated() {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "dd MMM yyyy HH:mm"
-            print("💬 \(index + 1). \(msg.senderName): \(msg.content) - \(formatter.string(from: msg.createdAt))")
+        print("💬 Fetched conversation page: \(pageMessages.count) messages, hasMoreOlder: \(hasMoreOlder)")
+        return ConversationMessagesPage(messages: pageMessages, hasMoreOlder: hasMoreOlder)
+    }
+    
+    /// Fetch only messages newer than a timestamp (for lightweight refresh)
+    func fetchConversationMessagesNewerThan(with otherUserId: String, since: Date) async throws -> [MessageDisplay] {
+        guard let currentUserId = auth.currentUser?.uid else {
+            throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
         
-        print("💬 Fetched \(allMessages.count) conversation messages")
-        return allMessages
+        let sinceTimestamp = since.timeIntervalSince1970
+        
+        async let otherUserNameTask = fetchSenderName(for: otherUserId)
+        async let otherUserPhotoTask = fetchUserProfilePhotoURL(for: otherUserId)
+        async let currentUserPhotoTask = fetchUserProfilePhotoURL(for: currentUserId)
+        async let sentDocsTask = fetchFilteredMessageDocuments(
+            collection: "sentMessages",
+            filterField: "recipientId",
+            filterValue: otherUserId,
+            userId: currentUserId,
+            after: sinceTimestamp
+        )
+        async let incomingDocsTask = fetchFilteredMessageDocuments(
+            collection: "incomingMessages",
+            filterField: "senderId",
+            filterValue: otherUserId,
+            userId: currentUserId,
+            after: sinceTimestamp
+        )
+        
+        let otherUserName = try await otherUserNameTask
+        let otherUserPhoto = try await otherUserPhotoTask
+        let currentUserPhoto = try await currentUserPhotoTask
+        let sentDocs = try await sentDocsTask
+        let incomingDocs = try await incomingDocsTask
+        
+        var messages: [MessageDisplay] = []
+        
+        for document in sentDocs {
+            if let display = messageDisplay(
+                from: document.data(),
+                currentUserId: currentUserId,
+                otherUserId: otherUserId,
+                otherUserName: otherUserName,
+                otherUserPhotoURL: otherUserPhoto,
+                currentUserPhotoURL: currentUserPhoto,
+                isOutgoing: true
+            ) {
+                messages.append(display)
+            }
+        }
+        
+        for document in incomingDocs {
+            if let display = messageDisplay(
+                from: document.data(),
+                currentUserId: currentUserId,
+                otherUserId: otherUserId,
+                otherUserName: otherUserName,
+                otherUserPhotoURL: otherUserPhoto,
+                currentUserPhotoURL: currentUserPhoto,
+                isOutgoing: false
+            ) {
+                messages.append(display)
+            }
+        }
+        
+        return messages.sorted { $0.createdAt < $1.createdAt }
+    }
+    
+    // Fetch all messages between current user and another user (legacy — prefer paginated API)
+    func fetchConversationMessages(with otherUserId: String) async throws -> [MessageDisplay] {
+        let page = try await fetchConversationMessagesPage(with: otherUserId, limit: 10)
+        return page.messages
     }
     
     // Fetch only message content without profile photos (for auto-refresh)
@@ -1597,70 +1957,35 @@ class FirebaseAuthService: ObservableObject {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
         
-        print("💬 Fetching conversation message content only between \(currentUserId) and \(otherUserId)")
+        print("💬 Fetching recent conversation message content only with \(otherUserId)")
+        
+        async let sentDocsTask = fetchFilteredMessageDocuments(
+            collection: "sentMessages",
+            filterField: "recipientId",
+            filterValue: otherUserId,
+            userId: currentUserId,
+            limit: 20
+        )
+        async let incomingDocsTask = fetchFilteredMessageDocuments(
+            collection: "incomingMessages",
+            filterField: "senderId",
+            filterValue: otherUserId,
+            userId: currentUserId,
+            limit: 20
+        )
+        
+        let sentDocs = try await sentDocsTask
+        let incomingDocs = try await incomingDocsTask
         
         var allMessages: [Message] = []
         
-        // Fetch sent messages to this user
-        let sentSnapshot = try await db.collection("users").document(currentUserId).collection("sentMessages").getDocuments()
-        for document in sentSnapshot.documents {
-            let data = document.data()
-            guard let content = data["content"] as? String,
-                  let senderId = data["senderId"] as? String,
-                  let recipientId = data["recipientId"] as? String,
-                  let createdAt = data["createdAt"] as? TimeInterval else { continue }
-            
-            // Only include messages to/from the other user
-            if (senderId == currentUserId && recipientId == otherUserId) {
-                let messageTypeString = data["type"] as? String ?? "text"
-                let messageType = MessageType(rawValue: messageTypeString) ?? .text
-                
-                let message = Message(
-                    conversationId: UUID(),
-                    senderId: UUID(uuidString: senderId) ?? UUID(),
-                    senderFirebaseId: senderId,
-                    content: content,
-                    createdAt: Date(timeIntervalSince1970: createdAt),
-                    type: messageType
-                )
-                
+        for document in sentDocs + incomingDocs {
+            if let message = messageFromDocument(document.data()) {
                 allMessages.append(message)
             }
         }
         
-        // Fetch incoming messages from this user
-        let incomingSnapshot = try await db.collection("users").document(currentUserId).collection("incomingMessages").getDocuments()
-        for document in incomingSnapshot.documents {
-            let data = document.data()
-            guard let content = data["content"] as? String,
-                  let senderId = data["senderId"] as? String,
-                  let recipientId = data["recipientId"] as? String,
-                  let createdAt = data["createdAt"] as? TimeInterval else { continue }
-            
-            // Only include messages from/to the other user
-            if (senderId == otherUserId && recipientId == currentUserId) {
-                let messageTypeString = data["type"] as? String ?? "text"
-                let messageType = MessageType(rawValue: messageTypeString) ?? .text
-                
-                let message = Message(
-                    conversationId: UUID(),
-                    senderId: UUID(uuidString: senderId) ?? UUID(),
-                    senderFirebaseId: senderId,
-                    content: content,
-                    createdAt: Date(timeIntervalSince1970: createdAt),
-                    type: messageType,
-                    voiceDuration: data["voiceDuration"] as? TimeInterval
-                )
-                
-                allMessages.append(message)
-            }
-        }
-        
-        // Sort messages chronologically (oldest first, newest last)
-        allMessages.sort { $0.createdAt < $1.createdAt }
-        
-        print("💬 Fetched \(allMessages.count) conversation message content only")
-        return allMessages
+        return allMessages.sorted { $0.createdAt < $1.createdAt }
     }
     
     // Get latest message from each user (for conversation list)
@@ -1671,33 +1996,297 @@ class FirebaseAuthService: ObservableObject {
         
         print("💬 Fetching latest messages from each user...")
         
-        var userLatestMessages: [String: MessageDisplay] = [:]
-        var sentMessageCount = 0
-        var incomingMessageCount = 0
+        let recentLimit = 100
         
-        // Fetch sent messages
-        let sentSnapshot = try await db.collection("users").document(currentUserId).collection("sentMessages").getDocuments()
+        async let sentSnapshotTask = db.collection("users")
+            .document(currentUserId)
+            .collection("sentMessages")
+            .order(by: "createdAt", descending: true)
+            .limit(to: recentLimit)
+            .getDocuments()
+        async let incomingSnapshotTask = db.collection("users")
+            .document(currentUserId)
+            .collection("incomingMessages")
+            .order(by: "createdAt", descending: true)
+            .limit(to: recentLimit)
+            .getDocuments()
+        
+        let sentSnapshot = try await sentSnapshotTask
+        let incomingSnapshot = try await incomingSnapshotTask
+        
+        struct LatestCandidate {
+            let otherUserId: String
+            let data: [String: Any]
+            let createdAt: TimeInterval
+            let isOutgoing: Bool
+        }
+        
+        var latestByUser: [String: LatestCandidate] = [:]
+        
         for document in sentSnapshot.documents {
             let data = document.data()
-            guard let content = data["content"] as? String,
-                  let senderId = data["senderId"] as? String,
-                  let recipientId = data["recipientId"] as? String,
+            guard let recipientId = data["recipientId"] as? String,
                   let createdAt = data["createdAt"] as? TimeInterval else { continue }
             
-            let messageTypeString = data["type"] as? String ?? "text"
-            let messageType = MessageType(rawValue: messageTypeString) ?? .text
-            let voiceDuration = data["voiceDuration"] as? TimeInterval
+            if let existing = latestByUser[recipientId], existing.createdAt >= createdAt {
+                continue
+            }
             
-            let message = Message(
-                conversationId: UUID(),
-                senderId: UUID(uuidString: senderId) ?? UUID(),
-                senderFirebaseId: senderId,
-                content: content,
-                createdAt: Date(timeIntervalSince1970: createdAt),
-                type: messageType,
-                voiceDuration: voiceDuration
+            latestByUser[recipientId] = LatestCandidate(
+                otherUserId: recipientId,
+                data: data,
+                createdAt: createdAt,
+                isOutgoing: true
             )
+        }
+        
+        for document in incomingSnapshot.documents {
+            let data = document.data()
+            guard let senderId = data["senderId"] as? String,
+                  let createdAt = data["createdAt"] as? TimeInterval else { continue }
             
+            if let existing = latestByUser[senderId], existing.createdAt >= createdAt {
+                continue
+            }
+            
+            latestByUser[senderId] = LatestCandidate(
+                otherUserId: senderId,
+                data: data,
+                createdAt: createdAt,
+                isOutgoing: false
+            )
+        }
+        
+        let profiles = await fetchUserSummaries(for: Array(latestByUser.keys))
+        
+        var latestMessages: [MessageDisplay] = []
+        for candidate in latestByUser.values {
+            let summary = profiles[candidate.otherUserId]
+            let otherName = summary?.name ?? "Unknown User"
+            let otherPhoto = summary?.photoURL
+            
+            if let display = messageDisplay(
+                from: candidate.data,
+                currentUserId: currentUserId,
+                otherUserId: candidate.otherUserId,
+                otherUserName: otherName,
+                otherUserPhotoURL: otherPhoto,
+                currentUserPhotoURL: nil,
+                isOutgoing: candidate.isOutgoing
+            ) {
+                latestMessages.append(display)
+            }
+        }
+        
+        latestMessages.sort { $0.createdAt > $1.createdAt }
+        
+        print("💬 Final result: \(latestMessages.count) unique conversations")
+        return latestMessages
+    }
+    
+    func fetchLatestMessageForConversation(with otherUserId: String) async throws -> MessageDisplay? {
+        guard let currentUserId = auth.currentUser?.uid else {
+            throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let sentSnapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("sentMessages")
+            .whereField("recipientId", isEqualTo: otherUserId)
+            .order(by: "createdAt", descending: true)
+            .limit(to: 1)
+            .getDocuments()
+        
+        let incomingSnapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("incomingMessages")
+            .whereField("senderId", isEqualTo: otherUserId)
+            .order(by: "createdAt", descending: true)
+            .limit(to: 1)
+            .getDocuments()
+        
+        var sentMessage: MessageDisplay?
+        if let document = sentSnapshot.documents.first,
+           let candidate = try await conversationCandidate(
+            from: document.data(),
+            currentUserId: currentUserId,
+            isOutgoing: true
+           ) {
+            sentMessage = candidate.message
+        }
+        
+        var incomingMessage: MessageDisplay?
+        if let document = incomingSnapshot.documents.first,
+           let candidate = try await conversationCandidate(
+            from: document.data(),
+            currentUserId: currentUserId,
+            isOutgoing: false
+           ) {
+            incomingMessage = candidate.message
+        }
+        
+        switch (sentMessage, incomingMessage) {
+        case (nil, nil):
+            return nil
+        case (let sent?, nil):
+            return sent
+        case (nil, let incoming?):
+            return incoming
+        case (let sent?, let incoming?):
+            return sent.createdAt >= incoming.createdAt ? sent : incoming
+        }
+    }
+    
+    private func fetchFilteredMessageDocuments(
+        collection: String,
+        filterField: String,
+        filterValue: String,
+        userId: String,
+        limit: Int? = nil,
+        before: Date? = nil,
+        after: TimeInterval? = nil
+    ) async throws -> [QueryDocumentSnapshot] {
+        var query: Query = db.collection("users")
+            .document(userId)
+            .collection(collection)
+            .whereField(filterField, isEqualTo: filterValue)
+        
+        if let after {
+            query = query
+                .whereField("createdAt", isGreaterThan: after)
+                .order(by: "createdAt", descending: false)
+        } else if let before {
+            query = query
+                .whereField("createdAt", isLessThan: before.timeIntervalSince1970)
+                .order(by: "createdAt", descending: true)
+        } else {
+            query = query.order(by: "createdAt", descending: true)
+        }
+        
+        if let limit {
+            query = query.limit(to: limit)
+        }
+        
+        let snapshot = try await query.getDocuments()
+        return snapshot.documents
+    }
+    
+    private func messageFromDocument(_ data: [String: Any]) -> Message? {
+        guard let content = data["content"] as? String,
+              let senderId = data["senderId"] as? String,
+              let createdAt = data["createdAt"] as? TimeInterval else {
+            return nil
+        }
+        
+        let messageTypeString = data["type"] as? String ?? "text"
+        let messageType = MessageType(rawValue: messageTypeString) ?? .text
+        let voiceDuration = data["voiceDuration"] as? TimeInterval
+        
+        return Message(
+            conversationId: UUID(),
+            senderId: UUID(uuidString: senderId) ?? UUID(),
+            senderFirebaseId: senderId,
+            content: content,
+            createdAt: Date(timeIntervalSince1970: createdAt),
+            type: messageType,
+            voiceDuration: voiceDuration
+        )
+    }
+    
+    private func messageDisplay(
+        from data: [String: Any],
+        currentUserId: String,
+        otherUserId: String,
+        otherUserName: String,
+        otherUserPhotoURL: String?,
+        currentUserPhotoURL: String?,
+        isOutgoing: Bool
+    ) -> MessageDisplay? {
+        guard let message = messageFromDocument(data) else { return nil }
+        
+        if isOutgoing {
+            return MessageDisplay(
+                message: message,
+                senderName: "You",
+                recipientName: otherUserName,
+                senderId: currentUserId,
+                recipientId: otherUserId,
+                senderProfilePhotoURL: currentUserPhotoURL,
+                recipientProfilePhotoURL: otherUserPhotoURL
+            )
+        }
+        
+        return MessageDisplay(
+            message: message,
+            senderName: otherUserName,
+            recipientName: "You",
+            senderId: otherUserId,
+            recipientId: currentUserId,
+            senderProfilePhotoURL: otherUserPhotoURL,
+            recipientProfilePhotoURL: currentUserPhotoURL
+        )
+    }
+    
+    private struct UserSummary {
+        let name: String
+        let photoURL: String?
+    }
+    
+    private func fetchUserSummaries(for userIds: [String]) async -> [String: UserSummary] {
+        guard !userIds.isEmpty else { return [:] }
+        
+        var summaries: [String: UserSummary] = [:]
+        
+        await withTaskGroup(of: (String, UserSummary?).self) { group in
+            for userId in userIds {
+                group.addTask {
+                    do {
+                        let name = try await self.fetchSenderName(for: userId)
+                        let photoURL = try await self.fetchUserProfilePhotoURL(for: userId)
+                        return (userId, UserSummary(name: name, photoURL: photoURL))
+                    } catch {
+                        return (userId, nil)
+                    }
+                }
+            }
+            
+            for await (userId, summary) in group {
+                if let summary {
+                    summaries[userId] = summary
+                }
+            }
+        }
+        
+        return summaries
+    }
+    
+    private func conversationCandidate(
+        from data: [String: Any],
+        currentUserId: String,
+        isOutgoing: Bool
+    ) async throws -> (otherUserId: String, message: MessageDisplay, createdAt: TimeInterval)? {
+        guard let content = data["content"] as? String,
+              let senderId = data["senderId"] as? String,
+              let recipientId = data["recipientId"] as? String,
+              let createdAt = data["createdAt"] as? TimeInterval else {
+            return nil
+        }
+        
+        let messageTypeString = data["type"] as? String ?? "text"
+        let messageType = MessageType(rawValue: messageTypeString) ?? .text
+        let voiceDuration = data["voiceDuration"] as? TimeInterval
+        
+        let message = Message(
+            conversationId: UUID(),
+            senderId: UUID(uuidString: senderId) ?? UUID(),
+            senderFirebaseId: senderId,
+            content: content,
+            createdAt: Date(timeIntervalSince1970: createdAt),
+            type: messageType,
+            voiceDuration: voiceDuration
+        )
+        
+        if isOutgoing {
             let recipientName = try await fetchRecipientName(for: recipientId)
             let recipientProfilePhotoURL = try await fetchUserProfilePhotoURL(for: recipientId)
             let messageDisplay = MessageDisplay(
@@ -1709,48 +2298,8 @@ class FirebaseAuthService: ObservableObject {
                 senderProfilePhotoURL: nil,
                 recipientProfilePhotoURL: recipientProfilePhotoURL
             )
-            
-            // Use recipientId as key (the other user in the conversation)
-            sentMessageCount += 1
-            print("💬 Processing sent message \(sentMessageCount): to \(recipientId), content: \(content.prefix(20))...")
-            
-            if let existingMessage = userLatestMessages[recipientId] {
-                print("💬 Found existing message for \(recipientId), comparing timestamps: new=\(messageDisplay.createdAt), existing=\(existingMessage.createdAt)")
-                if messageDisplay.createdAt > existingMessage.createdAt {
-                    userLatestMessages[recipientId] = messageDisplay
-                    print("💬 Updated message for \(recipientId) with newer message")
-                } else {
-                    print("💬 Kept existing message for \(recipientId) (older message)")
-                }
-            } else {
-                userLatestMessages[recipientId] = messageDisplay
-                print("💬 Added new message for \(recipientId)")
-            }
-        }
-        
-        // Fetch incoming messages
-        let incomingSnapshot = try await db.collection("users").document(currentUserId).collection("incomingMessages").getDocuments()
-        for document in incomingSnapshot.documents {
-            let data = document.data()
-            guard let content = data["content"] as? String,
-                  let senderId = data["senderId"] as? String,
-                  let recipientId = data["recipientId"] as? String,
-                  let createdAt = data["createdAt"] as? TimeInterval else { continue }
-            
-            let messageTypeString = data["type"] as? String ?? "text"
-            let messageType = MessageType(rawValue: messageTypeString) ?? .text
-                let voiceDuration = data["voiceDuration"] as? TimeInterval
-            
-            let message = Message(
-                conversationId: UUID(),
-                senderId: UUID(uuidString: senderId) ?? UUID(),
-                senderFirebaseId: senderId,
-                content: content,
-                    createdAt: Date(timeIntervalSince1970: createdAt),
-                    type: messageType,
-                    voiceDuration: voiceDuration
-            )
-            
+            return (recipientId, messageDisplay, createdAt)
+        } else {
             let senderName = try await fetchSenderName(for: senderId)
             let senderProfilePhotoURL = try await fetchUserProfilePhotoURL(for: senderId)
             let messageDisplay = MessageDisplay(
@@ -1762,36 +2311,8 @@ class FirebaseAuthService: ObservableObject {
                 senderProfilePhotoURL: senderProfilePhotoURL,
                 recipientProfilePhotoURL: nil
             )
-            
-            // Use senderId as key (the other user in the conversation)
-            incomingMessageCount += 1
-            print("💬 Processing incoming message \(incomingMessageCount): from \(senderId), content: \(content.prefix(20))...")
-            
-            if let existingMessage = userLatestMessages[senderId] {
-                print("💬 Found existing message for \(senderId), comparing timestamps: new=\(messageDisplay.createdAt), existing=\(existingMessage.createdAt)")
-                if messageDisplay.createdAt > existingMessage.createdAt {
-                    userLatestMessages[senderId] = messageDisplay
-                    print("💬 Updated message for \(senderId) with newer message")
-                } else {
-                    print("💬 Kept existing message for \(senderId) (older message)")
-                }
-            } else {
-                userLatestMessages[senderId] = messageDisplay
-                print("💬 Added new message for \(senderId)")
-            }
+            return (senderId, messageDisplay, createdAt)
         }
-        
-        // Convert to array and sort by latest message time
-        let latestMessages = Array(userLatestMessages.values)
-            .sorted { $0.createdAt > $1.createdAt }
-        
-        print("💬 Summary: Processed \(sentMessageCount) sent messages, \(incomingMessageCount) incoming messages")
-        print("💬 Final result: \(latestMessages.count) unique conversations")
-        for (index, message) in latestMessages.enumerated() {
-            print("💬 Conversation \(index + 1): \(message.senderName) -> \(message.recipientName), content: \(message.content.prefix(30))...")
-        }
-        
-        return latestMessages
     }
     
     // Get latest sent message to each user
@@ -1978,9 +2499,7 @@ class FirebaseAuthService: ObservableObject {
         try await resetPassSwipesToNew()
     }
     
-    /// Delete all matches for the current user
-    /// Note: This only deletes matches from the current user's collection
-    /// The other user's match record will still exist
+    /// Delete all matches for the current user and the other user in each match pair.
     func deleteAllMatches() async throws {
         guard let currentUserId = auth.currentUser?.uid else {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
@@ -1991,13 +2510,32 @@ class FirebaseAuthService: ObservableObject {
         let matchesRef = db.collection("users").document(currentUserId).collection("matches")
         let snapshot = try await matchesRef.getDocuments()
         
-        let batch = db.batch()
+        var deletedCount = 0
+        
         for document in snapshot.documents {
-            batch.deleteDocument(document.reference)
+            let data = document.data()
+            let matchId = document.documentID
+            let user1Id = data["user1Id"] as? String
+            let user2Id = data["user2Id"] as? String
+            
+            var refsToDelete = [document.reference]
+            
+            if let user1Id, let user2Id {
+                let otherUserId = user1Id == currentUserId ? user2Id : user1Id
+                let otherRef = db.collection("users")
+                    .document(otherUserId)
+                    .collection("matches")
+                    .document(matchId)
+                refsToDelete.append(otherRef)
+            }
+            
+            let batch = db.batch()
+            refsToDelete.forEach { batch.deleteDocument($0) }
+            try await batch.commit()
+            deletedCount += 1
         }
         
-        try await batch.commit()
-        print("✅ Deleted \(snapshot.documents.count) matches")
+        print("✅ Deleted \(deletedCount) match pair(s)")
     }
     
     /// Delete all messages for the current user (both incoming and sent)

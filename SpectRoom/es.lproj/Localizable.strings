@@ -129,6 +129,11 @@
 "profile.gender" = "Género";
 "profile.no.one" = "nadie";
 "profile.nothing.specific" = "nada específico";
+"profile.block.title" = "Bloquear este perfil";
+"profile.unblock.title" = "Desbloquear este perfil";
+"profile.block.confirm.title" = "¿Estás seguro?";
+"profile.block.confirm.message" = "%@ no podrá verte ni comunicarse contigo.";
+"profile.block.confirm.action" = "Bloquear";
 
 // MARK: - Matches
 "matches.title" = "Coincidencias";
@@ -177,6 +182,10 @@
 "messages.type.something" = "Escribe algo...";
 "messages.conversation.with" = "Conversación con %@";
 "messages.no.messages.found" = "No se encontraron mensajes";
+"messages.blocked.alert.title" = "%@ te ha bloqueado.";
+"messages.blocked.alert.detail" = "Aún puedes ver los mensajes anteriores, pero no puedes enviar nuevos.";
+"messages.blocked.alert.dont.show.again" = "No volver a mostrar";
+"messages.conversation.blocked" = "Bloqueado";
 "messages.error.no.message" = "Error: No se seleccionó ningún mensaje";
 "messages.image.saved" = "Imagen Guardada";
 "messages.image.saved.success" = "Imagen guardada en tu biblioteca de fotos";

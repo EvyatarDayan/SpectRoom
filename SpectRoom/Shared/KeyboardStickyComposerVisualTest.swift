@@ -3,151 +3,146 @@
 //  SpectRoom
 //
 //  Launch with argument: -KeyboardComposerVisualTest
-//  Posts synthetic keyboard frames so we can verify layout without Simulator soft-keyboard quirks.
 //
 
 import SwiftUI
-import UIKit
 
 struct KeyboardStickyComposerVisualTest: View {
     @State private var text = ""
-    @State private var showSheet = true
+    @State private var showConversation = true
     @State private var phaseLabel = "KB Closed"
+    @State private var keyboardScrollToken = 0
     @FocusState private var focused: Bool
     
-    private var hasText: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
+    private let bottomAnchorID = "visual-test-bottom"
     
     var body: some View {
         Color.blue.opacity(0.15)
             .ignoresSafeArea()
-            .sheet(isPresented: $showSheet) {
-                sheetContent
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.hidden)
-                    .interactiveDismissDisabled()
+            .fullScreenCover(isPresented: $showConversation) {
+                conversationScreen
             }
             .onAppear {
-                // 0.0s–1.2s: closed keyboard for screenshot
-                // 1.4s+: synthesize a realistic keyboard frame for open screenshot
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-                    phaseLabel = "KB Open (synthetic)"
-                    postSyntheticKeyboard(height: 336)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    phaseLabel = "KB Open"
+                    focused = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                    phaseLabel = "KB Closed"
+                    focused = false
                 }
             }
     }
     
-    private var sheetContent: some View {
+    private var conversationScreen: some View {
         NavigationStack {
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.55, green: 0.75, blue: 0.95),
-                        Color(red: 0.70, green: 0.88, blue: 0.70),
-                        Color(red: 0.98, green: 0.85, blue: 0.55)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
-                
-                KeyboardStickyChatLayout {
-                    HStack {
-                        Text("Visual Test")
-                            .font(.headline)
-                        Spacer()
+            messagesScroll
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    composer
+                        .background {
+                            Color(.systemGray5)
+                                .ignoresSafeArea(edges: .bottom)
+                        }
+                }
+                .background {
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.55, green: 0.75, blue: 0.95),
+                            Color(red: 0.70, green: 0.88, blue: 0.70),
+                            Color(red: 0.98, green: 0.85, blue: 0.55)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .ignoresSafeArea()
+                }
+                .navigationTitle("Visual Test")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            showConversation = false
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 17, weight: .semibold))
+                        }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
                         Text(phaseLabel)
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
-                    .padding()
-                    .background(.ultraThinMaterial)
-                } messages: {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(0..<8, id: \.self) { index in
-                                HStack {
-                                    Spacer()
-                                    Text("Sample message \(index + 1)")
-                                        .padding(12)
-                                        .background(Color.blue.opacity(0.25))
-                                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                                }
-                            }
-                        }
-                        .padding()
-                    }
-                } composer: {
-                    composer
                 }
-                
-                // Visual stand-in for the keyboard area so screenshots show where it would sit.
-                if phaseLabel.contains("Open") {
-                    VStack {
-                        Spacer()
-                        ZStack {
-                            Color(UIColor.systemGray4)
-                            Text("Synthetic Keyboard \(Int(336))pt")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
+        }
+    }
+    
+    private var messagesScroll: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(0..<8, id: \.self) { index in
+                        HStack {
+                            Spacer()
+                            Text("Sample message \(index + 1)")
+                                .padding(12)
+                                .background(Color.blue.opacity(0.25))
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
                         }
-                        .frame(height: 336)
                     }
-                    .ignoresSafeArea(edges: .bottom)
-                    .allowsHitTesting(false)
+                    Color.clear.frame(height: 1).id(bottomAnchorID)
+                }
+                .padding()
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: keyboardScrollToken) { _ in
+                withAnimation(.easeOut(duration: 0.25)) {
+                    proxy.scrollTo(bottomAnchorID, anchor: .bottom)
                 }
             }
-            .toolbar(.hidden, for: .navigationBar)
+            .onChange(of: focused) { _, _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+                    }
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                keyboardScrollToken += 1
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                keyboardScrollToken += 1
+            }
         }
     }
     
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
             Image(systemName: "plus")
-                .font(.system(size: 22, weight: .medium))
                 .frame(width: 34, height: 34)
             
-            TextField("Type something...", text: $text, axis: .vertical)
+            TextField("", text: $text, axis: .vertical)
                 .lineLimit(1...5)
                 .focused($focused)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .frame(minHeight: 38)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minWidth: 0, maxWidth: .infinity)
+                .layoutPriority(1)
                 .background(Color(.systemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             
-            if hasText {
-                Image(systemName: "paperplane.fill")
-                    .foregroundColor(.white)
-                    .frame(width: 34, height: 34)
-                    .background(Color.green)
-                    .clipShape(Circle())
-            } else {
-                Image(systemName: "camera")
-                    .frame(width: 34, height: 34)
-                Image(systemName: "mic")
-                    .frame(width: 34, height: 34)
-            }
+            Image(systemName: "camera").frame(width: 34, height: 34)
+            Image(systemName: "mic").frame(width: 34, height: 34)
         }
         .padding(.horizontal, 10)
         .padding(.top, 8)
-        .padding(.bottom, 8)
+        .padding(.bottom, 10)
         .frame(maxWidth: .infinity)
-    }
-    
-    private func postSyntheticKeyboard(height: CGFloat) {
-        let screen = UIScreen.main.bounds
-        let frame = CGRect(x: 0, y: screen.height - height, width: screen.width, height: height)
-        NotificationCenter.default.post(
-            name: UIResponder.keyboardWillChangeFrameNotification,
-            object: nil,
-            userInfo: [
-                UIResponder.keyboardFrameEndUserInfoKey: frame,
-                UIResponder.keyboardAnimationDurationUserInfoKey: 0.25,
-                UIResponder.keyboardAnimationCurveUserInfoKey: 7
-            ]
-        )
     }
 }

@@ -181,7 +181,7 @@ struct MessagesView: View {
                 }
             }
         }
-        .sheet(isPresented: Binding(
+        .fullScreenCover(isPresented: Binding(
             get: { 
                 let isPresented = showingMessageModal
                 print("💬 MessagesView Sheet binding GET - isPresented: \(isPresented), selectedMessage: \(selectedMessage?.recipientName ?? "nil")")
@@ -235,9 +235,6 @@ struct MessagesView: View {
                     message: message,
                     conversationMessages: $conversationMessages
                 )
-                .interactiveDismissDisabled()
-                .presentationDetents([.large])
-                .presentationDragIndicator(.hidden)
             } else {
                 let _ = print("❌ MessagesView selectedMessage is nil in sheet closure!")
                 VStack {
@@ -795,7 +792,7 @@ struct MessageConversationModal: View {
             print("❌ MessageConversationModal: Failed to update conversation open state: \(error)")
         }
     }
-    @FocusState private var isTextFieldFocused: Bool
+    @State private var isTextFieldFocused: Bool = false
     @State private var replyText: String = ""
     @State private var isSendingReply = false
     @State private var isLoadingMessages = true
@@ -831,8 +828,10 @@ struct MessageConversationModal: View {
     @State private var isLoadingOlderMessages = false
     @State private var cachedMessagesPool: [MessageDisplay] = []
     @State private var shouldScrollToBottom = false
+    @State private var keyboardScrollToken = 0
     
     private let conversationPageSize = 10
+    private let conversationBottomAnchorID = "conversation-bottom-anchor"
     
     init(message: MessageDisplay, conversationMessages: Binding<[MessageDisplay]>) {
         self.message = message
@@ -859,83 +858,43 @@ struct MessageConversationModal: View {
     var body: some View {
         let _ = print("💬 MessageConversationModal body being computed, message: \(message.recipientName), isLoadingMessages: \(isLoadingMessages)")
         NavigationStack {
-            ZStack {
-                Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .ignoresSafeArea()
+            conversationContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background {
+                    Image(colorScheme == .dark ? "ColorsDark" : "Colors")
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .ignoresSafeArea()
+                }
+            .navigationTitle(conversationTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+                    .accessibilityLabel("common.close".localized)
+                }
                 
-                KeyboardStickyChatLayout {
-                    conversationHeaderBar
-                } messages: {
-                    if isLoadingMessages {
-                        VStack(spacing: 20) {
-                            Spacer()
-                            ProgressView()
-                                .scaleEffect(1.5)
-                            Text("messages.loading.conversation".localized)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingPreMessageOptions = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "text.bubble")
+                            Text("matches.pre.message.button".localized)
                                 .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                        }
-                    } else if conversationMessages.isEmpty {
-                        VStack(spacing: 20) {
-                            Spacer()
-                            Text("messages.no.messages.found".localized)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            Spacer()
-                        }
-                    } else {
-                        ScrollViewReader { proxy in
-                            ScrollView {
-                                LazyVStack(spacing: 12) {
-                                    if isLoadingOlderMessages {
-                                        ProgressView()
-                                            .padding(.vertical, 8)
-                                    }
-                                    
-                                    ForEach(conversationMessages) { msg in
-                                        MessageBubble(
-                                            message: msg,
-                                            currentUserProfilePhotoURL: currentUserProfilePhotoURL,
-                                            otherUserProfilePhotoURL: otherUserProfilePhotoURL,
-                                            conversationMessages: conversationMessages,
-                                            showingConversationPhotoViewer: $showingConversationPhotoViewer,
-                                            selectedPhotoIndex: $selectedPhotoIndex
-                                        )
-                                        .id(msg.id)
-                                        .onAppear {
-                                            if msg.id == conversationMessages.first?.id {
-                                                loadOlderMessagesIfNeeded()
-                                            }
-                                        }
-                                    }
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.top, 12)
-                                .padding(.bottom, 12)
-                            }
-                            .scrollContentBackground(.hidden)
-                            .scrollIndicators(.hidden)
-                            .scrollDismissesKeyboard(.interactively)
-                            .onAppear {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                    scrollToBottomIfNeeded(proxy: proxy)
-                                }
-                            }
-                            .onChange(of: conversationMessages.count) { _ in
-                                scrollToBottomIfNeeded(proxy: proxy)
-                            }
                         }
                     }
-                } composer: {
-                    if !isLoadingMessages && !isBlockedByRecipient {
-                        messageComposer
-                    }
+                    .disabled(isBlockedByRecipient)
+                    .opacity(isBlockedByRecipient ? 0.5 : 1)
                 }
             }
-            .toolbar(.hidden, for: .navigationBar)
         }
         .overlay {
             if showingBlockedAlert {
@@ -1064,136 +1023,125 @@ struct MessageConversationModal: View {
         }
     }
     
-    private var conversationHeaderBar: some View {
-        HStack {
-            Button(action: {
-                showingPreMessageOptions = true
-            }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "text.bubble")
-                        .font(.system(size: 14))
-                    Text("matches.pre.message.button".localized)
-                        .font(.subheadline)
+    private var conversationContent: some View {
+        conversationMessagesArea
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !isLoadingMessages && !isBlockedByRecipient {
+                    MessageComposerBar(
+                        text: $replyText,
+                        isFocused: $isTextFieldFocused,
+                        placeholder: "",
+                        isDisabled: isBlockedByRecipient,
+                        isSending: isSendingReply,
+                        isRecording: isRecording,
+                        onSend: { sendReply() },
+                        onAttach: { showingImagePicker = true },
+                        onCamera: { showingImagePicker = true },
+                        onRecordingPressChanged: { pressing in
+                            if pressing {
+                                if !isRecording { startRecording() }
+                            } else if isRecording {
+                                stopRecording()
+                            }
+                        }
+                    )
+                    .background {
+                        Color(.systemGray5)
+                            .ignoresSafeArea(edges: .bottom)
+                    }
                 }
-                .foregroundColor(.blue)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color.blue.opacity(0.1))
-                .cornerRadius(8)
             }
-            .disabled(isBlockedByRecipient)
-            .opacity(isBlockedByRecipient ? 0.5 : 1)
-            
-            Spacer()
-            
-            Text(conversationTitle)
-                .font(.headline)
-                .lineLimit(1)
-            
-            Spacer()
-            
-            Button("common.done".localized) {
-                dismiss()
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    keyboardScrollToken += 1
+                }
             }
-            .font(.headline)
-            .foregroundColor(.blue)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
-        .background(.ultraThinMaterial)
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    keyboardScrollToken += 1
+                }
+            }
     }
     
-    private var hasComposerText: Bool {
-        !replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-    
-    private var messageComposer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            Button(action: {
-                showingImagePicker = true
-            }) {
-                Image(systemName: "plus")
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundColor(.primary)
-                    .frame(width: 34, height: 34)
-            }
-            .disabled(isBlockedByRecipient)
-            
-            TextField("messages.type.something".localized, text: $replyText, axis: .vertical)
-                .lineLimit(1...5)
-                .focused($isTextFieldFocused)
-                .disabled(isSendingReply || isBlockedByRecipient)
-                .textFieldStyle(.plain)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .frame(minHeight: 38)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            
-            if hasComposerText {
-                Button(action: {
-                    sendReply()
-                }) {
-                    Group {
-                        if isSendingReply {
-                            ProgressView()
-                                .scaleEffect(0.85)
-                        } else {
-                            Image(systemName: "paperplane.fill")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(.white)
+    private var conversationMessagesArea: some View {
+        Group {
+            if isLoadingMessages {
+                VStack(spacing: 20) {
+                    Spacer()
+                    ProgressView()
+                        .scaleEffect(1.5)
+                    Text("messages.loading.conversation".localized)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+            } else if conversationMessages.isEmpty {
+                VStack(spacing: 20) {
+                    Spacer()
+                    Text("messages.no.messages.found".localized)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            if isLoadingOlderMessages {
+                                ProgressView()
+                                    .padding(.vertical, 8)
+                            }
+                            
+                            ForEach(conversationMessages) { msg in
+                                MessageBubble(
+                                    message: msg,
+                                    currentUserProfilePhotoURL: currentUserProfilePhotoURL,
+                                    otherUserProfilePhotoURL: otherUserProfilePhotoURL,
+                                    conversationMessages: conversationMessages,
+                                    showingConversationPhotoViewer: $showingConversationPhotoViewer,
+                                    selectedPhotoIndex: $selectedPhotoIndex
+                                )
+                                .id(msg.id)
+                                .onAppear {
+                                    if msg.id == conversationMessages.first?.id {
+                                        loadOlderMessagesIfNeeded()
+                                    }
+                                }
+                            }
+                            
+                            Color.clear
+                                .frame(height: 1)
+                                .id(conversationBottomAnchorID)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, 12)
+                    }
+                    .scrollContentBackground(.hidden)
+                    .scrollIndicators(.hidden)
+                    .scrollDismissesKeyboard(.interactively)
+                    .defaultScrollAnchor(.bottom)
+                    .onAppear {
+                        scheduleScrollToBottom(proxy: proxy, force: true, isInitial: true)
+                    }
+                    .onChange(of: isLoadingMessages) { _, isLoading in
+                        guard !isLoading else { return }
+                        scheduleScrollToBottom(proxy: proxy, force: true, isInitial: true)
+                    }
+                    .onChange(of: conversationMessages.count) { _ in
+                        scrollToBottomIfNeeded(proxy: proxy)
+                    }
+                    .onChange(of: keyboardScrollToken) { _ in
+                        scrollToLatestMessage(proxy: proxy, force: true)
+                    }
+                    .onChange(of: isTextFieldFocused) { _, _ in
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            scrollToLatestMessage(proxy: proxy, force: true)
                         }
                     }
-                    .frame(width: 34, height: 34)
-                    .background(Color.green)
-                    .clipShape(Circle())
                 }
-                .disabled(isSendingReply || isBlockedByRecipient)
-            } else {
-                Button(action: {
-                    showingImagePicker = true
-                }) {
-                    Image(systemName: "camera")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(.primary)
-                        .frame(width: 34, height: 34)
-                }
-                .disabled(isBlockedByRecipient)
-                
-                microphoneButton
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 8)
-        .padding(.bottom, 8)
-        .frame(maxWidth: .infinity)
-        .opacity(isBlockedByRecipient ? 0.5 : 1)
-    }
-    
-    private var microphoneButton: some View {
-        Image(systemName: isRecording ? "mic.fill" : "mic")
-            .font(.system(size: 20, weight: .medium))
-            .foregroundColor(isRecording ? .red : .primary)
-            .frame(width: 34, height: 34)
-            .overlay(
-                Circle()
-                    .stroke(isRecording ? Color.red.opacity(0.4) : Color.clear, lineWidth: 2)
-            )
-            .opacity(isBlockedByRecipient ? 0.5 : 1)
-            .allowsHitTesting(!isBlockedByRecipient)
-            .onLongPressGesture(minimumDuration: 0.2, maximumDistance: 60, pressing: { pressing in
-                if pressing {
-                    if !isRecording {
-                        startRecording()
-                    }
-                } else {
-                    if isRecording {
-                        stopRecording()
-                    }
-                }
-            }, perform: {})
     }
     
     private func firstName(from fullName: String) -> String {
@@ -1228,11 +1176,44 @@ struct MessageConversationModal: View {
     }
     
     private func scrollToBottomIfNeeded(proxy: ScrollViewProxy) {
-        guard shouldScrollToBottom, let lastMessage = conversationMessages.last else { return }
-        withAnimation(.easeInOut(duration: 0.3)) {
-            proxy.scrollTo(lastMessage.id, anchor: .bottom)
-        }
+        guard shouldScrollToBottom else { return }
+        scheduleScrollToBottom(proxy: proxy, force: true)
         shouldScrollToBottom = false
+    }
+    
+    private func scheduleScrollToBottom(
+        proxy: ScrollViewProxy,
+        force: Bool = false,
+        isInitial: Bool = false
+    ) {
+        let delays: [TimeInterval] = isInitial ? [0, 0.05, 0.15, 0.35] : [0.05]
+        for delay in delays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                scrollToLatestMessage(
+                    proxy: proxy,
+                    force: force || shouldScrollToBottom,
+                    animated: !isInitial
+                )
+            }
+        }
+    }
+    
+    private func scrollToLatestMessage(
+        proxy: ScrollViewProxy,
+        force: Bool,
+        animated: Bool = true
+    ) {
+        guard force || shouldScrollToBottom else { return }
+        guard !conversationMessages.isEmpty else { return }
+        
+        let targetID = conversationMessages.last?.id ?? conversationBottomAnchorID
+        if animated {
+            withAnimation(.easeOut(duration: 0.25)) {
+                proxy.scrollTo(targetID, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(targetID, anchor: .bottom)
+        }
     }
     
     private func loadConversationMessages() {
@@ -1532,10 +1513,14 @@ struct MessageConversationModal: View {
     
     private func sendReply() {
         guard !isBlockedByRecipient else { return }
-        guard !replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        
-        isSendingReply = true
+        guard !isSendingReply else { return }
         let trimmedContent = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedContent.isEmpty else { return }
+        
+        // Clear text immediately and keep focus so the keyboard stays up.
+        replyText = ""
+        isTextFieldFocused = true
+        isSendingReply = true
         updateConversationListAfterOutgoingMessage(content: trimmedContent, type: .text, voiceDuration: nil)
         shouldScrollToBottom = true
         
@@ -1557,15 +1542,20 @@ struct MessageConversationModal: View {
                 print("✅ Reply sent successfully with ID: \(messageId)")
                 
                 await MainActor.run {
-                    replyText = ""
                     isSendingReply = false
+                    isTextFieldFocused = true
                     refreshMessagesOnly()
                 }
                 
             } catch {
                 print("❌ Error sending reply: \(error)")
                 await MainActor.run {
+                    // Restore text if send failed so the user can retry.
+                    if replyText.isEmpty {
+                        replyText = trimmedContent
+                    }
                     isSendingReply = false
+                    isTextFieldFocused = true
                 }
             }
         }
@@ -2133,16 +2123,7 @@ struct VoiceMessageBackground: View {
             let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             ZStack {
                 shape
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                baseColor.opacity(0.95),
-                                baseColor.opacity(0.82)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .fill(baseColor)
                 Canvas { context, size in
                     let waveWidth = max(0, size.width - leadingInset - trailingInset)
                     guard waveWidth > 0 else { return }
@@ -2203,6 +2184,10 @@ struct MessageBubble: View {
     @State private var showingSaveAlert = false
     @State private var saveSuccess = false
     
+    private let outgoingBubbleColor = Color.white
+    private let incomingBubbleColor = Color(red: 0.851, green: 0.992, blue: 0.827) // WhatsApp-style green (#D9FDD3)
+    private let voiceAccentColor = Color(red: 0.07, green: 0.55, blue: 0.47)
+    
     var body: some View {
         VStack(spacing: 4) {
             HStack(alignment: .top, spacing: 8) {
@@ -2246,17 +2231,17 @@ struct MessageBubble: View {
                             VoiceMessagePlayerView(
                                 audioURL: URL(string: message.content),
                                 displayDuration: message.voiceDuration,
-                                accentColor: .white,
-                                textColor: .white,
-                                baseColor: Color.blue,
-                                waveColor: Color.white
+                                accentColor: voiceAccentColor,
+                                textColor: .primary,
+                                baseColor: outgoingBubbleColor,
+                                waveColor: Color.gray.opacity(0.45)
                             )
                         default:
                             Text(message.content)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .lineLimit(nil)
                                 .padding(8)
-                                .background(Color.blue.opacity(0.2))
+                                .background(outgoingBubbleColor)
                                 .foregroundColor(.primary)
                                 .cornerRadius(10)
                         }
@@ -2400,17 +2385,17 @@ struct MessageBubble: View {
                             VoiceMessagePlayerView(
                                 audioURL: URL(string: message.content),
                                 displayDuration: message.voiceDuration,
-                                accentColor: .white,
-                                textColor: .white,
-                                baseColor: Color.blue,
-                                waveColor: Color.white
+                                accentColor: voiceAccentColor,
+                                textColor: .primary,
+                                baseColor: incomingBubbleColor,
+                                waveColor: Color.gray.opacity(0.45)
                             )
                         default:
                             Text(message.content)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .lineLimit(nil)
                                 .padding(8)
-                                .background(Color.green.opacity(0.2))
+                                .background(incomingBubbleColor)
                                 .foregroundColor(.primary)
                                 .cornerRadius(10)
                         }

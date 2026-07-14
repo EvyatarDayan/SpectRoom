@@ -156,14 +156,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         Messaging.messaging().delegate = self
         
         // Request notification permission
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-            if granted {
-                DispatchQueue.main.async {
-                    application.registerForRemoteNotifications()
+        if !ProcessInfo.processInfo.arguments.contains("-KeyboardComposerVisualTest") {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+                if granted {
+                    DispatchQueue.main.async {
+                        application.registerForRemoteNotifications()
+                    }
+                    print("✅ Notification permission granted on app launch")
+                } else {
+                    print("❌ Notification permission denied on app launch")
                 }
-                print("✅ Notification permission granted on app launch")
-            } else {
-                print("❌ Notification permission denied on app launch")
             }
         }
         

@@ -15,17 +15,24 @@ class FirebaseAuthService: ObservableObject {
     static let shared = FirebaseAuthService()
     
     @Published var currentUser: SpectRoomUser?
-    @Published var isAuthenticated = false
+    /// Restored synchronously from Firebase's persisted session so launch UI does not flash logged-out screens.
+    @Published var isAuthenticated: Bool
+    /// Becomes true after Firebase emits the first auth-state callback.
+    @Published var hasResolvedAuthState = false
     
     let auth = Auth.auth()
     private let db = Firestore.firestore()
     private var matchesListener: ListenerRegistration?
     
     private init() {
+        // Firebase restores the session from the keychain synchronously when available.
+        isAuthenticated = auth.currentUser != nil
+        
         // Listen for authentication state changes
         auth.addStateDidChangeListener { [weak self] _, firebaseUser in
             DispatchQueue.main.async {
                 self?.isAuthenticated = firebaseUser != nil
+                self?.hasResolvedAuthState = true
                 if let firebaseUser = firebaseUser {
                     // Load user data from Firestore when Firebase user changes
                     Task {
@@ -150,11 +157,14 @@ class FirebaseAuthService: ObservableObject {
                 let shareBodyType = userData["shareBodyType"] as? Bool ?? false
                 let idealFirstDate = userData["idealFirstDate"] as? [String] ?? []
                 let shareIdealFirstDate = userData["shareIdealFirstDate"] as? Bool ?? false
+                let sensoryPreferences = userData["sensoryPreferences"] as? [String] ?? []
+                let shareSensoryPreferences = userData["shareSensoryPreferences"] as? Bool ?? false
                 let energyLevel = userData["energyLevel"] as? Int ?? 4
                 
                 print("🔍 Firebase - Loaded lifestyle: \(lifestyle), shareLifestyle: \(shareLifestyle)")
                 print("🔍 Firebase - Loaded bodyType: \(bodyType), shareBodyType: \(shareBodyType)")
                 print("🔍 Firebase - Loaded idealFirstDate: \(idealFirstDate), shareIdealFirstDate: \(shareIdealFirstDate)")
+                print("🔍 Firebase - Loaded sensoryPreferences: \(sensoryPreferences), shareSensoryPreferences: \(shareSensoryPreferences)")
                 print("🔍 Firebase - Loaded energyLevel: \(energyLevel)")
                 
                 let spectRoomUser = SpectRoomUser(
@@ -176,6 +186,8 @@ class FirebaseAuthService: ObservableObject {
                     shareBodyType: shareBodyType,
                     idealFirstDate: idealFirstDate,
                     shareIdealFirstDate: shareIdealFirstDate,
+                    sensoryPreferences: sensoryPreferences,
+                    shareSensoryPreferences: shareSensoryPreferences,
                     energyLevel: energyLevel
                 )
                 
@@ -449,6 +461,8 @@ class FirebaseAuthService: ObservableObject {
         let shareBodyType = userData["shareBodyType"] as? Bool ?? false
         let idealFirstDate = userData["idealFirstDate"] as? [String] ?? []
         let shareIdealFirstDate = userData["shareIdealFirstDate"] as? Bool ?? false
+        let sensoryPreferences = userData["sensoryPreferences"] as? [String] ?? []
+        let shareSensoryPreferences = userData["shareSensoryPreferences"] as? Bool ?? false
         let energyLevel = userData["energyLevel"] as? Int ?? 2
         let isOnline = userData["isOnline"] as? Bool ?? false
         let lastSeenInterval = userData["lastSeen"] as? TimeInterval
@@ -473,6 +487,8 @@ class FirebaseAuthService: ObservableObject {
             shareBodyType: shareBodyType,
             idealFirstDate: idealFirstDate,
             shareIdealFirstDate: shareIdealFirstDate,
+            sensoryPreferences: sensoryPreferences,
+            shareSensoryPreferences: shareSensoryPreferences,
             energyLevel: energyLevel
         )
         
@@ -1183,6 +1199,8 @@ class FirebaseAuthService: ObservableObject {
         let shareBodyType = userData["shareBodyType"] as? Bool ?? false
         let idealFirstDate = userData["idealFirstDate"] as? [String] ?? []
         let shareIdealFirstDate = userData["shareIdealFirstDate"] as? Bool ?? false
+        let sensoryPreferences = userData["sensoryPreferences"] as? [String] ?? []
+        let shareSensoryPreferences = userData["shareSensoryPreferences"] as? Bool ?? false
         let energyLevel = userData["energyLevel"] as? Int ?? 2
         let preferredAgeMin = userData["preferredAgeMin"] as? Int ?? age
         let preferredAgeMax = userData["preferredAgeMax"] as? Int ?? min(age + 5, 80)
@@ -1212,6 +1230,8 @@ class FirebaseAuthService: ObservableObject {
             lastSeen: lastSeen,
             idealFirstDate: idealFirstDate,
             shareIdealFirstDate: shareIdealFirstDate,
+            sensoryPreferences: sensoryPreferences,
+            shareSensoryPreferences: shareSensoryPreferences,
             energyLevel: energyLevel
         )
     }

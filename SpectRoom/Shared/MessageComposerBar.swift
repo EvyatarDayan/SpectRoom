@@ -14,9 +14,14 @@ struct MessageComposerBar: View {
     var isSending: Bool
     var isRecording: Bool
     var onSend: () -> Void
-    var onAttach: () -> Void
     var onCamera: () -> Void
     var onRecordingPressChanged: (Bool) -> Void
+    var onShortMicTap: () -> Void = {}
+    
+    @State private var didArmLongPressRecording = false
+    
+    /// Hold this long before recording starts (short taps show a tip instead).
+    private let micLongPressDuration: Double = 1.0
     
     private var hasText: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -24,14 +29,6 @@ struct MessageComposerBar: View {
     
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            Button(action: onAttach) {
-                Image(systemName: "plus")
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundColor(.primary)
-                    .frame(width: 34, height: 34)
-            }
-            .disabled(isDisabled)
-            
             ComposerDismissKeyboardTextView(
                 text: $text,
                 isFocused: $isFocused,
@@ -39,7 +36,7 @@ struct MessageComposerBar: View {
                 isDisabled: isDisabled
             )
             .padding(.horizontal, 6)
-            .frame(minHeight: 38, maxHeight: 38)
+            .frame(minHeight: 42, maxHeight: 42)
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
             .background(Color(.systemBackground))
@@ -65,7 +62,7 @@ struct MessageComposerBar: View {
                 .disabled(isSending || isDisabled)
             } else {
                 Button(action: onCamera) {
-                    Image(systemName: "camera")
+                    Image(systemName: "folder")
                         .font(.system(size: 20, weight: .medium))
                         .foregroundColor(.primary)
                         .frame(width: 34, height: 34)
@@ -76,15 +73,31 @@ struct MessageComposerBar: View {
                     .font(.system(size: 20, weight: .medium))
                     .foregroundColor(isRecording ? .red : .primary)
                     .frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
                     .overlay(
                         Circle()
                             .stroke(isRecording ? Color.red.opacity(0.4) : Color.clear, lineWidth: 2)
                     )
                     .opacity(isDisabled ? 0.5 : 1)
                     .allowsHitTesting(!isDisabled)
-                    .onLongPressGesture(minimumDuration: 0.2, maximumDistance: 60, pressing: { pressing in
-                        onRecordingPressChanged(pressing)
-                    }, perform: {})
+                    .onLongPressGesture(
+                        minimumDuration: micLongPressDuration,
+                        maximumDistance: 60,
+                        pressing: { pressing in
+                            if pressing {
+                                didArmLongPressRecording = false
+                            } else if didArmLongPressRecording {
+                                // Recording continues in the bottom sheet — stop from there.
+                                didArmLongPressRecording = false
+                            } else {
+                                onShortMicTap()
+                            }
+                        },
+                        perform: {
+                            didArmLongPressRecording = true
+                            onRecordingPressChanged(true)
+                        }
+                    )
             }
         }
         .padding(.horizontal, 10)

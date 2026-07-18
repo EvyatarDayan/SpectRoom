@@ -77,7 +77,10 @@ struct SpectRoomApp: App {
     @ViewBuilder
     private var mainRootView: some View {
         Group {
-            if appState.isAuthenticated {
+            if !appState.hasResolvedAuthState && !appState.isAuthenticated {
+                // Wait for Firebase to restore session before showing welcome/sign-in
+                LaunchAuthPlaceholderView()
+            } else if appState.isAuthenticated {
                 if appState.hasCompletedInitialProfile {
                     ContentView()
                         .environmentObject(appState)
@@ -91,13 +94,11 @@ struct SpectRoomApp: App {
                         .environmentObject(appState)
                 }
             } else if appState.hasCompletedOnboarding {
-                // User has completed onboarding before - show sign-in view
-                // hasCompletedOnboarding persists across sign-outs, so users won't see onboarding again
+                // Skip welcome — either completed with "Don't show again", or mid-session after Get Started
                 AuthenticationView()
                     .environmentObject(appState)
             } else {
-                // New user (first app install) - show welcome wizard
-                // This should only display once for new users after first app installation
+                // Show welcome (first launch, or after logout when "Don't show again" was not checked)
                 OnboardingView()
                     .environmentObject(appState)
             }
@@ -142,6 +143,20 @@ struct SpectRoomApp: App {
             languageChanged.toggle()
         }
         .id(languageChanged) // Force view refresh on language change
+    }
+}
+
+/// Neutral launch screen while Firebase restores the persisted session.
+private struct LaunchAuthPlaceholderView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    
+    var body: some View {
+        ZStack {
+            Image(colorScheme == .dark ? "ColorsDark" : "Colors")
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .ignoresSafeArea()
+        }
     }
 }
 

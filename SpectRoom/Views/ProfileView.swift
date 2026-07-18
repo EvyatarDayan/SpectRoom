@@ -46,7 +46,6 @@ struct ProfileView: View {
     @State private var showingEditView = false
     @State private var showingPhotoViewer = false
     @State private var selectedPhotoIndex = 0
-    @State private var photosCarouselIndex = 0
     
     var body: some View {
         NavigationView {
@@ -159,83 +158,18 @@ struct ProfileView: View {
     
     // MARK: - Profile Header Section
     private var profileHeaderSection: some View {
-        ZStack {
-            if let user = appState.currentUser,
-               let profilePhotoURL = user.profilePhotoURL,
-               !profilePhotoURL.isEmpty,
-               let url = URL(string: profilePhotoURL) {
-                CachedAsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .blur(radius: 25)
-                        .scaleEffect(1.2)
-                } placeholder: {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
+        ProfileMainPhotoCard(
+            imageURL: appState.currentUser?.profilePhotoURL,
+            onTap: {
+                guard let user = appState.currentUser else { return }
+                let hasProfilePhoto = user.profilePhotoURL != nil && !(user.profilePhotoURL?.isEmpty ?? true)
+                let hasGalleryPhotos = !user.photos.isEmpty
+                if hasProfilePhoto || hasGalleryPhotos {
+                    selectedPhotoIndex = 0
+                    showingPhotoViewer = true
                 }
-            } else {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.15))
-            }
-        }
-        .frame(height: 180)
-        .frame(maxWidth: .infinity)
-        .overlay(
-            VStack {
-                Button(action: {
-                    // Check if there are any photos to show
-                    if let user = appState.currentUser {
-                        let hasProfilePhoto = user.profilePhotoURL != nil && !user.profilePhotoURL!.isEmpty
-                        let hasGalleryPhotos = !user.photos.isEmpty
-                        if hasProfilePhoto || hasGalleryPhotos {
-                            selectedPhotoIndex = 0 // Profile photo will be at index 0
-                            showingPhotoViewer = true
-                        }
-                    }
-                }) {
-                    Group {
-                        if let user = appState.currentUser,
-                           let profilePhotoURL = user.profilePhotoURL,
-                           !profilePhotoURL.isEmpty,
-                           let url = URL(string: profilePhotoURL) {
-                            CachedAsyncImage(url: url) { image in
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                Rectangle()
-                                    .fill(Color.gray.opacity(0.3))
-                                    .overlay(
-                                        Image(systemName: "person.fill")
-                                            .font(.system(size: 50))
-                                            .foregroundColor(.gray)
-                                    )
-                            }
-                        } else {
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .overlay(
-                                    Image(systemName: "person.fill")
-                                        .font(.system(size: 50))
-                                        .foregroundColor(.gray)
-                                )
-                        }
-                    }
-                    .frame(width: 140, height: 140)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color.white.opacity(0.8), lineWidth: 2)
-                    )
-                    .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 4)
-                }
-                .buttonStyle(PlainButtonStyle())
-                .padding(.vertical, 20)
             }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 8)
     }
     
     // MARK: - Age Section
@@ -363,6 +297,23 @@ struct ProfileView: View {
                     .fontWeight(.semibold)
                     .foregroundColor(.blue)
                 Text(formattedIdealFirstDate(user.idealFirstDate))
+                    .font(.body)
+                    .foregroundColor(.primary)
+            }
+            
+            if let user = appState.currentUser, user.shareSensoryPreferences, !user.sensoryPreferences.isEmpty {
+                if user.shareLifestyle || user.shareBodyType || user.shareIdealFirstDate {
+                    Divider()
+                        .frame(height: 2)
+                        .background(Color.gray.opacity(0.3))
+                        .padding(.vertical, 4)
+                }
+                
+                Text("profile.sensory.preferences".localized)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.blue)
+                Text(SensoryPreferenceOption.formattedTitles(user.sensoryPreferences))
                     .font(.body)
                     .foregroundColor(.primary)
             }
@@ -591,149 +542,13 @@ struct ProfileView: View {
     
     // MARK: - My Photos Section
     private var myPhotosSection: some View {
-        ZStack {
-            // Same blurry background as profile photo
-            if let user = appState.currentUser,
-               let profilePhotoURL = user.profilePhotoURL,
-               !profilePhotoURL.isEmpty,
-               let url = URL(string: profilePhotoURL) {
-                CachedAsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .blur(radius: 25)
-                        .scaleEffect(1.2)
-                } placeholder: {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                }
-            } else {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.15))
-            }
-        }
-        .frame(height: 160)
-        .frame(maxWidth: .infinity)
-        .overlay(
-            VStack(alignment: .leading, spacing: 8) {
-                if let user = appState.currentUser, !user.photos.isEmpty {
-                    if user.photos.count <= 3 {
-                        // Show all photos if 3 or fewer
-                        LazyVGrid(columns: [
-                            GridItem(.flexible()),
-                            GridItem(.flexible()),
-                            GridItem(.flexible())
-                        ], spacing: 6) {
-                            ForEach(Array(user.photos.enumerated()), id: \.offset) { index, photoURL in
-                                Button(action: {
-                                    selectedPhotoIndex = index + 1
-                                    showingPhotoViewer = true
-                                }) {
-                                    ZStack {
-                                        CachedAsyncImage(url: URL(string: photoURL)) { image in
-                                            image
-                                                .resizable()
-                                                .aspectRatio(contentMode: .fill)
-                                        } placeholder: {
-                                            Rectangle()
-                                                .fill(Color.gray.opacity(0.3))
-                                                .overlay(
-                                                    Image(systemName: "photo")
-                                                        .foregroundColor(.gray)
-                                                )
-                                        }
-                                        .frame(width: 92, height: 92)
-                                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                    }
-                                    .frame(width: 100, height: 100)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                            .stroke(Color.white.opacity(0.8), lineWidth: 2)
-                                    )
-                                    .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 4)
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 20)
-                    } else {
-                        // Carousel for more than 3 photos
-                        VStack(spacing: 8) {
-                            TabView(selection: $photosCarouselIndex) {
-                                ForEach(0..<((user.photos.count + 2) / 3), id: \.self) { pageIndex in
-                                    LazyVGrid(columns: [
-                                        GridItem(.flexible()),
-                                        GridItem(.flexible()),
-                                        GridItem(.flexible())
-                                    ], spacing: 6) {
-                                        ForEach(0..<3, id: \.self) { gridIndex in
-                                            let photoIndex = pageIndex * 3 + gridIndex
-                                            if photoIndex < user.photos.count {
-                                                Button(action: {
-                                                    selectedPhotoIndex = photoIndex + 1
-                                                    showingPhotoViewer = true
-                                                }) {
-                                                    ZStack {
-                                                        CachedAsyncImage(url: URL(string: user.photos[photoIndex])) { image in
-                                                            image
-                                                                .resizable()
-                                                                .aspectRatio(contentMode: .fill)
-                                                        } placeholder: {
-                                                            Rectangle()
-                                                                .fill(Color.gray.opacity(0.3))
-                                                                .overlay(
-                                                                    Image(systemName: "photo")
-                                                                        .foregroundColor(.gray)
-                                                                )
-                                                        }
-                                                        .frame(width: 92, height: 92)
-                                                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                                    }
-                                                    .frame(width: 100, height: 100)
-                                                    .overlay(
-                                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                                            .stroke(Color.white.opacity(0.8), lineWidth: 2)
-                                                    )
-                                                    .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 4)
-                                                }
-                                            } else {
-                                                // Empty space for incomplete rows
-                                                Color.clear
-                                                    .aspectRatio(1, contentMode: .fit)
-                                            }
-                                        }
-                                    }
-                                    .tag(pageIndex)
-                                }
-                            }
-                            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-                            .frame(height: 105)
-                            
-                            // Custom smaller page indicator dots
-                            HStack(spacing: 4) {
-                                ForEach(0..<((user.photos.count + 2) / 3), id: \.self) { index in
-                                    Circle()
-                                        .fill(photosCarouselIndex == index ? Color.white.opacity(0.8) : Color.white.opacity(0.3))
-                                        .frame(width: 4, height: 4)
-                                }
-                            }
-                            .padding(.top, 4)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 20)
-                    }
-                } else {
-                    Text("profile.no.photos".localized)
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .italic()
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 20)
-                }
+        ProfileGalleryPhotosCard(
+            photoURLs: appState.currentUser?.photos ?? [],
+            onSelectRemote: { index in
+                selectedPhotoIndex = index + 1
+                showingPhotoViewer = true
             }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 8)
     }
 }
 

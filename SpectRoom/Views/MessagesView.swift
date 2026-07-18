@@ -803,6 +803,8 @@ struct MessageConversationModal: View {
     @State private var showingImagePicker = false
     @State private var selectedImage: UIImage?
     @State private var isUploadingImage = false
+    /// Local previews keyed by message content (`pending://…` or final image URL).
+    @State private var localImagePreviews: [String: UIImage] = [:]
     @State private var showingConversationPhotoViewer = false
     @State private var selectedPhotoIndex = 0
     @State private var previousMessageCount = 0
@@ -814,6 +816,7 @@ struct MessageConversationModal: View {
     @State private var showRecordingPreview = false
     @State private var isSendingVoice = false
     @State private var showingMicrophonePermissionAlert = false
+    @State private var showingMicLongPressTip = false
     @State private var loadError = false
     @State private var showingPreMessageOptions = false
     @State private var currentTime: TimeInterval = 0
@@ -829,9 +832,13 @@ struct MessageConversationModal: View {
     @State private var cachedMessagesPool: [MessageDisplay] = []
     @State private var shouldScrollToBottom = false
     @State private var keyboardScrollToken = 0
+    @State private var edgeSwipeOffset: CGFloat = 0
+    @State private var isEdgeSwiping = false
     
     private let conversationPageSize = 10
     private let conversationBottomAnchorID = "conversation-bottom-anchor"
+    private let edgeSwipeActivationWidth: CGFloat = 28
+    private let edgeSwipeDismissThreshold: CGFloat = 110
     
     init(message: MessageDisplay, conversationMessages: Binding<[MessageDisplay]>) {
         self.message = message
@@ -873,7 +880,7 @@ struct MessageConversationModal: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        dismiss()
+                        closeChat()
                     } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 17, weight: .semibold))
@@ -895,6 +902,47 @@ struct MessageConversationModal: View {
                     .opacity(isBlockedByRecipient ? 0.5 : 1)
                 }
             }
+        }
+        .offset(x: max(0, edgeSwipeOffset))
+        .overlay(alignment: .leading) {
+            // Thin left-edge hit area for iOS-style swipe-to-close.
+            Color.clear
+                .frame(width: edgeSwipeActivationWidth)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 8, coordinateSpace: .global)
+                        .onChanged { value in
+                            guard !isRecording, !showRecordingPreview, !showingMicLongPressTip else { return }
+                            if !isEdgeSwiping {
+                                guard value.startLocation.x <= edgeSwipeActivationWidth + 8 else { return }
+                                isEdgeSwiping = true
+                            }
+                            edgeSwipeOffset = max(0, value.translation.width)
+                        }
+                        .onEnded { value in
+                            guard isEdgeSwiping else { return }
+                            isEdgeSwiping = false
+                            
+                            let shouldDismiss =
+                                value.translation.width > edgeSwipeDismissThreshold
+                                || value.predictedEndTranslation.width > edgeSwipeDismissThreshold * 1.4
+                            
+                            if shouldDismiss {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    edgeSwipeOffset = UIScreen.main.bounds.width
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                                    closeChat()
+                                }
+                            } else {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                    edgeSwipeOffset = 0
+                                }
+                            }
+                        }
+                )
+                .allowsHitTesting(!isRecording && !showRecordingPreview)
         }
         .overlay {
             if showingBlockedAlert {
@@ -931,6 +979,8 @@ struct MessageConversationModal: View {
             // Determine the other user's ID
             let otherUserId = message.senderName == "You" ? message.recipientId : message.senderId
             
+            persistConversationCache()
+            
             // Clear the currently open conversation ID
             appState.currentlyOpenConversationSenderId = nil
             print("💬 Cleared currentlyOpenConversationSenderId (from modal onDisappear)")
@@ -964,6 +1014,14 @@ struct MessageConversationModal: View {
         } message: {
             Text("Please enable microphone access in Settings to record voice messages.")
         }
+        .alert(
+            "messages.voice.long.press.tip.title".localized,
+            isPresented: $showingMicLongPressTip
+        ) {
+            Button("messages.voice.long.press.tip.got.it".localized, role: .cancel) {}
+        } message: {
+            Text("messages.voice.long.press.tip.message".localized)
+        }
         .sheet(isPresented: $showingPreMessageOptions) {
             PreMessageOptionsModal(
                 profileName: message.senderName == "You" ? message.recipientName : message.senderName,
@@ -977,48 +1035,43 @@ struct MessageConversationModal: View {
                 }
             )
         }
-        .overlay {
-            Group {
-                if isRecording {
-                    ZStack {
-                        Color.black.opacity(0.8)
-                            .ignoresSafeArea()
-                        RecordingIndicatorView(durationText: formattedDuration(recordingDuration))
-                            .padding(.vertical, 20)
-                            .padding(.horizontal, 24)
-                            .background(.ultraThinMaterial)
-                            .cornerRadius(28)
-                            .shadow(color: Color.black.opacity(0.3), radius: 20, x: 0, y: 10)
-                            .frame(maxWidth: 360)
-                    }
-                    .allowsHitTesting(false)
-                    .transition(.opacity.combined(with: .scale))
-                } else if showRecordingPreview, let audioRecordingURL {
-                    ZStack {
-                        Color.black.opacity(0.8)
-                            .ignoresSafeArea()
-                            .transition(.opacity)
-                        
-                        RecordingPreviewView(
-                            audioURL: audioRecordingURL,
-                            duration: recordingDuration,
-                            isSending: isSendingVoice,
-                            onSend: {
-                                sendVoiceMessage(audioURL: audioRecordingURL, duration: recordingDuration)
-                            },
-                            onDiscard: {
-                                discardRecording()
-                            }
-                        )
-                        .padding(.vertical, 20)
-                        .padding(.horizontal, 24)
-                        .background(.ultraThinMaterial)
-                        .cornerRadius(28)
-                        .shadow(color: Color.black.opacity(0.3), radius: 20, x: 0, y: 10)
-                        .frame(maxWidth: 360)
-                    }
-                    .transition(.opacity.combined(with: .scale))
+        .sheet(isPresented: $isRecording) {
+            RecordingIndicatorSheet(
+                durationText: formattedDuration(recordingDuration),
+                onStop: { stopRecording() },
+                onCancel: { discardRecording() }
+            )
+            .presentationDetents([.height(230)])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(true)
+            .presentationBackground(.regularMaterial)
+        }
+        .sheet(isPresented: Binding(
+            get: { showRecordingPreview },
+            set: { newValue in
+                if !newValue, !isSendingVoice {
+                    discardRecording()
+                } else if newValue {
+                    showRecordingPreview = true
                 }
+            }
+        )) {
+            if let audioRecordingURL {
+                RecordingPreviewSheet(
+                    audioURL: audioRecordingURL,
+                    duration: recordingDuration,
+                    isSending: isSendingVoice,
+                    onSend: {
+                        sendVoiceMessage(audioURL: audioRecordingURL, duration: recordingDuration)
+                    },
+                    onDiscard: {
+                        discardRecording()
+                    }
+                )
+                .presentationDetents([.height(230)])
+                .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled(isSendingVoice)
+                .presentationBackground(.regularMaterial)
             }
         }
     }
@@ -1035,14 +1088,14 @@ struct MessageConversationModal: View {
                         isSending: isSendingReply,
                         isRecording: isRecording,
                         onSend: { sendReply() },
-                        onAttach: { showingImagePicker = true },
                         onCamera: { showingImagePicker = true },
                         onRecordingPressChanged: { pressing in
-                            if pressing {
-                                if !isRecording { startRecording() }
-                            } else if isRecording {
-                                stopRecording()
+                            if pressing, !isRecording {
+                                startRecording()
                             }
+                        },
+                        onShortMicTap: {
+                            showingMicLongPressTip = true
                         }
                     )
                     .background {
@@ -1099,7 +1152,9 @@ struct MessageConversationModal: View {
                                     otherUserProfilePhotoURL: otherUserProfilePhotoURL,
                                     conversationMessages: conversationMessages,
                                     showingConversationPhotoViewer: $showingConversationPhotoViewer,
-                                    selectedPhotoIndex: $selectedPhotoIndex
+                                    selectedPhotoIndex: $selectedPhotoIndex,
+                                    localImagePreview: localImagePreviews[msg.content],
+                                    isImageUploading: msg.content.hasPrefix("pending://")
                                 )
                                 .id(msg.id)
                                 .onAppear {
@@ -1128,8 +1183,23 @@ struct MessageConversationModal: View {
                         guard !isLoading else { return }
                         scheduleScrollToBottom(proxy: proxy, force: true, isInitial: true)
                     }
+                    .onChange(of: isUploadingImage) { _, uploading in
+                        if uploading {
+                            shouldScrollToBottom = true
+                            scheduleScrollToBottom(proxy: proxy, force: true)
+                        }
+                    }
                     .onChange(of: conversationMessages.count) { _ in
-                        scrollToBottomIfNeeded(proxy: proxy)
+                        if shouldScrollToBottom {
+                            scheduleScrollToBottom(proxy: proxy, force: true, isInitial: true)
+                            shouldScrollToBottom = false
+                        }
+                    }
+                    .onChange(of: conversationMessages.last?.id) { _, _ in
+                        if shouldScrollToBottom {
+                            scheduleScrollToBottom(proxy: proxy, force: true, isInitial: true)
+                            shouldScrollToBottom = false
+                        }
                     }
                     .onChange(of: keyboardScrollToken) { _ in
                         scrollToLatestMessage(proxy: proxy, force: true)
@@ -1142,6 +1212,19 @@ struct MessageConversationModal: View {
                 }
             }
         }
+    }
+    
+    private func closeChat() {
+        isTextFieldFocused = false
+        edgeSwipeOffset = 0
+        isEdgeSwiping = false
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+        dismiss()
     }
     
     private func firstName(from fullName: String) -> String {
@@ -1177,7 +1260,7 @@ struct MessageConversationModal: View {
     
     private func scrollToBottomIfNeeded(proxy: ScrollViewProxy) {
         guard shouldScrollToBottom else { return }
-        scheduleScrollToBottom(proxy: proxy, force: true)
+        scheduleScrollToBottom(proxy: proxy, force: true, isInitial: true)
         shouldScrollToBottom = false
     }
     
@@ -1186,13 +1269,15 @@ struct MessageConversationModal: View {
         force: Bool = false,
         isInitial: Bool = false
     ) {
-        let delays: [TimeInterval] = isInitial ? [0, 0.05, 0.15, 0.35] : [0.05]
+        let delays: [TimeInterval] = isInitial
+            ? [0, 0.05, 0.15, 0.35, 0.6, 1.0]
+            : [0.05, 0.2]
         for delay in delays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 scrollToLatestMessage(
                     proxy: proxy,
                     force: force || shouldScrollToBottom,
-                    animated: !isInitial
+                    animated: !isInitial && delay > 0
                 )
             }
         }
@@ -1206,23 +1291,40 @@ struct MessageConversationModal: View {
         guard force || shouldScrollToBottom else { return }
         guard !conversationMessages.isEmpty else { return }
         
-        let targetID = conversationMessages.last?.id ?? conversationBottomAnchorID
-        if animated {
-            withAnimation(.easeOut(duration: 0.25)) {
-                proxy.scrollTo(targetID, anchor: .bottom)
+        // Prefer the dedicated bottom anchor so LazyVStack always has a scroll target.
+        let scrollAction = {
+            proxy.scrollTo(conversationBottomAnchorID, anchor: .bottom)
+            if let lastID = conversationMessages.last?.id {
+                proxy.scrollTo(lastID, anchor: .bottom)
             }
-        } else {
-            proxy.scrollTo(targetID, anchor: .bottom)
         }
+        
+        if animated {
+            withAnimation(.easeOut(duration: 0.25), scrollAction)
+        } else {
+            scrollAction()
+        }
+    }
+    
+    private func persistConversationCache() {
+        guard !isLoadingMessages else { return }
+        let pool = cachedMessagesPool.isEmpty ? conversationMessages : cachedMessagesPool
+        guard !pool.isEmpty else { return }
+        
+        appState.cacheConversationState(
+            for: otherUserId,
+            messagePool: pool,
+            visibleMessages: conversationMessages,
+            hasMoreOlderMessages: hasMoreOlderMessages
+        )
     }
     
     private func loadConversationMessages() {
         print("💬 MessageConversationModal: Loading conversation messages for: \(message.content)")
         
-        // Check cache first — show only the latest page instantly
-        if let cachedMessages = appState.getCachedConversationMessages(for: otherUserId) {
-            let deduplicated = cachedMessages.deduplicatedConversationMessages()
-            print("💬 MessageConversationModal: Using cached messages (\(deduplicated.count) messages)")
+        // Restore the full cached scroll state when available.
+        if let cachedState = appState.getCachedConversationState(for: otherUserId) {
+            print("💬 MessageConversationModal: Using cached conversation state (\(cachedState.visibleMessages.count) visible / \(cachedState.messagePool.count) total messages)")
             
             Task {
                 if !hasMarkedAsRead {
@@ -1233,9 +1335,11 @@ struct MessageConversationModal: View {
                 }
                 
                 await MainActor.run {
-                    cachedMessagesPool = deduplicated
-                    conversationMessages = Array(deduplicated.suffix(conversationPageSize))
-                    hasMoreOlderMessages = deduplicated.count > conversationPageSize
+                    cachedMessagesPool = cachedState.messagePool
+                    // Always open at the latest messages so a new-message open lands on the tip.
+                    conversationMessages = Array(cachedState.messagePool.suffix(conversationPageSize))
+                    hasMoreOlderMessages = cachedState.messagePool.count > conversationPageSize
+                        || cachedState.hasMoreOlderMessages
                     isLoadingMessages = false
                     previousMessageCount = conversationMessages.count
                     shouldScrollToBottom = true
@@ -1277,7 +1381,7 @@ struct MessageConversationModal: View {
                     isLoadingMessages = false
                     previousMessageCount = conversationMessages.count
                     shouldScrollToBottom = true
-                    appState.cacheConversationMessages(conversationMessages, for: otherUserId)
+                    persistConversationCache()
                 }
             } catch {
                 print("❌ MessageConversationModal: Error loading conversation messages: \(error)")
@@ -1316,7 +1420,7 @@ struct MessageConversationModal: View {
             conversationMessages = olderMessages + conversationMessages
             hasMoreOlderMessages = startIndex > 0
             isLoadingOlderMessages = false
-            appState.cacheConversationMessages(cachedMessagesPool, for: otherUserId)
+            persistConversationCache()
             return
         }
         
@@ -1341,7 +1445,7 @@ struct MessageConversationModal: View {
                         mergedPool = mergedPool.deduplicatedConversationMessages()
                         cachedMessagesPool = mergedPool
                         hasMoreOlderMessages = page.hasMoreOlder
-                        appState.cacheConversationMessages(cachedMessagesPool, for: otherUserId)
+                        persistConversationCache()
                     }
                     isLoadingOlderMessages = false
                 }
@@ -1404,18 +1508,19 @@ struct MessageConversationModal: View {
                     conversationMessages.append(contentsOf: uniqueNew)
                     cachedMessagesPool = (cachedMessagesPool + uniqueNew).deduplicatedConversationMessages()
                     shouldScrollToBottom = true
-                    appState.cacheConversationMessages(cachedMessagesPool, for: otherUserId)
+                    persistConversationCache()
                     
                     let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid ?? ""
                     let hasNewIncomingMessage = uniqueNew.contains { $0.senderId != currentUserId }
                     if hasNewIncomingMessage {
-                        SoundService.shared.playNewMessageSound()
                         Task {
                             await appState.markMessagesAsRead(from: otherUserId)
                         }
                     }
                     
                     previousMessageCount = oldCount + uniqueNew.count
+                    // Tip: newer messages often arrive right after open — keep scrolling to the end.
+                    keyboardScrollToken += 1
                 }
                 return
             }
@@ -1426,10 +1531,12 @@ struct MessageConversationModal: View {
             )
             
             await MainActor.run {
+                guard conversationMessages.isEmpty else { return }
+                
                 conversationMessages = page.messages
                 cachedMessagesPool = page.messages
                 hasMoreOlderMessages = page.hasMoreOlder
-                appState.cacheConversationMessages(cachedMessagesPool, for: otherUserId)
+                persistConversationCache()
                 previousMessageCount = conversationMessages.count
             }
         } catch {
@@ -1568,25 +1675,28 @@ struct MessageConversationModal: View {
             return
         }
         
+        let pendingContent = "pending://\(UUID().uuidString)"
         isUploadingImage = true
+        localImagePreviews[pendingContent] = image
+        updateConversationListAfterOutgoingMessage(
+            content: pendingContent,
+            type: .image,
+            voiceDuration: nil
+        )
+        shouldScrollToBottom = true
         
         Task {
             do {
-                // Determine recipient ID based on message type
                 let recipientId: String
                 if message.senderName == "You" {
-                    // This is a sent message, so we're replying to the recipient
                     recipientId = message.recipientId
                 } else {
-                    // This is an incoming message, so we're replying to the sender
                     recipientId = message.senderId
                 }
                 
-                // Upload image to Firebase Storage
                 let imageURL = try await PhotoStorageService.shared.uploadMessageImage(image, for: currentUserId)
                 print("✅ Image uploaded successfully: \(imageURL)")
                 
-                // Send message with image URL
                 let messageId = try await FirebaseAuthService.shared.sendImageMessage(
                     to: recipientId,
                     imageURL: imageURL
@@ -1596,12 +1706,38 @@ struct MessageConversationModal: View {
                 
                 await MainActor.run {
                     selectedImage = nil
+                    // Swap pending bubble → real URL, keep the same local image under the spinner until ready.
+                    if let index = conversationMessages.firstIndex(where: { $0.content == pendingContent }) {
+                        let pending = conversationMessages[index]
+                        let finalized = Message(
+                            conversationId: UUID(),
+                            senderId: UUID(),
+                            senderFirebaseId: currentUserId,
+                            content: imageURL,
+                            type: .image
+                        )
+                        let finalizedDisplay = MessageDisplay(
+                            message: finalized,
+                            senderName: pending.senderName,
+                            recipientName: pending.recipientName,
+                            senderId: pending.senderId,
+                            recipientId: pending.recipientId,
+                            senderProfilePhotoURL: pending.senderProfilePhotoURL,
+                            recipientProfilePhotoURL: pending.recipientProfilePhotoURL
+                        )
+                        conversationMessages[index] = finalizedDisplay
+                        localImagePreviews[imageURL] = image
+                        localImagePreviews.removeValue(forKey: pendingContent)
+                        cachedMessagesPool = (cachedMessagesPool.filter { $0.content != pendingContent } + [finalizedDisplay])
+                            .deduplicatedConversationMessages()
+                        persistConversationCache()
+                        appState.updateConversationInCache(finalizedDisplay)
+                    } else {
+                        localImagePreviews[imageURL] = image
+                        localImagePreviews.removeValue(forKey: pendingContent)
+                        updateConversationListAfterOutgoingMessage(content: imageURL, type: .image, voiceDuration: nil)
+                    }
                     isUploadingImage = false
-                    
-                    // Update cache with new message
-                    updateConversationListAfterOutgoingMessage(content: imageURL, type: .image, voiceDuration: nil)
-                    let otherUserId = message.senderName == "You" ? message.recipientId : message.senderId
-                    // Refresh will update the cache
                     refreshMessagesOnly()
                 }
                 
@@ -1610,6 +1746,10 @@ struct MessageConversationModal: View {
                 await MainActor.run {
                     selectedImage = nil
                     isUploadingImage = false
+                    conversationMessages.removeAll { $0.content == pendingContent }
+                    cachedMessagesPool.removeAll { $0.content == pendingContent }
+                    localImagePreviews.removeValue(forKey: pendingContent)
+                    persistConversationCache()
                 }
             }
         }
@@ -1685,10 +1825,9 @@ struct MessageConversationModal: View {
         try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
         
         recordingDuration = max(capturedDuration, 0.1)
-        DispatchQueue.main.async {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.85, blendDuration: 0.2)) {
-                showRecordingPreview = true
-            }
+        // Let the recording sheet finish dismissing before presenting the ready sheet.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            showRecordingPreview = true
         }
     }
     
@@ -1703,10 +1842,10 @@ struct MessageConversationModal: View {
         }
         audioRecordingURL = nil
         recordingDuration = 0
+        isSendingVoice = false
         
-        withAnimation {
-            showRecordingPreview = false
-        }
+        isRecording = false
+        showRecordingPreview = false
     }
     
     private func sendVoiceMessage(audioURL: URL, duration: TimeInterval) {
@@ -1780,7 +1919,7 @@ struct MessageConversationModal: View {
         )
         conversationMessages.append(messageDisplay)
         cachedMessagesPool = (cachedMessagesPool + [messageDisplay]).deduplicatedConversationMessages()
-        appState.cacheConversationMessages(cachedMessagesPool, for: otherUserId)
+        persistConversationCache()
         appState.updateConversationInCache(messageDisplay)
     }
 }
@@ -1828,38 +1967,76 @@ struct MessageImagePicker: UIViewControllerRepresentable {
     }
 }
 
-struct RecordingIndicatorView: View {
+struct RecordingIndicatorSheet: View {
     let durationText: String
+    let onStop: () -> Void
+    let onCancel: () -> Void
     @State private var animate = false
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        VStack(spacing: 20) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text("messages.voice.recording".localized)
-                     .font(.headline)
-                     .fontWeight(.semibold)
-                 Spacer()
-             }
-             HStack(spacing: 12) {
-                 Circle()
-                     .fill(Color.red)
-                     .frame(width: 12, height: 12)
-                     .scaleEffect(animate ? 1.2 : 0.9)
-                     .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: animate)
-                     .onAppear {
-                         animate = true
-                     }
-                 Text(durationText)
-                     .font(.title3)
-                     .fontWeight(.medium)
-                     .monospacedDigit()
-                     .foregroundColor(.secondary)
-             }
-         }
-     }
- }
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                
+                HStack(spacing: 12) {
+                    Spacer(minLength: 0)
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 12, height: 12)
+                        .scaleEffect(animate ? 1.2 : 0.9)
+                        .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: animate)
+                        .onAppear { animate = true }
+                    
+                    Text(durationText)
+                        .font(.title3)
+                        .fontWeight(.medium)
+                        .monospacedDigit()
+                        .foregroundColor(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .frame(height: 64)
+                .frame(maxWidth: .infinity)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            
+            HStack(spacing: 12) {
+                Button(role: .destructive, action: onCancel) {
+                    Text("common.delete".localized)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                
+                Button(action: onStop) {
+                    Text("common.done".localized)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+}
 
-struct RecordingPreviewView: View {
+struct SendingSpinner: View {
+    @State private var rotating = false
+    
+    var body: some View {
+        Circle()
+            .trim(from: 0.12, to: 0.88)
+            .stroke(Color.black, style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+            .frame(width: 14, height: 14)
+            .rotationEffect(.degrees(rotating ? 360 : 0))
+            .animation(.linear(duration: 0.75).repeatForever(autoreverses: false), value: rotating)
+            .onAppear { rotating = true }
+    }
+}
+
+struct RecordingPreviewSheet: View {
     let audioURL: URL
     let duration: TimeInterval
     let isSending: Bool
@@ -1867,56 +2044,57 @@ struct RecordingPreviewView: View {
     let onDiscard: () -> Void
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        VStack(spacing: 20) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text("messages.voice.ready".localized)
                     .font(.headline)
                     .fontWeight(.semibold)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
-                 Spacer()
-             }
-             
-             VoiceMessagePlayerView(
-                 audioURL: audioURL,
-                 displayDuration: duration,
-                 accentColor: .white,
-                 textColor: .white,
-                 baseColor: Color.gray,
-                 waveColor: Color.white
-             )
-             
-             HStack {
-                 Button(role: .destructive) {
-                     onDiscard()
-                 } label: {
-                     Label("common.delete".localized, systemImage: "trash")
-                         .font(.subheadline)
-                 }
-                 .buttonStyle(.borderedProminent)
-                 .tint(.red)
-                 
-                 Spacer()
-                 
-                 Button(action: onSend) {
-                     if isSending {
-                         ProgressView()
-                             .progressViewStyle(CircularProgressViewStyle())
-                             .scaleEffect(0.8)
-                     } else {
-                         Label("messages.send".localized, systemImage: "paperplane.fill")
-                             .font(.subheadline)
-                     }
-                 }
-                 .buttonStyle(.borderedProminent)
-                 .tint(.green)
-                 .disabled(isSending)
-             }
-         }
-         .padding(.vertical, 20)
-         .padding(.horizontal, 24)
-     }
- }
+                
+                // Same allocated slot as the recording progress row.
+                VoiceMessagePlayerView(
+                    audioURL: audioURL,
+                    displayDuration: duration,
+                    accentColor: Color(red: 0.07, green: 0.55, blue: 0.47),
+                    textColor: .primary,
+                    baseColor: Color(.systemGray5),
+                    waveColor: Color.gray.opacity(0.45)
+                )
+                .frame(height: 64)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            
+            HStack(spacing: 12) {
+                Button(role: .destructive, action: onDiscard) {
+                    Text("common.delete".localized)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(isSending)
+                
+                Button(action: onSend) {
+                    HStack(spacing: 8) {
+                        if isSending {
+                            SendingSpinner()
+                            Text("messages.sending".localized)
+                        } else {
+                            Text("messages.send".localized)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                .disabled(isSending)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+}
 
 struct VoiceMessagePlayerView: View {
     let audioURL: URL?
@@ -1937,48 +2115,55 @@ struct VoiceMessagePlayerView: View {
     @State private var pendingAutoPlay = false
     @State private var showElapsedTime = false
     
+    private let playedWaveColor = Color.black.opacity(0.85)
+    private let unplayedWaveColor = Color.gray.opacity(0.35)
+    private let scrubberColor = Color(red: 0.45, green: 0.78, blue: 0.95)
+    
     var body: some View {
-        let bubbleHeight: CGFloat = 80
-        ZStack(alignment: .bottomTrailing) {
-            VoiceMessageBackground(
-                baseColor: baseColor,
-                waveColor: waveColor,
-                progress: progress
-            )
-            .frame(height: bubbleHeight)
-            
-            HStack(spacing: 12) {
-                Button(action: togglePlayback) {
-                    ZStack {
-                        Circle()
-                            .fill(accentColor.opacity(0.18))
-                            .frame(width: 44, height: 44)
-                        if isLoading {
-                            ProgressView()
-                                .tint(accentColor)
-                        } else if loadError {
-                            Image(systemName: "exclamationmark.triangle")
-                                .foregroundColor(.orange)
-                        } else {
-                            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                                .foregroundColor(accentColor)
-                        }
+        HStack(alignment: .center, spacing: 10) {
+            Button(action: togglePlayback) {
+                ZStack {
+                    Circle()
+                        .fill(accentColor.opacity(0.15))
+                        .frame(width: 40, height: 40)
+                    if isLoading {
+                        ProgressView()
+                            .tint(accentColor)
+                    } else if loadError {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundColor(.orange)
+                    } else {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(accentColor)
                     }
                 }
-                .buttonStyle(.plain)
-                .disabled(isLoading || loadError || audioURL == nil)
-                
-                Spacer()
             }
-            .padding(.horizontal, 16)
-            .frame(height: bubbleHeight, alignment: .center)
+            .buttonStyle(.plain)
+            .disabled(isLoading || loadError || audioURL == nil)
             
-            Text(displayTime)
-                .font(.caption)
-                .foregroundColor(textColor.opacity(0.75))
-                .padding(.trailing, 16)
-                .padding(.bottom, 10)
+            VStack(alignment: .leading, spacing: 4) {
+                VoiceMessageWaveform(
+                    progress: progress,
+                    playedColor: playedWaveColor,
+                    unplayedColor: unplayedWaveColor,
+                    scrubberColor: scrubberColor,
+                    onSeek: seekToProgress
+                )
+                .frame(height: 24)
+                
+                Text(displayTime)
+                    .font(.caption2)
+                    .foregroundColor(textColor.opacity(0.65))
+                    .monospacedDigit()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(minWidth: 200, maxWidth: 260)
+        .background(baseColor)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onAppear {
             if duration == 0, let displayDuration {
                 duration = displayDuration
@@ -2000,10 +2185,29 @@ struct VoiceMessagePlayerView: View {
     }
     
     private var displayTime: String {
-        if showElapsedTime {
+        if showElapsedTime || isPlaying || currentTime > 0 {
             return formattedDuration(currentTime)
         }
         return formattedDuration(duration > 0 ? duration : (displayDuration ?? 0))
+    }
+    
+    private func formattedDuration(_ time: TimeInterval) -> String {
+        let total = max(0, Int(time.rounded()))
+        let minutes = total / 60
+        let seconds = total % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+    
+    private func seekToProgress(_ newProgress: Double) {
+        let clamped = min(max(newProgress, 0), 1)
+        guard duration > 0 else { return }
+        let newTime = duration * clamped
+        currentTime = newTime
+        showElapsedTime = true
+        audioPlayer?.currentTime = newTime
+        if isPlaying {
+            audioPlayer?.play()
+        }
     }
     
     private func togglePlayback() {
@@ -2087,7 +2291,7 @@ struct VoiceMessagePlayerView: View {
         isPlaying = true
         showElapsedTime = true
         playbackTimer?.invalidate()
-        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
             currentTime = min(player.currentTime, duration)
             if !player.isPlaying {
                 stopPlayback(resetPosition: true)
@@ -2097,7 +2301,7 @@ struct VoiceMessagePlayerView: View {
     
     private func stopPlayback(resetPosition: Bool) {
         if let player = audioPlayer, player.isPlaying {
-            player.stop()
+            player.pause()
         }
         isPlaying = false
         playbackTimer?.invalidate()
@@ -2105,72 +2309,155 @@ struct VoiceMessagePlayerView: View {
         if resetPosition {
             currentTime = 0
             showElapsedTime = false
+            audioPlayer?.currentTime = 0
         }
     }
 }
 
-struct VoiceMessageBackground: View {
-    let baseColor: Color
-    let waveColor: Color
+struct VoiceMessageWaveform: View {
     let progress: Double
-    private let cornerRadius: CGFloat = 16
-    private let barCount = 32
-    private let leadingInset: CGFloat = 90
-    private let trailingInset: CGFloat = 24
+    let playedColor: Color
+    let unplayedColor: Color
+    let scrubberColor: Color
+    var onSeek: ((Double) -> Void)?
+    
+    private let barCount = 40
+    private let scrubberSize: CGFloat = 11
+    private let scrubberHitSize: CGFloat = 32
+    
+    @State private var dragStartProgress: Double?
     
     var body: some View {
         GeometryReader { proxy in
-            let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            let width = proxy.size.width
+            let height = proxy.size.height
+            let step = width / CGFloat(max(barCount - 1, 1))
+            let progressX = width * CGFloat(min(max(progress, 0), 1))
+            let centerY = height / 2
+            let scrubberX = max(scrubberSize / 2, min(progressX, width - scrubberSize / 2))
+            
             ZStack {
-                shape
-                    .fill(baseColor)
                 Canvas { context, size in
-                    let waveWidth = max(0, size.width - leadingInset - trailingInset)
-                    guard waveWidth > 0 else { return }
-                    let step = waveWidth / CGFloat(max(barCount - 1, 1))
-                    let centerY = size.height / 2
+                    let midY = size.height / 2
                     for index in 0..<barCount {
+                        let normalized = Double(index) / Double(max(barCount - 1, 1))
+                        let isPlayed = normalized <= progress
                         let currentWidth = barWidth(for: index)
-                        let currentHeight = barHeight(for: index)
-                        let xPosition = leadingInset + step * CGFloat(index)
+                        let currentHeight = min(barHeight(for: index), size.height - 4)
+                        let xPosition = step * CGFloat(index)
                         let rect = CGRect(
                             x: xPosition - currentWidth / 2,
-                            y: centerY - currentHeight / 2,
+                            y: midY - currentHeight / 2,
                             width: currentWidth,
                             height: currentHeight
                         )
                         let path = Path(roundedRect: rect, cornerRadius: currentWidth / 2)
-                        context.fill(path, with: .color(barColor(for: index)))
+                        context.fill(path, with: .color(isPlayed ? playedColor : unplayedColor))
                     }
                 }
-                .clipShape(shape)
+                .allowsHitTesting(false)
+                
+                // Seek only via the blue time indicator (expanded hit target for usability).
+                Circle()
+                    .fill(scrubberColor)
+                    .frame(width: scrubberSize, height: scrubberSize)
+                    .shadow(color: .black.opacity(0.15), radius: 1, x: 0, y: 0.5)
+                    .frame(width: scrubberHitSize, height: scrubberHitSize)
+                    .contentShape(Rectangle())
+                    .position(x: scrubberX, y: centerY)
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                guard width > 0, let onSeek else { return }
+                                if dragStartProgress == nil {
+                                    dragStartProgress = progress
+                                }
+                                let delta = Double(value.translation.width / width)
+                                onSeek(min(max((dragStartProgress ?? progress) + delta, 0), 1))
+                            }
+                            .onEnded { _ in
+                                dragStartProgress = nil
+                            }
+                    )
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
+            .frame(width: width, height: height)
+            .animation(nil, value: progress)
         }
-        .allowsHitTesting(false)
     }
     
     private func barHeight(for index: Int) -> CGFloat {
-        let pattern: [CGFloat] = [20, 14, 24, 12, 26, 15, 22, 13, 24, 16, 20, 14, 28, 17, 22, 15, 24, 14, 22, 15, 24, 13]
+        // Compact WhatsApp-style bars, vertically centered in the wave area.
+        let pattern: [CGFloat] = [
+            6, 10, 14, 8, 16, 9, 12, 7, 15, 10,
+            11, 8, 17, 10, 13, 7, 15, 9, 12, 7,
+            14, 10, 11, 8, 16, 9, 12, 7, 15, 10,
+            11, 7, 14, 9, 16, 8, 12, 7, 13, 9
+        ]
         return pattern[index % pattern.count]
     }
     
     private func barWidth(for index: Int) -> CGFloat {
-        index % 3 == 0 ? 3 : 2
+        index % 4 == 0 ? 2.5 : 2
     }
+}
+
+struct ChatImageBubbleContent: View {
+    let remoteURL: URL?
+    let localImage: UIImage?
+    let isUploading: Bool
     
-    private func barColor(for index: Int) -> Color {
-        let normalized = Double(index) / Double(max(barCount - 1, 1))
-        let highlightWidth = 0.22
-        let distance = progress - normalized
-        let emphasis = max(0.0, min(1.0, (distance + highlightWidth) / highlightWidth))
-        let baseRGB: (Double, Double, Double) = (0.70, 0.72, 0.75)
-        let targetRGB: (Double, Double, Double) = (1.0, 1.0, 1.0)
-        let red = baseRGB.0 + (targetRGB.0 - baseRGB.0) * emphasis
-        let green = baseRGB.1 + (targetRGB.1 - baseRGB.1) * emphasis
-        let blue = baseRGB.2 + (targetRGB.2 - baseRGB.2) * emphasis
-        let opacity = 0.55 + (0.4 * emphasis)
-        return Color(.sRGB, red: red, green: green, blue: blue, opacity: opacity)
+    var body: some View {
+        ZStack {
+            if let localImage {
+                Image(uiImage: localImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 150, maxHeight: 150)
+                    .cornerRadius(10)
+            }
+            
+            if let remoteURL {
+                AsyncImage(url: remoteURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: 150, maxHeight: 150)
+                            .cornerRadius(10)
+                    case .failure:
+                        if localImage == nil {
+                            Image(systemName: "photo")
+                                .foregroundColor(.gray)
+                                .frame(width: 150, height: 150)
+                        }
+                    case .empty:
+                        if localImage == nil {
+                            ProgressView()
+                                .frame(width: 150, height: 150)
+                        }
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+            } else if localImage == nil {
+                ProgressView()
+                    .frame(width: 150, height: 150)
+            }
+            
+            if isUploading {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.black.opacity(0.35))
+                    .frame(maxWidth: 150, maxHeight: 150)
+                
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    .scaleEffect(1.15)
+                    .padding(14)
+                    .background(Circle().fill(Color.black.opacity(0.45)))
+            }
+        }
+        .frame(maxWidth: 150, maxHeight: 150)
     }
 }
 
@@ -2181,11 +2468,14 @@ struct MessageBubble: View {
     let conversationMessages: [MessageDisplay]
     @Binding var showingConversationPhotoViewer: Bool
     @Binding var selectedPhotoIndex: Int
+    var localImagePreview: UIImage? = nil
+    var isImageUploading: Bool = false
     @State private var showingSaveAlert = false
     @State private var saveSuccess = false
     
     private let outgoingBubbleColor = Color.white
     private let incomingBubbleColor = Color(red: 0.851, green: 0.992, blue: 0.827) // WhatsApp-style green (#D9FDD3)
+    private let bubbleTextColor = Color.black
     private let voiceAccentColor = Color(red: 0.07, green: 0.55, blue: 0.47)
     
     var body: some View {
@@ -2200,39 +2490,27 @@ struct MessageBubble: View {
                         switch message.messageType {
                         case .image:
                             Button(action: {
-                                let imageMessages = conversationMessages.filter { $0.messageType == .image }
+                                guard !isImageUploading, !message.content.hasPrefix("pending://") else { return }
+                                let imageMessages = conversationMessages.filter { $0.messageType == .image && !$0.content.hasPrefix("pending://") }
                                 if let index = imageMessages.firstIndex(where: { $0.id == message.id }) {
                                     selectedPhotoIndex = index
                                     showingConversationPhotoViewer = true
                                 }
                             }) {
-                                AsyncImage(url: URL(string: message.content)) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fit)
-                                            .frame(maxWidth: 150, maxHeight: 150)
-                                            .cornerRadius(10)
-                                    case .failure:
-                                        Image(systemName: "photo")
-                                            .foregroundColor(.gray)
-                                            .frame(width: 150, height: 150)
-                                    case .empty:
-                                        ProgressView()
-                                            .frame(width: 150, height: 150)
-                                    @unknown default:
-                                        EmptyView()
-                                    }
-                                }
+                                ChatImageBubbleContent(
+                                    remoteURL: message.content.hasPrefix("pending://") ? nil : URL(string: message.content),
+                                    localImage: localImagePreview,
+                                    isUploading: isImageUploading
+                                )
                             }
                             .buttonStyle(PlainButtonStyle())
+                            .disabled(isImageUploading || message.content.hasPrefix("pending://"))
                         case .voice:
                             VoiceMessagePlayerView(
                                 audioURL: URL(string: message.content),
                                 displayDuration: message.voiceDuration,
                                 accentColor: voiceAccentColor,
-                                textColor: .primary,
+                                textColor: bubbleTextColor,
                                 baseColor: outgoingBubbleColor,
                                 waveColor: Color.gray.opacity(0.45)
                             )
@@ -2242,7 +2520,7 @@ struct MessageBubble: View {
                                 .lineLimit(nil)
                                 .padding(8)
                                 .background(outgoingBubbleColor)
-                                .foregroundColor(.primary)
+                                .foregroundColor(bubbleTextColor)
                                 .cornerRadius(10)
                         }
                     }
@@ -2354,31 +2632,17 @@ struct MessageBubble: View {
                         switch message.messageType {
                         case .image:
                             Button(action: {
-                                let imageMessages = conversationMessages.filter { $0.messageType == .image }
+                                let imageMessages = conversationMessages.filter { $0.messageType == .image && !$0.content.hasPrefix("pending://") }
                                 if let index = imageMessages.firstIndex(where: { $0.id == message.id }) {
                                     selectedPhotoIndex = index
                                     showingConversationPhotoViewer = true
                                 }
                             }) {
-                                AsyncImage(url: URL(string: message.content)) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fit)
-                                            .frame(maxWidth: 150, maxHeight: 150)
-                                            .cornerRadius(10)
-                                    case .failure:
-                                        Image(systemName: "photo")
-                                            .foregroundColor(.gray)
-                                            .frame(width: 150, height: 150)
-                                    case .empty:
-                                        ProgressView()
-                                            .frame(width: 150, height: 150)
-                                    @unknown default:
-                                        EmptyView()
-                                    }
-                                }
+                                ChatImageBubbleContent(
+                                    remoteURL: URL(string: message.content),
+                                    localImage: localImagePreview,
+                                    isUploading: false
+                                )
                             }
                             .buttonStyle(PlainButtonStyle())
                         case .voice:
@@ -2386,7 +2650,7 @@ struct MessageBubble: View {
                                 audioURL: URL(string: message.content),
                                 displayDuration: message.voiceDuration,
                                 accentColor: voiceAccentColor,
-                                textColor: .primary,
+                                textColor: bubbleTextColor,
                                 baseColor: incomingBubbleColor,
                                 waveColor: Color.gray.opacity(0.45)
                             )
@@ -2396,7 +2660,7 @@ struct MessageBubble: View {
                                 .lineLimit(nil)
                                 .padding(8)
                                 .background(incomingBubbleColor)
-                                .foregroundColor(.primary)
+                                .foregroundColor(bubbleTextColor)
                                 .cornerRadius(10)
                         }
                     }

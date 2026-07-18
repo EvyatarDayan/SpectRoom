@@ -123,9 +123,6 @@ struct KeyboardStickyComposerVisualTest: View {
     
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            Image(systemName: "plus")
-                .frame(width: 34, height: 34)
-            
             TextField("", text: $text, axis: .vertical)
                 .lineLimit(1...5)
                 .focused($focused)
@@ -137,7 +134,7 @@ struct KeyboardStickyComposerVisualTest: View {
                 .background(Color(.systemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             
-            Image(systemName: "camera").frame(width: 34, height: 34)
+            Image(systemName: "folder").frame(width: 34, height: 34)
             Image(systemName: "mic").frame(width: 34, height: 34)
         }
         .padding(.horizontal, 10)

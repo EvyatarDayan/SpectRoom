@@ -134,6 +134,8 @@ struct ProfileCard {
     let lastSeen: Date
     let idealFirstDate: [String]
     let shareIdealFirstDate: Bool
+    let sensoryPreferences: [String]
+    let shareSensoryPreferences: Bool
     let energyLevel: Int
     let matchPercentage: Int
     
@@ -159,6 +161,8 @@ struct ProfileCard {
         lastSeen: Date,
         idealFirstDate: [String],
         shareIdealFirstDate: Bool,
+        sensoryPreferences: [String] = [],
+        shareSensoryPreferences: Bool = false,
         energyLevel: Int,
         matchPercentage: Int = 0
     ) {
@@ -183,6 +187,8 @@ struct ProfileCard {
         self.lastSeen = lastSeen
         self.idealFirstDate = idealFirstDate
         self.shareIdealFirstDate = shareIdealFirstDate
+        self.sensoryPreferences = sensoryPreferences
+        self.shareSensoryPreferences = shareSensoryPreferences
         self.energyLevel = energyLevel
         self.matchPercentage = matchPercentage
     }

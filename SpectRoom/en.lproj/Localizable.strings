@@ -51,6 +51,7 @@
 "onboarding.previous" = "Previous";
 "onboarding.next" = "Next";
 "onboarding.get.started" = "Get Started";
+"onboarding.dont.show.again" = "Don't show this again";
 
 // MARK: - Navigation & Tabs
 "nav.discover" = "Discover";
@@ -83,9 +84,15 @@
 "settings.notification.permission.message" = "Notifications are disabled. Please enable them in Settings to receive match and message notifications.";
 "settings.settings.button" = "Settings";
 "settings.cancel" = "Cancel";
-"settings.blocked.users.section.title" = "Blocked Users";
-"settings.blocked.users.button.title" = "Blocked Users";
-"settings.blocked.users.button.subtitle" = "See all blocked users";
+"settings.blocked.users.section.title" = "Blocked profiles";
+"settings.blocked.users.button.title" = "Blocked profiles";
+"settings.blocked.users.button.subtitle" = "See all blocked profiles";
+"settings.blocked.users.modal.title" = "Blocked profiles";
+"settings.blocked.users.empty" = "No blocked profiles";
+"settings.blocked.users.since" = "Blocked %@";
+"settings.blocked.users.no.date" = "Blocked";
+"settings.blocked.users.unblock.action" = "Unblock";
+"settings.blocked.users.unblock.confirm.message" = "Do you want to unblock %@?";
 
 "settings.authentication.section.title" = "Authentication";
 "settings.authentication.signout.subtitle" = "Tap to sign out";
@@ -177,6 +184,7 @@
 "messages.start.swiping" = "Start Swiping";
 "messages.new.message" = "New Message";
 "messages.send" = "Send";
+"messages.sending" = "Sending";
 "messages.send.message" = "Send Message";
 "messages.type.message" = "Type a message...";
 "messages.type.something" = "Type something...";
@@ -193,6 +201,9 @@
 "messages.you" = "You";
 "messages.voice.recording" = "Recording...";
 "messages.voice.ready" = "Message ready";
+"messages.voice.long.press.tip.title" = "Voice message";
+"messages.voice.long.press.tip.message" = "Long tap for recording a message";
+"messages.voice.long.press.tip.got.it" = "Got it";
 "messages.preview.photo" = "📷 Photo";
 "messages.preview.voice" = "🎤 Voice message";
 "messages.preview.voice.duration" = "🎤 Voice message • %@";
@@ -325,6 +336,28 @@
 "profile.edit.ideal.date.cinema.movie.night" = "Cinema Movie Night";
 "profile.edit.ideal.date.friendly.video.chat" = "Friendly Video Chat";
 "profile.ideal.first.date" = "Ideal First Date";
+"profile.edit.sensory.preferences" = "Sensory Preferences";
+"profile.sensory.preferences" = "Sensory Preferences";
+"profile.sensory.low.noise.title" = "Low-noise environments";
+"profile.sensory.low.noise.subtitle" = "Prefers quiet spaces, low-volume music, or peaceful outdoor spots";
+"profile.sensory.dim.lighting.title" = "Dim / soft lighting";
+"profile.sensory.dim.lighting.subtitle" = "Enjoys cozy, warmly lit spaces over bright or fluorescent lights";
+"profile.sensory.active.walking.title" = "Active / walking dates";
+"profile.sensory.active.walking.subtitle" = "Prefers moving, walking, or gentle activities over sitting still";
+"profile.sensory.short.meetups.title" = "Short, low-pressure meetups";
+"profile.sensory.short.meetups.subtitle" = "Prefers short first dates, like a quick 45-minute coffee";
+"profile.sensory.fidget.stim.title" = "Fidget / stim-friendly spaces";
+"profile.sensory.fidget.stim.subtitle" = "Loves playing with fidgets, doodling, or having something to hold";
+"profile.sensory.safe.foods.title" = "Predictable \"safe\" foods";
+"profile.sensory.safe.foods.subtitle" = "Enjoys familiar menus with simple, consistent textures";
+"profile.sensory.scent.free.title" = "Scent-free environments";
+"profile.sensory.scent.free.subtitle" = "Loves spaces free of strong perfumes, candles, or incense";
+"profile.sensory.temperature.title" = "Comfortable temperature zones";
+"profile.sensory.temperature.subtitle" = "Prefers predictable, temperature-controlled indoor spaces";
+"profile.sensory.visually.calm.title" = "Visually calm spaces";
+"profile.sensory.visually.calm.subtitle" = "Enjoys minimalist, clean, and uncluttered environments";
+"profile.sensory.clear.touch.title" = "Deep-pressure / clear touch";
+"profile.sensory.clear.touch.subtitle" = "Prefers firm physical contact or clear verbal consent over unexpected light touches";
 "profile.body.type" = "Body type";
 "profile.edit.body.type.slim" = "Slim";
 "profile.edit.body.type.average" = "Average";

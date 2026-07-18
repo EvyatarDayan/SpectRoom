@@ -15,8 +15,8 @@ struct ComposerDismissKeyboardTextView: UIViewRepresentable {
     
     var placeholder: String
     var isDisabled: Bool = false
-    var minHeight: CGFloat = 38
-    var maxHeight: CGFloat = 38
+    var minHeight: CGFloat = 42
+    var maxHeight: CGFloat = 42
     
     func makeCoordinator() -> Coordinator {
         Coordinator(self)

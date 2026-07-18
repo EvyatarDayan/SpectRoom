@@ -13,6 +13,7 @@ struct MatchModalView: View {
     let onMaybeLater: () -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showConfetti = false
     
     private func firstName(from fullName: String) -> String {
         let components = fullName.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
@@ -92,6 +93,7 @@ struct MatchModalView: View {
                 )
             }
             .padding(.horizontal, 40)
+            .confettiBurstAnchor()
             
             VStack(spacing: 12) {
                 let baseColor = colorScheme == .dark ? Color.gray : Color.black
@@ -165,6 +167,10 @@ struct MatchModalView: View {
         )
         .padding(.horizontal, 12)
         .background(Color.clear)
+        .confettiCelebration(isVisible: $showConfetti)
+        .onAppear {
+            showConfetti = true
+        }
     }
 }
 

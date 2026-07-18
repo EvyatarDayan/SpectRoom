@@ -51,6 +51,7 @@
 "onboarding.previous" = "Précédent";
 "onboarding.next" = "Suivant";
 "onboarding.get.started" = "Commencer";
+"onboarding.dont.show.again" = "Ne plus afficher";
 
 // MARK: - Navigation & Tabs
 "nav.discover" = "Découvrir";
@@ -83,9 +84,15 @@
 "settings.notification.permission.message" = "Les notifications sont désactivées. Veuillez les activer dans les Paramètres pour recevoir des notifications de correspondances et de messages.";
 "settings.settings.button" = "Paramètres";
 "settings.cancel" = "Annuler";
-"settings.blocked.users.section.title" = "Utilisateurs bloqués";
-"settings.blocked.users.button.title" = "Utilisateurs bloqués";
-"settings.blocked.users.button.subtitle" = "Voir tous les utilisateurs bloqués";
+"settings.blocked.users.section.title" = "Profils bloqués";
+"settings.blocked.users.button.title" = "Profils bloqués";
+"settings.blocked.users.button.subtitle" = "Voir tous les profils bloqués";
+"settings.blocked.users.modal.title" = "Profils bloqués";
+"settings.blocked.users.empty" = "Aucun profil bloqué";
+"settings.blocked.users.since" = "Bloqué %@";
+"settings.blocked.users.no.date" = "Bloqué";
+"settings.blocked.users.unblock.action" = "Débloquer";
+"settings.blocked.users.unblock.confirm.message" = "Voulez-vous débloquer %@ ?";
 
 "settings.authentication.section.title" = "Authentification";
 "settings.authentication.signout.subtitle" = "Appuyez pour vous déconnecter";
@@ -177,6 +184,7 @@
 "messages.start.swiping" = "Commencer à Swiper";
 "messages.new.message" = "Nouveau Message";
 "messages.send" = "Envoyer";
+"messages.sending" = "Envoi…";
 "messages.send.message" = "Envoyer le Message";
 "messages.type.message" = "Tapez un message...";
 "messages.type.something" = "Tapez quelque chose...";
@@ -193,6 +201,9 @@
 "messages.you" = "Vous";
 "messages.voice.recording" = "Enregistrement en cours...";
 "messages.voice.ready" = "Message prêt";
+"messages.voice.long.press.tip.title" = "Message vocal";
+"messages.voice.long.press.tip.message" = "Appui long pour enregistrer un message";
+"messages.voice.long.press.tip.got.it" = "Compris";
 "messages.preview.photo" = "📷 Photo";
 "messages.preview.voice" = "🎤 Message vocal";
 "messages.preview.voice.duration" = "🎤 Message vocal • %@";
@@ -325,6 +336,28 @@
 "profile.edit.ideal.date.cinema.movie.night" = "Soirée cinéma";
 "profile.edit.ideal.date.friendly.video.chat" = "Chat vidéo amical";
 "profile.ideal.first.date" = "Premier rendez-vous idéal";
+"profile.edit.sensory.preferences" = "Préférences sensorielles";
+"profile.sensory.preferences" = "Préférences sensorielles";
+"profile.sensory.low.noise.title" = "Environnements peu bruyants";
+"profile.sensory.low.noise.subtitle" = "Préfère les espaces calmes, la musique douce ou les lieux extérieurs paisibles";
+"profile.sensory.dim.lighting.title" = "Éclairage tamisé / doux";
+"profile.sensory.dim.lighting.subtitle" = "Apprécie les espaces chaleureux plutôt que les lumières vives ou fluorescentes";
+"profile.sensory.active.walking.title" = "Rendez-vous actifs / en marchant";
+"profile.sensory.active.walking.subtitle" = "Préfère bouger, marcher ou des activités douces plutôt que rester assis";
+"profile.sensory.short.meetups.title" = "Rencontres courtes et sans pression";
+"profile.sensory.short.meetups.subtitle" = "Préfère les premiers rendez-vous courts, comme un café rapide de 45 minutes";
+"profile.sensory.fidget.stim.title" = "Espaces adaptés aux fidgets / stim";
+"profile.sensory.fidget.stim.subtitle" = "Aime les fidgets, gribouiller ou avoir quelque chose à tenir";
+"profile.sensory.safe.foods.title" = "Aliments \"sûrs\" prévisibles";
+"profile.sensory.safe.foods.subtitle" = "Apprécie les menus familiers avec des textures simples et constantes";
+"profile.sensory.scent.free.title" = "Environnements sans parfums forts";
+"profile.sensory.scent.free.subtitle" = "Aime les espaces sans parfums forts, bougies ou encens";
+"profile.sensory.temperature.title" = "Zones de température confortable";
+"profile.sensory.temperature.subtitle" = "Préfère les espaces intérieurs à température contrôlée et prévisible";
+"profile.sensory.visually.calm.title" = "Espaces visuellement calmes";
+"profile.sensory.visually.calm.subtitle" = "Apprécie les environnements minimalistes, propres et dégagés";
+"profile.sensory.clear.touch.title" = "Pression profonde / contact clair";
+"profile.sensory.clear.touch.subtitle" = "Préfère un contact physique ferme ou un consentement verbal clair plutôt que des touches légères inattendues";
 "profile.body.type" = "Type de corps";
 "profile.edit.body.type.slim" = "Mince";
 "profile.edit.body.type.average" = "Moyen";

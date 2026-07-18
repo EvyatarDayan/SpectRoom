@@ -30,14 +30,19 @@ struct SearchView: View {
     @State private var programmaticSwipeDirection: String? = nil // "left" or "right" for button-triggered swipes
     @State private var lastFetchedUserDocumentId: String?
     @State private var hasMoreUsersToLoad = true
+    @State private var hasMoreRemoteUsers = true
     @State private var isLoadingMoreProfiles = false
     @State private var cachedSwipeFilter: FirebaseAuthService.SwipeFilterState?
     @State private var pendingDiscoverProfiles: [ProfileCard] = []
     
     private enum DiscoverConstants {
-        static let firestorePageSize = 15
-        static let profilesPerBatch = 8
-        static let prefetchThreshold = 3
+        /// How many discover cards to surface per load.
+        static let profilesPerBatch = 10
+        /// Firestore page size used while collecting eligible users for a batch.
+        static let firestorePageSize = 20
+        /// Prefetch when the user reaches the 7th card of the current 10
+        /// (4 cards remaining including the current one: indices 6…9).
+        static let prefetchRemainingThreshold = 4
     }
     
     let filterOptions = ["Nearby", "Similar Interests", "Same Age Group", "Online Now"]
@@ -456,6 +461,7 @@ struct SearchView: View {
         isLoading = true
         lastFetchedUserDocumentId = nil
         hasMoreUsersToLoad = true
+        hasMoreRemoteUsers = true
         cachedSwipeFilter = nil
         pendingDiscoverProfiles = []
         loadDiscoverProfiles()
@@ -509,6 +515,8 @@ struct SearchView: View {
             lastSeen: user.lastSeen,
             idealFirstDate: user.idealFirstDate,
             shareIdealFirstDate: user.shareIdealFirstDate,
+            sensoryPreferences: user.sensoryPreferences,
+            shareSensoryPreferences: user.shareSensoryPreferences,
             energyLevel: user.energyLevel,
             matchPercentage: matchPercentage
         )
@@ -525,7 +533,7 @@ struct SearchView: View {
     
     private func appendProfilesFromPendingQueue() {
         guard !pendingDiscoverProfiles.isEmpty else {
-            hasMoreUsersToLoad = false
+            hasMoreUsersToLoad = hasMoreRemoteUsers
             isLoadingMoreProfiles = false
             return
         }
@@ -533,7 +541,7 @@ struct SearchView: View {
         let nextBatch = Array(pendingDiscoverProfiles.prefix(DiscoverConstants.profilesPerBatch))
         pendingDiscoverProfiles.removeFirst(nextBatch.count)
         profiles.append(contentsOf: nextBatch)
-        hasMoreUsersToLoad = !pendingDiscoverProfiles.isEmpty
+        hasMoreUsersToLoad = hasMoreRemoteUsers || !pendingDiscoverProfiles.isEmpty
         isLoadingMoreProfiles = false
         print("✅ SearchView: Appended \(nextBatch.count) profiles from sorted queue (total: \(profiles.count))")
     }
@@ -552,8 +560,14 @@ struct SearchView: View {
                 syncDiscoverCache()
                 return
             }
+            
+            guard hasMoreRemoteUsers else {
+                hasMoreUsersToLoad = false
+                isLoadingMoreProfiles = false
+                return
+            }
         } else {
-            print("🔍 SearchView: Starting paginated profile load...")
+            print("🔍 SearchView: Starting paginated profile load (batch size \(DiscoverConstants.profilesPerBatch))...")
             guard appState.currentUser != nil else {
                 print("⚠️ SearchView: currentUser not ready yet, deferring profile load")
                 hasCompletedDiscoverLoad = false
@@ -563,6 +577,7 @@ struct SearchView: View {
             isLoading = true
             lastFetchedUserDocumentId = nil
             hasMoreUsersToLoad = true
+            hasMoreRemoteUsers = true
             pendingDiscoverProfiles = []
             profiles = []
             currentCardIndex = 0
@@ -594,7 +609,7 @@ struct SearchView: View {
                 var cursor = append ? lastFetchedUserDocumentId : nil
                 var hasMore = true
                 var seenUserIds = Set(profiles.map(\.userId))
-                let minimumProfiles = append ? DiscoverConstants.profilesPerBatch : DiscoverConstants.profilesPerBatch
+                let minimumProfiles = DiscoverConstants.profilesPerBatch
                 
                 while hasMore && collectedProfiles.count < minimumProfiles {
                     let page = try await FirebaseAuthService.shared.fetchUsersPage(
@@ -632,16 +647,17 @@ struct SearchView: View {
                 
                 await MainActor.run {
                     lastFetchedUserDocumentId = cursor
+                    hasMoreRemoteUsers = hasMore
                     
                     if append {
                         profiles.append(contentsOf: sortedProfiles)
-                        hasMoreUsersToLoad = hasMore || !pendingDiscoverProfiles.isEmpty
+                        hasMoreUsersToLoad = hasMoreRemoteUsers || !pendingDiscoverProfiles.isEmpty
                         isLoadingMoreProfiles = false
                         print("✅ SearchView: Loaded \(sortedProfiles.count) more profiles (total: \(profiles.count))")
                     } else {
                         profiles = Array(sortedProfiles.prefix(DiscoverConstants.profilesPerBatch))
                         pendingDiscoverProfiles = Array(sortedProfiles.dropFirst(DiscoverConstants.profilesPerBatch))
-                        hasMoreUsersToLoad = hasMore || !pendingDiscoverProfiles.isEmpty
+                        hasMoreUsersToLoad = hasMoreRemoteUsers || !pendingDiscoverProfiles.isEmpty
                         print("✅ SearchView: Loaded initial \(profiles.count) profiles, \(pendingDiscoverProfiles.count) queued by match %")
                         markDiscoverLoadCompleted()
                         
@@ -669,11 +685,13 @@ struct SearchView: View {
     
     private func prefetchMoreProfilesIfNeeded() {
         let remainingCards = profiles.count - currentCardIndex
-        guard remainingCards <= DiscoverConstants.prefetchThreshold,
+        // When the user reaches the 7th card of a 10-card batch, remaining == 4.
+        guard remainingCards <= DiscoverConstants.prefetchRemainingThreshold,
               hasMoreUsersToLoad,
               !isLoadingMoreProfiles,
               !isLoading else { return }
         
+        print("🔍 SearchView: Prefetching next \(DiscoverConstants.profilesPerBatch) profiles (at card \(currentCardIndex + 1), \(remainingCards) remaining)")
         loadDiscoverProfiles(append: true)
     }
     
@@ -688,17 +706,15 @@ struct SearchView: View {
     }
     
     private func handleSwipeRight(profile: ProfileCard) {
-        // Handle like/approve
+        // Advance the deck immediately — never wait on network for the next-card animation.
         print("✅ Liked: \(profile.name)")
+        moveToNextCard()
         
         Task {
             do {
                 try await FirebaseAuthService.shared.recordSwipe(to: profile.userId, action: .like)
                 
-                guard let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid else {
-                    await MainActor.run { moveToNextCard() }
-                    return
-                }
+                guard let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid else { return }
                 
                 let matchId = FirebaseAuthService.shared.matchDocumentId(
                     for: currentUserId,
@@ -709,45 +725,38 @@ struct SearchView: View {
                 
                 if !isMatch {
                     // Cloud Function may create the match shortly after the swipe is saved.
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
-                    isMatch = try await FirebaseAuthService.shared.matchExists(with: profile.userId)
+                    // Poll briefly in the background — UI already advanced.
+                    for _ in 0..<4 {
+                        try await Task.sleep(nanoseconds: 500_000_000)
+                        isMatch = try await FirebaseAuthService.shared.matchExists(with: profile.userId)
+                        if isMatch { break }
+                    }
                 }
                 
-                await MainActor.run {
-                    if isMatch {
+                if isMatch {
+                    await MainActor.run {
                         print("💕 Match with \(profile.name)! Showing popup")
                         appState.presentMatchNotification(otherUser: profile, matchId: matchId)
-                    } else {
-                        print("💕 Liked \(profile.name), but no match yet")
                     }
-                    moveToNextCard()
+                } else {
+                    print("💕 Liked \(profile.name), but no match yet")
                 }
             } catch {
                 print("❌ Error handling swipe right: \(error)")
-                await MainActor.run {
-                    moveToNextCard()
-                }
             }
         }
     }
     
     private func handleSwipeLeft(profile: ProfileCard) {
-        // Handle pass/deny
+        // Advance the deck immediately — never wait on network for the next-card animation.
         print("❌ Passed: \(profile.name)")
+        moveToNextCard()
         
         Task {
             do {
-                // Record the swipe action
                 try await FirebaseAuthService.shared.recordSwipe(to: profile.userId, action: .pass)
-                
-                await MainActor.run {
-                    moveToNextCard()
-                }
             } catch {
                 print("❌ Error handling swipe left: \(error)")
-                await MainActor.run {
-                    moveToNextCard()
-                }
             }
         }
     }
@@ -912,9 +921,7 @@ struct SwipeableProfileCard: View {
     
     private let cardWidth = UIScreen.main.bounds.width - 60
     private let cardHeight: CGFloat = 500
-    private let cardContentTopPadding: CGFloat = 24
-    private let cardContentBottomPadding: CGFloat = 20
-    private let photoAreaHeight: CGFloat = 276
+    private let photoAreaHeight: CGFloat = 340
     
     // MARK: - Helper function to extract first name
     private func firstName(from fullName: String) -> String {
@@ -931,15 +938,14 @@ struct SwipeableProfileCard: View {
     var body: some View {
         ZStack {
             // Card background with fixed width
-            RoundedRectangle(cornerRadius: 20)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(Color(.secondarySystemGroupedBackground))
                 .frame(width: cardWidth, height: cardHeight)
-                .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
+                .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
             
             VStack(spacing: 0) {
-                // Profile image area with padding
+                // Immersive photo with identity overlays
                 ZStack(alignment: .bottomLeading) {
-                    // Photo container with padding
                     ZStack {
                         if let imageURL = profile.imageURL, let url = URL(string: imageURL) {
                             CachedAsyncImage(url: url) { image in
@@ -956,7 +962,7 @@ struct SwipeableProfileCard: View {
                                     )
                             }
                         } else {
-                            RoundedRectangle(cornerRadius: 20)
+                            Rectangle()
                                 .fill(Color.gray.opacity(0.3))
                                 .overlay(
                                     Image(systemName: "person.fill")
@@ -965,144 +971,135 @@ struct SwipeableProfileCard: View {
                                 )
                         }
                     }
-                    .frame(width: cardWidth - 32, height: photoAreaHeight) // Fixed width: card width minus padding (16 * 2)
+                    .frame(width: cardWidth, height: photoAreaHeight)
                     .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-                    .padding(.horizontal, 16) // Padding creates space inside the card
                     
-                    // Distance label positioned relative to card edges (top right)
+                    // Soft top gradient so distance stays readable on bright photos
+                    LinearGradient(
+                        colors: [
+                            .black.opacity(0.5),
+                            .black.opacity(0.18),
+                            .clear
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 110)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    
+                    // Soft bottom gradient for readable name / age
+                    LinearGradient(
+                        colors: [
+                            .clear,
+                            .black.opacity(0.15),
+                            .black.opacity(0.55)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 140)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    
+                    // Distance — top trailing
                     VStack {
                         HStack {
                             Spacer()
-                            HStack(spacing: 4) {
+                            HStack(spacing: 5) {
                                 Image(systemName: "location.fill")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.white)
-                                
+                                    .font(.system(size: 11, weight: .semibold))
                                 Text(profile.distance)
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundColor(.white)
+                                    .font(.system(size: 13, weight: .semibold))
                             }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color.black.opacity(0.3))
-                            )
-                            .padding(.top, 15)
-                            .padding(.trailing, 30)
+                            .foregroundColor(.white)
+                            .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 1)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .padding(.top, 14)
+                            .padding(.trailing, 14)
                         }
                         Spacer()
                     }
-                    .frame(width: cardWidth) // Full card width for positioning
                     
-                    // Name and age label positioned relative to card edges (bottom left)
-                    VStack {
-                        Spacer()
-                        HStack {
+                    // Name, age, online — bottom of photo
+                    HStack(alignment: .bottom, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
                             Text("\(firstName(from: profile.name)), \(profile.age)")
-                                .font(.system(size: 14, weight: .bold))
+                                .font(.system(size: 28, weight: .bold, design: .rounded))
                                 .foregroundColor(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color.black.opacity(0.3))
-                                )
-                                .padding(.leading, 30)
-                                .padding(.bottom, 15)
-                            Spacer()
-                        }
-                    }
-                    .frame(width: cardWidth) // Full card width for positioning
-                    
-                    // Online/Offline indicator positioned relative to card edges (bottom right)
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(profile.isOnline ? Color.green : Color.red)
-                                    .frame(width: 6, height: 6)
-                                Text(profile.isOnline ? "search.online.now".localized : "search.offline".localized)
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundColor(.white)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color.black.opacity(0.3))
-                            )
-                            .padding(.trailing, 30)
-                            .padding(.bottom, 15)
-                        }
-                    }
-                    .frame(width: cardWidth) // Full card width for positioning
-                }
-                .frame(height: photoAreaHeight) // Fixed height for photo area
-                .padding(.top, cardContentTopPadding)
-                .padding(.bottom, 16)
-                
-                // Bio and match % sections
-                VStack(alignment: .leading, spacing: 12) {
-                    // About me framed block (content only, limited to two lines) - fixed height
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(.systemBackground))
-                            .frame(height: 70)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.gray.opacity(0.15), lineWidth: 3)
-                            )
-                        
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(profile.bio)
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.primary)
-                                .lineLimit(2)
-                                .truncationMode(.tail)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 12)
-                    }
-                    .frame(height: 80)
-                    
-                    // Match percentage framed block (two lines) - fixed height
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(.systemBackground))
-                            .frame(height: 70)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.gray.opacity(0.15), lineWidth: 3)
-                            )
-                        
-                        VStack(spacing: 6) {
-                            let matchPercentage = profile.matchPercentage
-                            let profileFirstName = firstName(from: profile.name)
+                                .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 1)
                             
-                            (Text("search.match.prefix".localized)
-                             + Text(String(format: "search.match.percent.part".localized, matchPercentage))
-                                .foregroundColor(matchPercentage > 49 ? .green : .primary)
-                             + Text(String(format: "search.match.suffix".localized, profileFirstName)))
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.primary)
-                                .multilineTextAlignment(.center)
-                                .lineLimit(2)
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(profile.isOnline ? Color.green : Color.white.opacity(0.55))
+                                    .frame(width: 8, height: 8)
+                                Text(profile.isOnline ? "search.online.now".localized : "search.offline".localized)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.95))
+                            }
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 12)
+                        
+                        Spacer(minLength: 0)
                     }
-                    .frame(height: 80)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, cardContentBottomPadding)
+                .frame(width: cardWidth, height: photoAreaHeight)
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 24,
+                        bottomLeadingRadius: 0,
+                        bottomTrailingRadius: 0,
+                        topTrailingRadius: 24,
+                        style: .continuous
+                    )
+                )
+                
+                // Bio + match — clean footer, no nested boxes
+                VStack(alignment: .leading, spacing: 30) {
+                    Text(profile.bio)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        let matchPercentage = profile.matchPercentage
+                        let profileFirstName = firstName(from: profile.name)
+                        let matchColor: Color = matchPercentage > 49 ? .green : .secondary
+                        
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule()
+                                    .fill(Color.primary.opacity(0.08))
+                                    .frame(height: 6)
+                                Capsule()
+                                    .fill(matchColor)
+                                    .frame(
+                                        width: geo.size.width * CGFloat(max(0, min(matchPercentage, 100))) / 100.0,
+                                        height: 6
+                                    )
+                            }
+                        }
+                        .frame(height: 6)
+                        
+                        (Text("search.match.prefix".localized)
+                         + Text(String(format: "search.match.percent.part".localized, matchPercentage))
+                            .foregroundColor(matchColor)
+                         + Text(String(format: "search.match.suffix".localized, profileFirstName)))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.primary)
+                            .lineLimit(2)
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 16)
+                .padding(.bottom, 18)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
-            .frame(width: cardWidth)
+            .frame(width: cardWidth, height: cardHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             
             // Swipe indicators overlay (centered on card)
             if isTopCard {
@@ -1354,7 +1351,6 @@ struct UserProfileModal: View {
     @EnvironmentObject var appState: AppStateManager
     @State private var showingPhotoViewer = false
     @State private var selectedPhotoIndex = 0
-    @State private var photosCarouselIndex = 0
     @State private var refreshedProfile: ProfileCard?
     @State private var showingBlockConfirmation = false
     
@@ -1554,6 +1550,8 @@ struct UserProfileModal: View {
                 lastSeen: refreshed.lastSeen,
                 idealFirstDate: refreshed.idealFirstDate,
                 shareIdealFirstDate: refreshed.shareIdealFirstDate,
+                sensoryPreferences: refreshed.sensoryPreferences,
+                shareSensoryPreferences: refreshed.shareSensoryPreferences,
                 energyLevel: refreshed.energyLevel,
                 matchPercentage: profile.matchPercentage
             )
@@ -1570,75 +1568,17 @@ struct UserProfileModal: View {
     
     // MARK: - Profile Header Section
     private var profileHeaderSection: some View {
-        ZStack {
-            if let imageURL = displayProfile.imageURL, let url = URL(string: imageURL) {
-                CachedAsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .blur(radius: 25)
-                        .scaleEffect(1.2)
-                } placeholder: {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
+        ProfileMainPhotoCard(
+            imageURL: displayProfile.imageURL,
+            onTap: {
+                let hasProfilePhoto = displayProfile.imageURL != nil && !(displayProfile.imageURL?.isEmpty ?? true)
+                let hasGalleryPhotos = !displayProfile.photos.isEmpty
+                if hasProfilePhoto || hasGalleryPhotos {
+                    selectedPhotoIndex = 0
+                    showingPhotoViewer = true
                 }
-            } else {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.15))
-            }
-        }
-        .frame(height: 180)
-        .frame(maxWidth: .infinity)
-        .overlay(
-            VStack {
-                Button(action: {
-                    // Check if there are any photos to show
-                    let hasProfilePhoto = displayProfile.imageURL != nil && !displayProfile.imageURL!.isEmpty
-                    let hasGalleryPhotos = !displayProfile.photos.isEmpty
-                    if hasProfilePhoto || hasGalleryPhotos {
-                        selectedPhotoIndex = 0 // Profile photo will be at index 0
-                        showingPhotoViewer = true
-                    }
-                }) {
-                    Group {
-                        if let imageURL = displayProfile.imageURL, let url = URL(string: imageURL) {
-                            CachedAsyncImage(url: url) { image in
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                Rectangle()
-                                    .fill(Color.gray.opacity(0.3))
-                                    .overlay(
-                                        Image(systemName: "person.fill")
-                                            .font(.system(size: 50))
-                                            .foregroundColor(.gray)
-                                    )
-                            }
-                        } else {
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .overlay(
-                                    Image(systemName: "person.fill")
-                                        .font(.system(size: 50))
-                                        .foregroundColor(.gray)
-                                )
-                        }
-                    }
-                    .frame(width: 140, height: 140)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color.white.opacity(0.8), lineWidth: 2)
-                    )
-                    .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 4)
-                }
-                .buttonStyle(PlainButtonStyle())
-                .padding(.vertical, 20)
             }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 8)
     }
     
     // MARK: - Age Section
@@ -1755,6 +1695,23 @@ struct UserProfileModal: View {
                     .fontWeight(.semibold)
                     .foregroundColor(.blue)
                 Text(formattedIdealFirstDate(displayProfile.idealFirstDate))
+                    .font(.body)
+                    .foregroundColor(.primary)
+            }
+            
+            if displayProfile.shareSensoryPreferences, !displayProfile.sensoryPreferences.isEmpty {
+                if displayProfile.shareLifestyle || displayProfile.shareBodyType || displayProfile.shareIdealFirstDate {
+                    Divider()
+                        .frame(height: 2)
+                        .background(Color.gray.opacity(0.3))
+                        .padding(.vertical, 4)
+                }
+                
+                Text("profile.sensory.preferences".localized)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.blue)
+                Text(SensoryPreferenceOption.formattedTitles(displayProfile.sensoryPreferences))
                     .font(.body)
                     .foregroundColor(.primary)
             }
@@ -1965,144 +1922,14 @@ struct UserProfileModal: View {
 
     // MARK: - My Photos Section
     private var myPhotosSection: some View {
-        ZStack {
-            // Same blurry background as profile photo
-            if let imageURL = displayProfile.imageURL, let url = URL(string: imageURL) {
-                CachedAsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .blur(radius: 25)
-                        .scaleEffect(1.2)
-                } placeholder: {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                }
-            } else {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.15))
-            }
-        }
-        .frame(height: 160)
-        .frame(maxWidth: .infinity)
-        .overlay(
-            VStack(alignment: .leading, spacing: 8) {
-                if displayProfile.photos.isEmpty {
-                    Text("profile.no.photos".localized)
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .italic()
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                } else if displayProfile.photos.count <= 3 {
-                    // Show all photos if 3 or fewer
-                    LazyVGrid(columns: [
-                        GridItem(.flexible()),
-                        GridItem(.flexible()),
-                        GridItem(.flexible())
-                    ], spacing: 6) {
-                        ForEach(Array(displayProfile.photos.enumerated()), id: \.offset) { index, photoURL in
-                            Button(action: {
-                                selectedPhotoIndex = index + 1
-                                showingPhotoViewer = true
-                            }) {
-                                ZStack {
-                                    CachedAsyncImage(url: URL(string: photoURL)) { image in
-                                        image
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fill)
-                                    } placeholder: {
-                                        Rectangle()
-                                            .fill(Color.gray.opacity(0.3))
-                                            .overlay(
-                                                Image(systemName: "photo")
-                                                    .foregroundColor(.gray)
-                                            )
-                                    }
-                                    .frame(width: 92, height: 92)
-                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                }
-                                .frame(width: 100, height: 100)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                        .stroke(Color.white.opacity(0.8), lineWidth: 2)
-                                )
-                                .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 4)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 20)
-                } else {
-                    // Carousel for more than 3 photos
-                    VStack(spacing: 8) {
-                        TabView(selection: $photosCarouselIndex) {
-                            ForEach(0..<((displayProfile.photos.count + 2) / 3), id: \.self) { pageIndex in
-                                LazyVGrid(columns: [
-                                    GridItem(.flexible()),
-                                    GridItem(.flexible()),
-                                    GridItem(.flexible())
-                                ], spacing: 6) {
-                                    ForEach(0..<3, id: \.self) { gridIndex in
-                                        let photoIndex = pageIndex * 3 + gridIndex
-                                        if photoIndex < displayProfile.photos.count {
-                                            Button(action: {
-                                                selectedPhotoIndex = photoIndex + 1
-                                                showingPhotoViewer = true
-                                            }) {
-                                                ZStack {
-                                                    CachedAsyncImage(url: URL(string: displayProfile.photos[photoIndex])) { image in
-                                                        image
-                                                            .resizable()
-                                                            .aspectRatio(contentMode: .fill)
-                                                    } placeholder: {
-                                                        Rectangle()
-                                                            .fill(Color.gray.opacity(0.3))
-                                                            .overlay(
-                                                                Image(systemName: "photo")
-                                                                    .foregroundColor(.gray)
-                                                            )
-                                                    }
-                                                    .frame(width: 92, height: 92)
-                                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                                }
-                                                .frame(width: 100, height: 100)
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                                        .stroke(Color.white.opacity(0.8), lineWidth: 2)
-                                                )
-                                                .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 4)
-                                            }
-                                        } else {
-                                            // Empty space for incomplete rows
-                                            Color.clear
-                                                .aspectRatio(1, contentMode: .fit)
-                                        }
-                                    }
-                                }
-                                .tag(pageIndex)
-                            }
-                        }
-                        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
-                        .frame(height: 105)
-                        
-                        // Custom smaller page indicator dots
-                        HStack(spacing: 4) {
-                            ForEach(0..<((displayProfile.photos.count + 2) / 3), id: \.self) { index in
-                                Circle()
-                                    .fill(photosCarouselIndex == index ? Color.white.opacity(0.8) : Color.white.opacity(0.3))
-                                    .frame(width: 4, height: 4)
-                            }
-                        }
-                        .padding(.top, 4)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 20)
-                }
+        ProfileGalleryPhotosCard(
+            photoURLs: displayProfile.photos,
+            title: nil,
+            onSelectRemote: { index in
+                selectedPhotoIndex = index + 1
+                showingPhotoViewer = true
             }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 8)
     }
 }
 
@@ -2440,103 +2267,114 @@ struct EmptyStateCard: View {
     let onMessagesTap: () -> Void
     let onStartOverTap: () -> Void
     
+    private let cardWidth = UIScreen.main.bounds.width - 60
+    private let cardHeight: CGFloat = 500
+    private let photoAreaHeight: CGFloat = 340
+    
     var body: some View {
         ZStack {
-            // Card background
-            RoundedRectangle(cornerRadius: 20)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(Color(.secondarySystemGroupedBackground))
-                .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
+                .frame(width: cardWidth, height: cardHeight)
+                .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
             
             VStack(spacing: 0) {
-                // Profile photo with text overlay
+                // Immersive faded photo header — same proportions as discover cards
                 ZStack {
-                    // Profile photo with 50% opacity
-                    Image("profile1")
-                        .resizable()
-                        .scaledToFill()
-                        .frame(height: 300)
-                        .padding(.horizontal, 15)
-                        .opacity(0.1)
+                    Color.clear
+                        .frame(width: cardWidth, height: photoAreaHeight)
+                        .overlay {
+                            Image("profile1")
+                                .resizable()
+                                .scaledToFill()
+                                .opacity(0.1)
+                        }
                         .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 20))
                     
-                    // Text overlay on top
-                    VStack(spacing: 12) {
+                    VStack(spacing: 10) {
                         Text("search.empty.no.more.profiles.line1".localized)
-                            .font(.title2)
-                            .fontWeight(.semibold)
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
                             .foregroundColor(.primary)
                             .multilineTextAlignment(.center)
                         
                         Text("search.empty.no.more.profiles.line2".localized)
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.primary)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                     }
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, 24)
                 }
+                .frame(width: cardWidth, height: photoAreaHeight)
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 24,
+                        bottomLeadingRadius: 0,
+                        bottomTrailingRadius: 0,
+                        topTrailingRadius: 24,
+                        style: .continuous
+                    )
+                )
                 
-                // Action section
-                VStack(alignment: .leading, spacing: 10) {
-                    Button(action: {
-                        onMatchesTap()
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "heart.fill")
-                                .font(.system(size: 17, weight: .bold))
-                            (Text("search.empty.matches.prefix".localized)
-                             + Text(" \(matchesCount)")
-                             + Text(" " + "search.empty.matches.suffix".localized))
-                                .font(.system(size: 17, weight: .bold))
-                        }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 14)
-                        .background(Color.blue)
-                        .cornerRadius(12)
-                    }
+                // Clean footer actions
+                VStack(spacing: 12) {
+                    emptyStateActionButton(
+                        icon: "heart.fill",
+                        label: Text("search.empty.matches.prefix".localized)
+                            + Text(" \(matchesCount)")
+                            + Text(" " + "search.empty.matches.suffix".localized),
+                        action: onMatchesTap
+                    )
                     
-                    Button(action: {
-                        onMessagesTap()
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "message.fill")
-                                .font(.system(size: 17, weight: .bold))
-                            (Text("search.empty.messages.prefix".localized)
-                             + Text(" \(messagesCount)")
-                             + Text(" " + "search.empty.messages.suffix".localized))
-                                .font(.system(size: 17, weight: .bold))
-                        }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 14)
-                        .background(Color.blue)
-                        .cornerRadius(12)
-                    }
-
-                    Button(action: {
-                        onStartOverTap()
-                    }) {
+                    emptyStateActionButton(
+                        icon: "message.fill",
+                        label: Text("search.empty.messages.prefix".localized)
+                            + Text(" \(messagesCount)")
+                            + Text(" " + "search.empty.messages.suffix".localized),
+                        action: onMessagesTap
+                    )
+                    
+                    Button(action: onStartOverTap) {
                         Text("search.empty.start.over".localized)
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(canReviewPassedProfiles ? .blue : .gray)
+                            .foregroundColor(canReviewPassedProfiles ? .blue : .secondary.opacity(0.45))
                             .frame(maxWidth: .infinity)
-                            .padding(.top, 10)
+                            .padding(.top, 4)
                     }
                     .buttonStyle(.plain)
                     .disabled(!canReviewPassedProfiles)
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 18)
                 .padding(.top, 16)
-                .padding(.bottom, 8)
+                .padding(.bottom, 18)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
+            .frame(width: cardWidth, height: cardHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
-        .frame(width: UIScreen.main.bounds.width - 60, height: 500)
+        .frame(width: cardWidth, height: cardHeight)
+    }
+    
+    private func emptyStateActionButton(
+        icon: String,
+        label: Text,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .bold))
+                label
+                    .font(.system(size: 16, weight: .bold))
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.blue)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 

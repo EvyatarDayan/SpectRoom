@@ -162,6 +162,8 @@ struct ProfileEditView: View {
     @State private var selectedBodyType: String = ""
     @State private var shareIdealFirstDate = false
     @State private var selectedIdealFirstDate: [String] = []
+    @State private var shareSensoryPreferences = false
+    @State private var selectedSensoryPreferences: [String] = []
     
     
     var body: some View {
@@ -319,84 +321,20 @@ struct ProfileEditView: View {
             Text("profile.edit.profile.photo".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
+                .foregroundColor(.blue)
             
-            Button(action: {
-                isEditingProfilePhoto = true
-                showingImagePicker = true
-            }) {
-                ZStack {
-                    if let profilePhoto = profilePhoto {
-                        Image(uiImage: profilePhoto)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 120, height: 120)
-                            .clipped()
-                            .cornerRadius(8)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
-                            )
-                    } else if let user = appState.currentUser,
-                              let profilePhotoURL = user.profilePhotoURL,
-                              !profilePhotoURL.isEmpty {
-                        AsyncImage(url: URL(string: profilePhotoURL)) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .overlay(
-                                    Image(systemName: "person.fill")
-                                        .font(.system(size: 50))
-                                        .foregroundColor(.gray)
-                                )
-                        }
-                        .frame(width: 120, height: 120)
-                        .clipped()
-                        .cornerRadius(8)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.blue.opacity(0.3), lineWidth: 1)
-                        )
-                    } else {
-                        Rectangle()
-                            .fill(Color.gray.opacity(0.3))
-                            .frame(width: 120, height: 120)
-                            .cornerRadius(8)
-                            .overlay(
-                                VStack {
-                                    Image(systemName: "camera")
-                                        .font(.system(size: 30))
-                                        .foregroundColor(.gray)
-                                    Text("profile.edit.add.photo".localized)
-                                        .font(.caption)
-                                        .foregroundColor(.gray)
-                                }
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
-                            )
-                    }
-                    
-                    // Edit icon overlay
-                    Image(systemName: "camera.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(.blue)
-                        .background(Color(.secondarySystemGroupedBackground))
-                        .clipShape(Circle())
-                        .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
-                        .offset(x: 40, y: -40)
+            ProfileMainPhotoCard(
+                imageURL: profilePhoto == nil ? appState.currentUser?.profilePhotoURL : nil,
+                localImage: profilePhoto,
+                placeholderSystemName: "camera",
+                showsCameraBadge: true,
+                onTap: {
+                    isEditingProfilePhoto = true
+                    showingImagePicker = true
                 }
-            }
-            
+            )
         }
-        .frame(maxWidth: .infinity, alignment: .center)
-        .padding()
-        .background(Color(.secondarySystemGroupedBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
     
     // MARK: - Name Section
@@ -749,6 +687,78 @@ struct ProfileEditView: View {
                                     .foregroundColor(.gray.opacity(0.5))
                                 Text(option.title)
                                     .foregroundColor(.gray.opacity(0.5))
+                            }
+                            .padding(.vertical, 6)
+                        }
+                    }
+                }
+            }
+            
+            Divider()
+                .frame(height: 2)
+                .background(Color.gray.opacity(0.3))
+                .padding(.vertical, 8)
+            
+            // Sensory Preferences Section
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("profile.edit.sensory.preferences".localized)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    Spacer()
+                    
+                    Toggle("", isOn: $shareSensoryPreferences)
+                        .labelsHidden()
+                }
+                
+                if shareSensoryPreferences {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(SensoryPreferenceOption.allCases, id: \.self) { option in
+                            Button(action: {
+                                if selectedSensoryPreferences.contains(option.rawValue) {
+                                    selectedSensoryPreferences.removeAll { $0 == option.rawValue }
+                                } else {
+                                    selectedSensoryPreferences.append(option.rawValue)
+                                }
+                            }) {
+                                HStack(alignment: .top, spacing: 12) {
+                                    Image(systemName: selectedSensoryPreferences.contains(option.rawValue) ? "checkmark.square.fill" : "square")
+                                        .font(.system(size: 18))
+                                        .foregroundColor(.blue)
+                                        .padding(.top, 2)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(option.title)
+                                            .foregroundColor(.primary)
+                                            .multilineTextAlignment(.leading)
+                                        Text(option.subtitle)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                            .multilineTextAlignment(.leading)
+                                    }
+                                }
+                                .padding(.vertical, 6)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(SensoryPreferenceOption.allCases, id: \.self) { option in
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: "square")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(.gray.opacity(0.5))
+                                    .padding(.top, 2)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(option.title)
+                                        .foregroundColor(.gray.opacity(0.5))
+                                        .multilineTextAlignment(.leading)
+                                    Text(option.subtitle)
+                                        .font(.caption)
+                                        .foregroundColor(.gray.opacity(0.4))
+                                        .multilineTextAlignment(.leading)
+                                }
                             }
                             .padding(.vertical, 6)
                         }
@@ -1168,132 +1178,22 @@ struct ProfileEditView: View {
     
     // MARK: - My Photos Section
     private var myPhotosSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("profile.my.photos".localized)
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                    
-//                    Text("Add photos to your gallery")
-//                        .font(.caption)
-//                        .foregroundColor(.secondary)
-                }
-                
-                Spacer()
-                
-                validationCheckmark(isValid: isPhotosValid)
-            }
-            
-            // Photo Grid with Add Button - Limited to 6 items (5 photos + Add button)
-            LazyVGrid(columns: [
-                GridItem(.flexible()),
-                GridItem(.flexible()),
-                GridItem(.flexible())
-            ], spacing: 8) {
-                let totalPhotos = existingPhotos.count + newPhotos.count
-                let maxPhotosToShow = min(5, totalPhotos)
-                let existingPhotosToShow = min(existingPhotos.count, maxPhotosToShow)
-                let newPhotosToShow = min(newPhotos.count, maxPhotosToShow - existingPhotosToShow)
-                
-                // Existing Photos (limited to first 5)
-                ForEach(Array(existingPhotos.prefix(existingPhotosToShow).enumerated()), id: \.element) { index, photoURL in
-                    ZStack {
-                        AsyncImage(url: URL(string: photoURL)) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .overlay(
-                                    Image(systemName: "photo")
-                                        .foregroundColor(.gray)
-                                )
-                        }
-                        .frame(width: 100, height: 100)
-                        .clipped()
-                        .cornerRadius(8)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.blue.opacity(0.3), lineWidth: 1)
-                        )
-                        
-                        Button(action: {
-                            deletePhoto(photoURL)
-                        }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.red)
-                                .background(Color(.secondarySystemGroupedBackground))
-                                .clipShape(Circle())
-                                .opacity(0.8)
-                        }
-                        .offset(x: 35, y: -35)
-                    }
-                    .frame(width: 100, height: 100)
-                }
-                
-                // New Photos (limited to fill remaining slots up to 5 total)
-                ForEach(Array(newPhotos.prefix(newPhotosToShow).enumerated()), id: \.offset) { index, photo in
-                    ZStack {
-                        Image(uiImage: photo)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: 100, height: 100)
-                            .clipped()
-                            .cornerRadius(8)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
-                            )
-                        
-                        Button(action: {
-                            removeNewPhoto(at: index)
-                        }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.red)
-                                .background(Color(.secondarySystemGroupedBackground))
-                                .clipShape(Circle())
-                                .opacity(0.8)
-                        }
-                        .offset(x: 30, y: -30)
-                    }
-                    .frame(width: 100, height: 100)
-                }
-                
-                // Add Photo Button (only show if less than 5 photos total)
-                if totalPhotos < 5 {
-                    Button(action: {
-                        showingGalleryPicker = true
-                    }) {
-                        VStack(spacing: 8) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 24, weight: .medium))
-                                .foregroundColor(.blue)
-                            
-                            Text("profile.edit.add".localized)
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(.blue)
-                        }
-                        .frame(height: 100)
-                        .frame(maxWidth: .infinity)
-                        .background(Color(.systemGroupedBackground))
-                        .cornerRadius(8)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.blue.opacity(0.3), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.secondarySystemGroupedBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        ProfileGalleryPhotosCard(
+            photoURLs: existingPhotos,
+            localImages: newPhotos,
+            allowsPaging: false,
+            onDeleteRemote: { photoURL in
+                deletePhoto(photoURL)
+            },
+            onDeleteLocal: { index in
+                removeNewPhoto(at: index)
+            },
+            onAdd: {
+                showingGalleryPicker = true
+            },
+            maxRemoteVisible: 5,
+            showValidation: isPhotosValid
+        )
     }
     
     
@@ -1406,10 +1306,13 @@ struct ProfileEditView: View {
             shareBodyType = user.shareBodyType
             selectedIdealFirstDate = user.idealFirstDate
             shareIdealFirstDate = user.shareIdealFirstDate
+            selectedSensoryPreferences = user.sensoryPreferences
+            shareSensoryPreferences = user.shareSensoryPreferences
             
             print("🔍 ProfileEditView - Loaded lifestyle: \(selectedLifestyle), shareLifestyle: \(shareLifestyle)")
             print("🔍 ProfileEditView - Loaded bodyType: \(selectedBodyType), shareBodyType: \(shareBodyType)")
             print("🔍 ProfileEditView - Loaded idealFirstDate: \(selectedIdealFirstDate), shareIdealFirstDate: \(shareIdealFirstDate)")
+            print("🔍 ProfileEditView - Loaded sensoryPreferences: \(selectedSensoryPreferences), shareSensoryPreferences: \(shareSensoryPreferences)")
             
             // Load interests from database
             let previousInterests = selectedInterests
@@ -1688,6 +1591,8 @@ struct ProfileEditView: View {
                     user.shareBodyType = shareBodyType
                     user.idealFirstDate = selectedIdealFirstDate
                     user.shareIdealFirstDate = shareIdealFirstDate
+                    user.sensoryPreferences = selectedSensoryPreferences
+                    user.shareSensoryPreferences = shareSensoryPreferences
                     
                     // Update profile photo URL only if a new one was selected
                     if let newProfilePhotoURL = newProfilePhotoURL {
@@ -1740,6 +1645,8 @@ struct ProfileEditView: View {
                         shareBodyType: shareBodyType,
                         idealFirstDate: selectedIdealFirstDate,
                         shareIdealFirstDate: shareIdealFirstDate,
+                        sensoryPreferences: selectedSensoryPreferences,
+                        shareSensoryPreferences: shareSensoryPreferences,
                         energyLevel: energyLevel
                     )
                     newUser.profilePhotoURL = newProfilePhotoURL
@@ -1790,6 +1697,8 @@ struct ProfileEditView: View {
                     "shareBodyType": shareBodyType,
                     "idealFirstDate": selectedIdealFirstDate,
                     "shareIdealFirstDate": shareIdealFirstDate,
+                    "sensoryPreferences": selectedSensoryPreferences,
+                    "shareSensoryPreferences": shareSensoryPreferences,
                     "energyLevel": energyLevel,
                     "location": [
                         "displayString": location,

@@ -58,5 +58,9 @@ class SoundService {
     func playNewMessageSound() {
         playSound(named: "newMessage", withExtension: "mp3")
     }
+    
+    func playMatchSound() {
+        playSound(named: "Match", withExtension: "mp3")
+    }
 }
 

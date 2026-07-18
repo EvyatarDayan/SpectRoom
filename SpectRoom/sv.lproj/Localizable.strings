@@ -51,6 +51,7 @@
 "onboarding.previous" = "Föregående";
 "onboarding.next" = "Nästa";
 "onboarding.get.started" = "Kom Igång";
+"onboarding.dont.show.again" = "Visa inte igen";
 
 // MARK: - Navigation & Tabs
 "nav.discover" = "Upptäck";
@@ -83,9 +84,15 @@
 "settings.notification.permission.message" = "Notifikationer är inaktiverade. Vänligen aktivera dem i Inställningar för att ta emot notifikationer om matchningar och meddelanden.";
 "settings.settings.button" = "Inställningar";
 "settings.cancel" = "Avbryt";
-"settings.blocked.users.section.title" = "Blockerade användare";
-"settings.blocked.users.button.title" = "Blockerade användare";
-"settings.blocked.users.button.subtitle" = "Visa alla blockerade användare";
+"settings.blocked.users.section.title" = "Blockerade profiler";
+"settings.blocked.users.button.title" = "Blockerade profiler";
+"settings.blocked.users.button.subtitle" = "Visa alla blockerade profiler";
+"settings.blocked.users.modal.title" = "Blockerade profiler";
+"settings.blocked.users.empty" = "Inga blockerade profiler";
+"settings.blocked.users.since" = "Blockerad %@";
+"settings.blocked.users.no.date" = "Blockerad";
+"settings.blocked.users.unblock.action" = "Avblockera";
+"settings.blocked.users.unblock.confirm.message" = "Vill du avblockera %@?";
 
 "settings.authentication.section.title" = "Autentisering";
 "settings.authentication.signout.subtitle" = "Tryck för att logga ut";
@@ -177,6 +184,7 @@
 "messages.start.swiping" = "Börja Swipa";
 "messages.new.message" = "Nytt Meddelande";
 "messages.send" = "Skicka";
+"messages.sending" = "Skickar";
 "messages.send.message" = "Skicka Meddelande";
 "messages.type.message" = "Skriv ett meddelande...";
 "messages.type.something" = "Skriv något...";
@@ -193,6 +201,9 @@
 "messages.you" = "Du";
 "messages.voice.recording" = "Spelar in...";
 "messages.voice.ready" = "Meddelande klart";
+"messages.voice.long.press.tip.title" = "Röstmeddelande";
+"messages.voice.long.press.tip.message" = "Tryck länge för att spela in ett meddelande";
+"messages.voice.long.press.tip.got.it" = "Jag förstår";
 "messages.preview.photo" = "📷 Foto";
 "messages.preview.voice" = "🎤 Röstmeddelande";
 "messages.preview.voice.duration" = "🎤 Röstmeddelande • %@";
@@ -325,6 +336,28 @@
 "profile.edit.ideal.date.cinema.movie.night" = "Biofilmkväll";
 "profile.edit.ideal.date.friendly.video.chat" = "Vänlig videosamtal";
 "profile.ideal.first.date" = "Ideal första dejt";
+"profile.edit.sensory.preferences" = "Sensoriska preferenser";
+"profile.sensory.preferences" = "Sensoriska preferenser";
+"profile.sensory.low.noise.title" = "Lågbullriga miljöer";
+"profile.sensory.low.noise.subtitle" = "Föredrar tysta platser, låg musik eller lugna utomhusmiljöer";
+"profile.sensory.dim.lighting.title" = "Dämpad / mjukt ljus";
+"profile.sensory.dim.lighting.subtitle" = "Trivs i mysiga, varmt upplysta rum framför starkt eller fluorescerande ljus";
+"profile.sensory.active.walking.title" = "Aktiva / promenaddejter";
+"profile.sensory.active.walking.subtitle" = "Föredrar rörelse, promenader eller lugna aktiviteter framför att sitta still";
+"profile.sensory.short.meetups.title" = "Korta, lågpressade träffar";
+"profile.sensory.short.meetups.subtitle" = "Föredrar korta första dejter, som en snabb 45-minutersfika";
+"profile.sensory.fidget.stim.title" = "Fidget- / stimvänliga platser";
+"profile.sensory.fidget.stim.subtitle" = "Gillar fidgets, att klottra eller ha något att hålla i";
+"profile.sensory.safe.foods.title" = "Förutsägbara \"säkra\" matval";
+"profile.sensory.safe.foods.subtitle" = "Gillar bekanta menyer med enkla, jämna texturer";
+"profile.sensory.scent.free.title" = "Doftfria miljöer";
+"profile.sensory.scent.free.subtitle" = "Gillar platser utan starka parfymer, ljus eller rökelse";
+"profile.sensory.temperature.title" = "Bekväma temperaturzoner";
+"profile.sensory.temperature.subtitle" = "Föredrar förutsägbara, temperaturkontrollerade inomhusmiljöer";
+"profile.sensory.visually.calm.title" = "Visuellt lugna utrymmen";
+"profile.sensory.visually.calm.subtitle" = "Gillar minimalistiska, rena och oclutterade miljöer";
+"profile.sensory.clear.touch.title" = "Djuptryck / tydlig beröring";
+"profile.sensory.clear.touch.subtitle" = "Föredrar fast fysisk kontakt eller tydligt verbalt samtycke framför oväntade lätta beröringar";
 "profile.body.type" = "Kroppstyp";
 "profile.edit.body.type.slim" = "Smal";
 "profile.edit.body.type.average" = "Genomsnittlig";

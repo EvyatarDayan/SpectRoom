@@ -36,9 +36,11 @@ struct SpectRoomUser: Identifiable, Codable, Equatable {
     var shareBodyType: Bool = false // Whether to share body type
     var idealFirstDate: [String] = [] // Ideal first date selections (multiple)
     var shareIdealFirstDate: Bool = false // Whether to share ideal first date
+    var sensoryPreferences: [String] = [] // Sensory preference selections (multiple)
+    var shareSensoryPreferences: Bool = false // Whether to share sensory preferences
     var energyLevel: Int = 4 // Energy level today (0-4: Quiet and Calm, Soft and Steady, Balanced Energy, Ready to Chat, Fully Social Mode)
     
-    init(name: String, age: Int, email: String, bio: String = "", interests: [String] = [], location: Location = Location(), preferences: UserPreferences = UserPreferences(), gender: String = "", interestedIn: [String] = [], lookingFor: [String] = [], preferredAgeMin: Int? = nil, preferredAgeMax: Int? = nil, lifestyle: String = "", shareLifestyle: Bool = false, bodyType: String = "", shareBodyType: Bool = false, idealFirstDate: [String] = [], shareIdealFirstDate: Bool = false, energyLevel: Int = 4) {
+    init(name: String, age: Int, email: String, bio: String = "", interests: [String] = [], location: Location = Location(), preferences: UserPreferences = UserPreferences(), gender: String = "", interestedIn: [String] = [], lookingFor: [String] = [], preferredAgeMin: Int? = nil, preferredAgeMax: Int? = nil, lifestyle: String = "", shareLifestyle: Bool = false, bodyType: String = "", shareBodyType: Bool = false, idealFirstDate: [String] = [], shareIdealFirstDate: Bool = false, sensoryPreferences: [String] = [], shareSensoryPreferences: Bool = false, energyLevel: Int = 4) {
         self.id = UUID()
         self.name = name
         self.age = age
@@ -67,6 +69,8 @@ struct SpectRoomUser: Identifiable, Codable, Equatable {
         self.shareBodyType = shareBodyType
         self.idealFirstDate = idealFirstDate
         self.shareIdealFirstDate = shareIdealFirstDate
+        self.sensoryPreferences = sensoryPreferences
+        self.shareSensoryPreferences = shareSensoryPreferences
         self.energyLevel = energyLevel
     }
 }

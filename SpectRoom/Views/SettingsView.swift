@@ -288,7 +288,7 @@ struct SettingsView: View {
                 Section("settings.authentication.section.title".localized.uppercased()) {
                     Button(action: {
                         // Use AppStateManager.signOut() to ensure proper state management
-                        // This preserves hasCompletedOnboarding so users go to sign-in view, not onboarding
+                        // Welcome shows again after logout unless "Don't show this again" was checked
                         appState.signOut()
                     }) {
                         HStack {
@@ -324,7 +324,8 @@ struct SettingsView: View {
                     .ignoresSafeArea()
             )
             .sheet(isPresented: $showingBlockedUsers) {
-                BlockedUsersModal(blockedUsers: appState.blockedUsers)
+                BlockedUsersModal()
+                    .environmentObject(appState)
             }
             .sheet(isPresented: $showingHelpSupport) {
                 HelpSupportView()
@@ -394,15 +395,17 @@ struct SettingsView: View {
 
 
 private struct BlockedUsersModal: View {
-    let blockedUsers: [BlockedUser]
+    @EnvironmentObject private var appState: AppStateManager
     @Environment(\.dismiss) private var dismiss
+    @State private var pendingUnblockUser: BlockedUser?
+    @State private var showingUnblockConfirmation = false
     
     var body: some View {
         NavigationView {
             Group {
-                if blockedUsers.isEmpty {
+                if appState.blockedUsers.isEmpty {
                     VStack(spacing: 16) {
-                        Image(systemName: "hand.raised.slash.fill")
+                        Image(systemName: "person.crop.circle.badge.xmark")
                             .font(.system(size: 48))
                             .foregroundColor(.secondary)
                         Text("settings.blocked.users.empty".localized)
@@ -412,26 +415,21 @@ private struct BlockedUsersModal: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(.systemGroupedBackground))
                 } else {
-                    List(blockedUsers) { blocked in
-                        HStack {
-                            Image(systemName: "hand.raised.slash.fill")
-                                .foregroundColor(.orange)
-                                .font(.title2)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(blocked.name)
-                                    .font(.headline)
-                                Text(dateText(for: blocked))
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                    List(appState.blockedUsers) { blocked in
+                        BlockedUserRow(
+                            blocked: blocked,
+                            isBlocked: true,
+                            onRequestUnblock: {
+                                pendingUnblockUser = blocked
+                                showingUnblockConfirmation = true
                             }
-                            Spacer()
-                        }
-                        .padding(.vertical, 4)
+                        )
                     }
                     .listStyle(InsetGroupedListStyle())
                 }
             }
             .navigationTitle("settings.blocked.users.modal.title".localized)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("common.done".localized) {
@@ -439,14 +437,116 @@ private struct BlockedUsersModal: View {
                     }
                 }
             }
+            .alert("profile.block.confirm.title".localized, isPresented: $showingUnblockConfirmation) {
+                Button("common.cancel".localized, role: .cancel) {
+                    pendingUnblockUser = nil
+                }
+                Button("settings.blocked.users.unblock.action".localized, role: .destructive) {
+                    if let user = pendingUnblockUser {
+                        appState.unblockUser(userId: user.id)
+                    }
+                    pendingUnblockUser = nil
+                }
+            } message: {
+                if let user = pendingUnblockUser {
+                    Text(String(format: "settings.blocked.users.unblock.confirm.message".localized, firstName(from: user.name)))
+                }
+            }
         }
+    }
+    
+    private func firstName(from fullName: String) -> String {
+        let components = fullName.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
+        return components.first.map(String.init) ?? fullName
+    }
+}
+
+private struct BlockedUserRow: View {
+    let blocked: BlockedUser
+    let isBlocked: Bool
+    let onRequestUnblock: () -> Void
+    
+    @State private var photoURL: String?
+    
+    private var toggleBinding: Binding<Bool> {
+        Binding(
+            get: { isBlocked },
+            set: { newValue in
+                if !newValue {
+                    onRequestUnblock()
+                }
+            }
+        )
+    }
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            profilePhoto
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(blocked.name)
+                    .font(.headline)
+                Text(dateText(for: blocked))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            Toggle("", isOn: toggleBinding)
+                .labelsHidden()
+                .compactToggleStyle()
+        }
+        .padding(.vertical, 4)
+        .task(id: blocked.id) {
+            await loadPhoto()
+        }
+    }
+    
+    private var profilePhoto: some View {
+        Group {
+            if let photoURL, let url = URL(string: photoURL) {
+                CachedAsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    initialsPlaceholder
+                }
+            } else {
+                initialsPlaceholder
+            }
+        }
+        .frame(width: 44, height: 44)
+        .clipShape(Circle())
+    }
+    
+    private var initialsPlaceholder: some View {
+        Circle()
+            .fill(Color.blue.opacity(0.2))
+            .overlay(
+                Text(String(blocked.name.prefix(1)).uppercased())
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.blue)
+            )
     }
     
     private func dateText(for blocked: BlockedUser) -> String {
         if let blockedAt = blocked.blockedAt {
-            return String(format: "settings.blocked.users.since".localized, blockedAt.formatted(date: .abbreviated, time: .shortened))
-        } else {
-            return "settings.blocked.users.no.date".localized
+            return String(
+                format: "settings.blocked.users.since".localized,
+                blockedAt.formatted(date: .abbreviated, time: .shortened)
+            )
+        }
+        return "settings.blocked.users.no.date".localized
+    }
+    
+    private func loadPhoto() async {
+        do {
+            photoURL = try await FirebaseAuthService.shared.fetchUserProfilePhotoURL(for: blocked.id)
+        } catch {
+            photoURL = nil
         }
     }
 }

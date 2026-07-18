@@ -13,6 +13,7 @@ import UIKit
 
 class AppStateManager: ObservableObject {
     @Published var isAuthenticated = false
+    @Published var hasResolvedAuthState = false
     @Published var hasCompletedOnboarding = false
     @Published var hasCompletedInitialProfile = false
     @Published var isNewSignup = false
@@ -33,8 +34,7 @@ class AppStateManager: ObservableObject {
     private var lastMessageConversationsUpdate: Date?
     
     // Cache for individual conversation messages (keyed by otherUserId)
-    private var cachedConversationMessages: [String: [MessageDisplay]] = [:]
-    private var conversationMessagesCacheTimestamp: [String: Date] = [:]
+    private var cachedConversationStates: [String: CachedConversationState] = [:]
     @Published var isLoading = false
     
     // Match notification properties
@@ -58,6 +58,7 @@ class AppStateManager: ObservableObject {
     @Published var unreadMessageCount: Int = 0
     @Published var conversationUnreadCounts: [String: Int] = [:]
     private var lastMessageId: String?
+    private var lastPlayedMessageSoundId: String?
     
     private let firebaseAuth = FirebaseAuthService.shared
     private var cancellables = Set<AnyCancellable>()
@@ -75,11 +76,27 @@ class AppStateManager: ObservableObject {
     private init() {
         // Listen to Firebase authentication state changes
         // Ensure all updates happen on the main thread to avoid publishing from background threads
+        // Mirror Firebase auth immediately so launch routing does not wait on the Combine subscription.
+        isAuthenticated = firebaseAuth.isAuthenticated
+        hasResolvedAuthState = firebaseAuth.hasResolvedAuthState
+        
+        firebaseAuth.$hasResolvedAuthState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] resolved in
+                self?.hasResolvedAuthState = resolved
+            }
+            .store(in: &cancellables)
+        
         firebaseAuth.$isAuthenticated
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isAuth in
                 self?.isAuthenticated = isAuth
                 if isAuth {
+                    // Returning session: never show the welcome wizard again.
+                    if self?.hasCompletedOnboarding != true {
+                        self?.hasCompletedOnboarding = true
+                        self?.saveAppState()
+                    }
                     // User is authenticated - set online status and preload photos
                     Task {
                         await self?.updateOnlineStatus(isOnline: true)
@@ -222,9 +239,6 @@ class AppStateManager: ObservableObject {
         Task {
             do {
                 try await firebaseAuth.signOut()
-                // Clear all local state EXCEPT hasCompletedOnboarding
-                // hasCompletedOnboarding should persist so users don't see onboarding again after sign out
-                // All @Published property updates must happen on the main thread
                 await MainActor.run {
                     currentUser = nil
                     isNewSignup = false
@@ -235,12 +249,16 @@ class AppStateManager: ObservableObject {
                     conversations = []
                     blockedUsers = []
                     blockedByUsers = []
-                    clearMessageConversationsCache() // Clear message conversations cache
+                    clearMessageConversationsCache()
                     clearDiscoverProfilesCache()
-                    // NOTE: hasCompletedOnboarding is NOT reset here - it persists across sign-outs
-                    // This ensures users go to sign-in view, not onboarding view, when they sign out
+                    
+                    // Show welcome again after logout unless the user opted out
+                    if !UserDefaults.standard.bool(forKey: "dontShowWelcomeAgain") {
+                        hasCompletedOnboarding = false
+                    }
+                    
                     saveAppState()
-                    print("🔐 User signed out successfully - hasCompletedOnboarding preserved: \(hasCompletedOnboarding)")
+                    print("🔐 User signed out successfully - hasCompletedOnboarding: \(hasCompletedOnboarding)")
                 }
             } catch {
                 await MainActor.run {
@@ -319,13 +337,15 @@ class AppStateManager: ObservableObject {
     
     
     // MARK: - Onboarding
-    func completeOnboarding() {
+    func completeOnboarding(dontShowAgain: Bool = false) {
         hasCompletedOnboarding = true
+        UserDefaults.standard.set(dontShowAgain, forKey: "dontShowWelcomeAgain")
         saveAppState()
     }
     
     func resetOnboarding() {
         hasCompletedOnboarding = false
+        UserDefaults.standard.set(false, forKey: "dontShowWelcomeAgain")
         saveAppState()
         print("🔄 Onboarding state reset - wizard will show on next app launch")
     }
@@ -495,6 +515,7 @@ class AppStateManager: ObservableObject {
                     blockedByUsers = []
                     clearMessageConversationsCache() // Clear message conversations cache
                     clearDiscoverProfilesCache()
+                    UserDefaults.standard.set(false, forKey: "dontShowWelcomeAgain")
                     saveAppState()
                     print("🔄 All app state reset - app will start fresh")
                 }
@@ -510,6 +531,7 @@ class AppStateManager: ObservableObject {
                     conversations = []
                     clearMessageConversationsCache()
                     clearDiscoverProfilesCache()
+                    UserDefaults.standard.set(false, forKey: "dontShowWelcomeAgain")
                     saveAppState()
                 }
             }
@@ -682,8 +704,16 @@ class AppStateManager: ObservableObject {
             self?.newMatchProfile = matchDisplay.otherUser
             self?.showingMatchNotification = true
             self?.updateMatchesCache(with: matchDisplay)
+            self?.playMatchSoundIfEnabled()
             print("💕 Match notification set to show for: \(matchDisplay.otherUser.name)")
         }
+    }
+    
+    private func playMatchSoundIfEnabled() {
+        if let settings = currentUser?.preferences.notificationSettings {
+            guard settings.newMatches, settings.soundEnabled else { return }
+        }
+        SoundService.shared.playMatchSound()
     }
     
     func dismissMatchNotification() {
@@ -862,6 +892,11 @@ class AppStateManager: ObservableObject {
                     )
                     self?.incrementUnreadCount(for: senderId)
                     
+                    // Play in-app sound whenever the app is open (any screen), not only when chat is open
+                    if UIApplication.shared.applicationState == .active {
+                        self?.playIncomingMessageSoundIfNeeded(for: messageDocId)
+                    }
+                    
                     if let openSenderId = self?.currentlyOpenConversationSenderId, openSenderId == senderId {
                         print("💬 Conversation with \(senderId) is already open, marking messages as read")
                         self?.lastMessageId = messageDocId
@@ -928,6 +963,17 @@ class AppStateManager: ObservableObject {
                 self?.lastMessageId = messageDocId
             }
         }
+    }
+    
+    private func playIncomingMessageSoundIfNeeded(for messageDocId: String) {
+        guard lastPlayedMessageSoundId != messageDocId else { return }
+        lastPlayedMessageSoundId = messageDocId
+        
+        if let settings = currentUser?.preferences.notificationSettings {
+            guard settings.newMessages, settings.soundEnabled else { return }
+        }
+        
+        SoundService.shared.playNewMessageSound()
     }
     
     func dismissNewMessageNotification() {
@@ -1107,74 +1153,110 @@ class AppStateManager: ObservableObject {
         cachedMessageConversations = []
         conversationUnreadCounts = [:]
         lastMessageConversationsUpdate = nil
-        cachedConversationMessages = [:]
-        conversationMessagesCacheTimestamp = [:]
+        cachedConversationStates = [:]
         print("💬 Message conversations cache cleared")
     }
     
     // MARK: - Individual Conversation Messages Cache
     
-    /// Get cached conversation messages if available and recent (within 5 minutes), otherwise return nil
-    func getCachedConversationMessages(for otherUserId: String) -> [MessageDisplay]? {
-        // Check if we have cached messages for this conversation
-        guard let cachedMessages = cachedConversationMessages[otherUserId],
-              let timestamp = conversationMessagesCacheTimestamp[otherUserId] else {
-            print("💬 No cached messages for conversation with \(otherUserId)")
+    struct ConversationCacheSnapshot {
+        let messagePool: [MessageDisplay]
+        let visibleMessages: [MessageDisplay]
+        let hasMoreOlderMessages: Bool
+    }
+    
+    private struct CachedConversationState {
+        var messagePool: [MessageDisplay]
+        var visibleMessages: [MessageDisplay]
+        var hasMoreOlderMessages: Bool
+        var updatedAt: Date
+    }
+    
+    /// Returns the in-memory conversation cache for the current app session.
+    func getCachedConversationState(for otherUserId: String) -> ConversationCacheSnapshot? {
+        guard let state = cachedConversationStates[otherUserId] else {
+            print("💬 No cached conversation state for \(otherUserId)")
             return nil
         }
         
-        // Check if cache is still valid (within 5 minutes)
-        let cacheAge = Date().timeIntervalSince(timestamp)
-        if cacheAge < 300.0 { // 5 minutes
-            print("💬 Returning cached conversation messages for \(otherUserId) (\(cachedMessages.count) messages, \(Int(cacheAge)) seconds old)")
-            return cachedMessages.deduplicatedConversationMessages()
-        } else {
-            print("💬 Cache expired for conversation with \(otherUserId) (\(Int(cacheAge)) seconds old)")
-            // Remove expired cache
-            cachedConversationMessages.removeValue(forKey: otherUserId)
-            conversationMessagesCacheTimestamp.removeValue(forKey: otherUserId)
-            return nil
-        }
+        print("💬 Returning cached conversation state for \(otherUserId) (\(state.visibleMessages.count) visible / \(state.messagePool.count) total messages)")
+        return ConversationCacheSnapshot(
+            messagePool: state.messagePool.deduplicatedConversationMessages(),
+            visibleMessages: state.visibleMessages.deduplicatedConversationMessages(),
+            hasMoreOlderMessages: state.hasMoreOlderMessages
+        )
     }
     
-    /// Cache conversation messages for a specific user
+    /// Backward-compatible accessor for callers that only need the message pool.
+    func getCachedConversationMessages(for otherUserId: String) -> [MessageDisplay]? {
+        getCachedConversationState(for: otherUserId)?.messagePool
+    }
+    
+    /// Persist the full scroll state so reopening/scrolling does not reload already fetched messages.
+    func cacheConversationState(
+        for otherUserId: String,
+        messagePool: [MessageDisplay],
+        visibleMessages: [MessageDisplay],
+        hasMoreOlderMessages: Bool
+    ) {
+        let pool = messagePool.deduplicatedConversationMessages()
+        let visible = visibleMessages.deduplicatedConversationMessages()
+        cachedConversationStates[otherUserId] = CachedConversationState(
+            messagePool: pool,
+            visibleMessages: visible,
+            hasMoreOlderMessages: hasMoreOlderMessages,
+            updatedAt: Date()
+        )
+        print("💬 Cached conversation state for \(otherUserId) (\(visible.count) visible / \(pool.count) total messages)")
+    }
+    
+    /// Cache only the message pool, preserving any existing visible scroll state.
     func cacheConversationMessages(_ messages: [MessageDisplay], for otherUserId: String) {
-        Task { @MainActor in
-            cachedConversationMessages[otherUserId] = messages.deduplicatedConversationMessages()
-            conversationMessagesCacheTimestamp[otherUserId] = Date()
-            print("💬 Cached \(messages.count) messages for conversation with \(otherUserId)")
+        let pool = messages.deduplicatedConversationMessages()
+        if var existingState = cachedConversationStates[otherUserId] {
+            existingState.messagePool = pool
+            existingState.updatedAt = Date()
+            cachedConversationStates[otherUserId] = existingState
+            print("💬 Updated message pool cache for \(otherUserId) (\(pool.count) messages)")
+            return
         }
+        
+        cacheConversationState(
+            for: otherUserId,
+            messagePool: pool,
+            visibleMessages: pool,
+            hasMoreOlderMessages: false
+        )
     }
     
     /// Update conversation messages cache when new messages arrive
     func updateConversationMessagesCache(_ newMessages: [MessageDisplay], for otherUserId: String) {
-        Task { @MainActor in
-            if var existingMessages = cachedConversationMessages[otherUserId] {
-                let existingKeys = Set(existingMessages.map(\.deduplicationKey))
-                
-                for newMessage in newMessages {
-                    if !existingKeys.contains(newMessage.deduplicationKey) {
-                        existingMessages.append(newMessage)
-                    }
-                }
-                
-                let deduplicated = existingMessages.deduplicatedConversationMessages()
-                cachedConversationMessages[otherUserId] = deduplicated
-                conversationMessagesCacheTimestamp[otherUserId] = Date()
-                print("💬 Updated conversation cache for \(otherUserId) with new messages (total: \(deduplicated.count))")
-            } else {
-                cacheConversationMessages(newMessages, for: otherUserId)
+        if var existingState = cachedConversationStates[otherUserId] {
+            let existingKeys = Set(existingState.messagePool.map(\.deduplicationKey))
+            var appendedToVisible = false
+            
+            for newMessage in newMessages where !existingKeys.contains(newMessage.deduplicationKey) {
+                existingState.messagePool.append(newMessage)
+                existingState.visibleMessages.append(newMessage)
+                appendedToVisible = true
             }
+            
+            existingState.messagePool = existingState.messagePool.deduplicatedConversationMessages()
+            if appendedToVisible {
+                existingState.visibleMessages = existingState.visibleMessages.deduplicatedConversationMessages()
+            }
+            existingState.updatedAt = Date()
+            cachedConversationStates[otherUserId] = existingState
+            print("💬 Updated conversation cache for \(otherUserId) (total: \(existingState.messagePool.count))")
+        } else {
+            cacheConversationMessages(newMessages, for: otherUserId)
         }
     }
     
     /// Clear cache for a specific conversation
     func clearConversationMessagesCache(for otherUserId: String) {
-        Task { @MainActor in
-            cachedConversationMessages.removeValue(forKey: otherUserId)
-            conversationMessagesCacheTimestamp.removeValue(forKey: otherUserId)
-            print("💬 Cleared conversation cache for \(otherUserId)")
-        }
+        cachedConversationStates.removeValue(forKey: otherUserId)
+        print("💬 Cleared conversation cache for \(otherUserId)")
     }
     
     // MARK: - App State Management for Push Notifications

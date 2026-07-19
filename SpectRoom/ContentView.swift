@@ -35,7 +35,7 @@ struct ContentView: View {
                 case 2:
                     SearchView(selectedTab: $selectedTab)
                 case 3:
-                    ProfileView()
+                    ProfileEditView(embedsInTabBar: true, selectedTab: $selectedTab)
                 case 4:
                     SettingsView()
                 default:
@@ -207,9 +207,9 @@ struct CustomFooterMenu: View {
                 Spacer()
                     .frame(width: 64) // Space for Discover button
                 
-                // Profile button
+                // Profile button — tap again while open returns to Home
                 Button(action: {
-                    selectedTab = 3
+                    selectedTab = selectedTab == 3 ? 2 : 3
                 }) {
                     VStack(spacing: 3) {
                         Image(systemName: "person.fill")

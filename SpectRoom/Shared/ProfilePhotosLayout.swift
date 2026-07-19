@@ -117,6 +117,8 @@ struct ProfileGalleryPhotosCard: View {
     var onAdd: (() -> Void)?
     var maxRemoteVisible: Int = 5
     var showValidation: Bool? = nil
+    /// White section card used on edit profile; leave off for read-only profiles.
+    var usesWhiteBackground: Bool = false
     
     @State private var pageIndex = 0
     
@@ -141,7 +143,6 @@ struct ProfileGalleryPhotosCard: View {
                         Text(title)
                             .font(.headline)
                             .fontWeight(.semibold)
-                            .foregroundColor(.blue)
                     }
                     
                     Spacer()
@@ -170,7 +171,7 @@ struct ProfileGalleryPhotosCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: ProfilePhotoStyle.cardCorner, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
+                .fill(usesWhiteBackground ? Color(.systemBackground) : Color(.secondarySystemGroupedBackground))
         )
         .shadow(color: ProfilePhotoStyle.cardShadow, radius: 16, x: 0, y: 8)
     }

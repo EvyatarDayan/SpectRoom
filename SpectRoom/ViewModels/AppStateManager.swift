@@ -892,8 +892,10 @@ class AppStateManager: ObservableObject {
                     )
                     self?.incrementUnreadCount(for: senderId)
                     
-                    // Play in-app sound whenever the app is open (any screen), not only when chat is open
-                    if UIApplication.shared.applicationState == .active {
+                    // When this chat is open, the conversation UI appends the message and
+                    // plays the sound together. Otherwise play here for list/other screens.
+                    let chatIsOpen = self?.currentlyOpenConversationSenderId == senderId
+                    if UIApplication.shared.applicationState == .active, chatIsOpen != true {
                         self?.playIncomingMessageSoundIfNeeded(for: messageDocId)
                     }
                     
@@ -965,7 +967,7 @@ class AppStateManager: ObservableObject {
         }
     }
     
-    private func playIncomingMessageSoundIfNeeded(for messageDocId: String) {
+    func playIncomingMessageSoundIfNeeded(for messageDocId: String) {
         guard lastPlayedMessageSoundId != messageDocId else { return }
         lastPlayedMessageSoundId = messageDocId
         
@@ -1094,6 +1096,9 @@ class AppStateManager: ObservableObject {
             recipientProfilePhotoURL: currentUser?.profilePhotoURL
         )
         updateConversationInCache(messageDisplay)
+        // Keep the open-chat message pool in sync so the conversation UI can show
+        // the bubble at the same time as the in-app sound.
+        updateConversationMessagesCache([messageDisplay], for: senderId)
     }
     
     @MainActor

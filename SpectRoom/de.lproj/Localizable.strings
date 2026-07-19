@@ -120,6 +120,7 @@
 "profile.location" = "Standort";
 "profile.my.location" = "Mein Standort";
 "profile.location.not.specified" = "Nicht angegeben";
+"profile.location.privacy.notice" = "Deine Adresse wird niemals geteilt";
 "profile.about.me" = "Über Mich";
 "profile.no.bio" = "Keine Biografie verfügbar";
 "profile.my.interests" = "Meine Interessen";

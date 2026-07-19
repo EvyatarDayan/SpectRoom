@@ -10,9 +10,17 @@ struct ProfileEditView: View {
     
     // MARK: - Parameters
     let isMandatoryCompletion: Bool
+    let embedsInTabBar: Bool
+    @Binding var selectedTab: Int
     
-    init(isMandatoryCompletion: Bool = false) {
+    init(
+        isMandatoryCompletion: Bool = false,
+        embedsInTabBar: Bool = false,
+        selectedTab: Binding<Int> = .constant(2)
+    ) {
         self.isMandatoryCompletion = isMandatoryCompletion
+        self.embedsInTabBar = embedsInTabBar
+        self._selectedTab = selectedTab
     }
     
     // MARK: - State Variables
@@ -34,8 +42,12 @@ struct ProfileEditView: View {
     @State private var selectedLookingFor: Set<String> = []
     @State private var customLookingFor: String = ""
     @State private var preferredAgeMin: Double = 18
-    @State private var preferredAgeMax: Double = 80
+    @State private var preferredAgeMax: Double = 30
     @State private var energyLevel: Int = 4 // Default to "Fully Social Mode" (index 4, locked to 0-4)
+    
+    private let absoluteAgeMin = 18.0
+    private let absoluteAgeMax = 80.0
+    private let maxPreferredAgeSpan = 12.0
     
     // MARK: - Suggested Interests
     private let suggestedInterests = [
@@ -79,7 +91,7 @@ struct ProfileEditView: View {
             case .balancedEnergy:
                 return Color(hex: "#ff9323")
             case .readyToChat:
-                return Color(hex: "#f1dc32")
+                return Color(hex: "#C9A000")
             case .fullySocialMode:
                 return Color(hex: "#69c440")
             }
@@ -154,6 +166,7 @@ struct ProfileEditView: View {
     @State private var isLoading = false
     @State private var showingAlert = false
     @State private var alertMessage = ""
+    @State private var hasAttemptedSave = false
     @State private var showingAddressSearch = false
     @State private var selectedLifestyle = ""
     @State private var isDataLoaded = false // Track when profile data is loaded
@@ -164,7 +177,7 @@ struct ProfileEditView: View {
     @State private var selectedIdealFirstDate: [String] = []
     @State private var shareSensoryPreferences = false
     @State private var selectedSensoryPreferences: [String] = []
-    
+    @State private var isDatePickerExpanded = false
     
     var body: some View {
         NavigationView {
@@ -199,7 +212,7 @@ struct ProfileEditView: View {
                         genderPreferencesSection
                     }
                     .padding(.horizontal)
-                    .padding(.bottom, 30)
+                    .padding(.bottom, embedsInTabBar ? 100 : 30)
                 }
                 .background(
                     Image(colorScheme == .dark ? "ColorsDark" : "Colors")
@@ -228,8 +241,10 @@ struct ProfileEditView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("profile.edit.cancel".localized) {
-                        dismiss()
+                    if !isMandatoryCompletion {
+                        Button("profile.edit.cancel".localized) {
+                            closeEdit()
+                        }
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -237,6 +252,7 @@ struct ProfileEditView: View {
                         if isFormValid() {
                             saveProfile()
                         } else {
+                            hasAttemptedSave = true
                             // Show validation errors with bullet points
                             alertMessage = getFormattedValidationErrors()
                             showingAlert = true
@@ -297,20 +313,16 @@ struct ProfileEditView: View {
         }
         .overlay {
             if isLoading {
-                Color.black.opacity(0.3)
-                    .ignoresSafeArea()
-                
                 VStack(spacing: 16) {
-                    Text("profile.edit.saving".localized)
-                        .font(.headline)
-                        .foregroundColor(.white)
                     ProgressView()
                         .scaleEffect(1.5)
-                        .tint(.white)
+                        .tint(.blue)
+                    Text("profile.edit.saving".localized)
+                        .font(.headline)
+                        .foregroundColor(.primary)
                 }
-                .frame(width: 200, height: 120)
-                .background(Color.black.opacity(0.7))
-                .cornerRadius(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.systemGroupedBackground).opacity(0.8))
             }
         }
     }
@@ -321,7 +333,6 @@ struct ProfileEditView: View {
             Text("profile.edit.profile.photo".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
-                .foregroundColor(.blue)
             
             ProfileMainPhotoCard(
                 imageURL: profilePhoto == nil ? appState.currentUser?.profilePhotoURL : nil,
@@ -334,84 +345,133 @@ struct ProfileEditView: View {
                 }
             )
         }
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: ProfilePhotoStyle.cardCorner, style: .continuous)
+                .fill(Color(.systemBackground))
+        )
     }
     
     // MARK: - Name Section
     private var nameSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("profile.edit.name".localized)
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                
-                Spacer()
-                
-                validationCheckmark(isValid: isNameValid)
-            }
+        VStack(alignment: .leading, spacing: 14) {
+            Text("profile.edit.name".localized)
+                .font(.headline)
+                .fontWeight(.semibold)
             
             TextField("profile.edit.name.placeholder".localized, text: $name)
-                .padding()
-                .background(Color(.systemGroupedBackground))
-                .cornerRadius(8)
-                .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+                .font(.system(size: 16, weight: .medium))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.blue.opacity(0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
+                )
+                .autocorrectionDisabled(true)
+                .textInputAutocapitalization(.words)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
+        .overlay(validationFrame(isValid: isNameValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
     
     // MARK: - Date of Birth Section
     private var dateOfBirthSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("profile.edit.date.of.birth".localized)
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                
-                Spacer()
-                
-                validationCheckmark(isValid: isAgeValid)
-            }
+        let age = calculateAge(from: dateOfBirth)
+        let maxBirthDate = Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()
+        let minBirthDate = Calendar.current.date(byAdding: .year, value: -100, to: Date()) ?? Date()
+        
+        return VStack(alignment: .leading, spacing: 14) {
+            Text("profile.edit.date.of.birth".localized)
+                .font(.headline)
+                .fontWeight(.semibold)
             
-            HStack {
-                DatePicker("", selection: $dateOfBirth, displayedComponents: .date)
-                    .datePickerStyle(CompactDatePickerStyle())
-                    .labelsHidden()
-                    .padding()
-                    .background(Color(.systemGroupedBackground))
-                    .cornerRadius(8)
-                    .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
-                
-                Spacer()
-                
-                Text(String(format: "profile.edit.my.age".localized, "\(calculateAge(from: dateOfBirth))"))
-                    .font(.subheadline)
-                    .fontWeight(.bold)
-                    .foregroundColor(.blue)
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    isDatePickerExpanded.toggle()
+                }
+            } label: {
+                ZStack {
+                    VStack(spacing: 6) {
+                        Text(formattedBirthDate(dateOfBirth))
+                            .font(.system(size: 20, weight: .semibold, design: .rounded))
+                            .foregroundColor(.primary)
+                        
+                        Text(String(format: "profile.edit.my.age".localized, "\(age)"))
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(.blue)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
+                    
+                    HStack {
+                        Spacer()
+                        Image(systemName: isDatePickerExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.vertical, 14)
+                .padding(.horizontal, 14)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.blue.opacity(0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
+                )
+            }
+            .buttonStyle(.plain)
+            
+            if isDatePickerExpanded {
+                DatePicker(
+                    "",
+                    selection: $dateOfBirth,
+                    in: minBirthDate...maxBirthDate,
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.wheel)
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+                .frame(height: 132)
+                .clipped()
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color(.systemGroupedBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
+        .overlay(validationFrame(isValid: isAgeValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .animation(.easeInOut(duration: 0.25), value: isDatePickerExpanded)
     }
     
     // MARK: - Location Section
     private var locationSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("profile.my.location".localized)
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                
-                Spacer()
-                
-                validationCheckmark(isValid: isLocationValid)
-            }
+            Text("profile.my.location".localized)
+                .font(.headline)
+                .fontWeight(.semibold)
             
             HStack {
                 Text(location.isEmpty ? "profile.edit.location.placeholder".localized : location)
@@ -428,14 +488,26 @@ struct ProfileEditView: View {
                 }
                 .buttonStyle(PlainButtonStyle())
             }
-            .padding()
-            .background(Color(.systemGroupedBackground))
-            .cornerRadius(8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.blue.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
+            )
+            
+            Text("profile.location.privacy.notice".localized)
+                .font(.caption)
+                .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
+        .overlay(validationFrame(isValid: isLocationValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
     
@@ -444,58 +516,32 @@ struct ProfileEditView: View {
         let currentOption = EnergyLevelOption(rawValue: energyLevel) ?? .fullySocialMode
         let levelColor = currentOption.color
         
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: 14) {
             Text("profile.edit.energy.level".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
             
-            VStack(spacing: 12) {
-                // Energy level display
-                HStack {
-                    Text(currentOption.title)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(levelColor)
-                    
-                    Spacer()
-                }
-                
-                // Single slider with discrete steps (locked to 5 levels: 0, 1, 2, 3, 4)
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        // Background track
-                        Rectangle()
-                            .fill(Color.gray.opacity(0.3))
-                            .frame(height: 6)
-                            .cornerRadius(3)
-                        
-                        // Active track (from start to current position)
-                        Rectangle()
-                            .fill(levelColor)
-                            .frame(height: 6)
-                            .cornerRadius(3)
-                            .frame(width: CGFloat(energyLevel) / 4.0 * geometry.size.width)
-                        
-                        // Thumb
-                        Circle()
-                            .fill(levelColor)
-                            .frame(width: 20, height: 20)
-                            .shadow(radius: 2)
-                            .offset(x: CGFloat(energyLevel) / 4.0 * geometry.size.width - 10)
-                            .gesture(
-                                DragGesture()
-                                    .onChanged { value in
-                                        // Calculate which discrete level the drag is closest to
-                                        // Snap to one of 5 positions: 0, 1, 2, 3, 4
-                                        let position = value.location.x / geometry.size.width
-                                        let newLevel = Int(round(position * 4.0))
-                                        let clampedLevel = max(0, min(newLevel, 4))
-                                        energyLevel = clampedLevel
-                                    }
-                            )
-                    }
-                }
-                .frame(height: 20)
-            }
+            Text(currentOption.title)
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundColor(levelColor)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.blue.opacity(0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
+                )
+                .multilineTextAlignment(.center)
+            
+            EnergyLevelSlider(
+                energyLevel: $energyLevel,
+                levelColor: levelColor
+            )
+            .frame(height: 40)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
@@ -508,14 +554,9 @@ struct ProfileEditView: View {
     private var aboutMeSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("profile.edit.about.me".localized)
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                    Spacer()
-                    
-                    validationCheckmark(isValid: isBioValid)
-                }
+                Text("profile.edit.about.me".localized)
+                    .font(.headline)
+                    .fontWeight(.semibold)
                 
                 VStack(alignment: .leading, spacing: 8) {
                     TextEditor(text: bioTextBinding)
@@ -523,11 +564,13 @@ struct ProfileEditView: View {
                         .foregroundColor(.primary)
                         .scrollContentBackground(.hidden)
                         .padding()
-                        .background(Color(.systemGroupedBackground))
-                        .cornerRadius(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(Color.blue.opacity(0.08))
+                        )
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
                         )
                     
                     // Character counter
@@ -550,6 +593,8 @@ struct ProfileEditView: View {
                     
                     Toggle("", isOn: $shareLifestyle)
                         .labelsHidden()
+                        .scaleEffect(0.8)
+                        .frame(width: 42, height: 26)
                 }
                 
                 if shareLifestyle {
@@ -602,6 +647,8 @@ struct ProfileEditView: View {
                     
                     Toggle("", isOn: $shareBodyType)
                         .labelsHidden()
+                        .scaleEffect(0.8)
+                        .frame(width: 42, height: 26)
                 }
                 
                 if shareBodyType {
@@ -654,6 +701,8 @@ struct ProfileEditView: View {
                     
                     Toggle("", isOn: $shareIdealFirstDate)
                         .labelsHidden()
+                        .scaleEffect(0.8)
+                        .frame(width: 42, height: 26)
                 }
                 
                 if shareIdealFirstDate {
@@ -710,6 +759,8 @@ struct ProfileEditView: View {
                     
                     Toggle("", isOn: $shareSensoryPreferences)
                         .labelsHidden()
+                        .scaleEffect(0.8)
+                        .frame(width: 42, height: 26)
                 }
                 
                 if shareSensoryPreferences {
@@ -770,21 +821,16 @@ struct ProfileEditView: View {
         .padding()
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
+        .overlay(validationFrame(isValid: isBioValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
     
     // MARK: - Gender & Preferences Section
     private var genderPreferencesSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("profile.preferences".localized)
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                
-                Spacer()
-                
-                validationCheckmark(isValid: isGenderValid)
-            }
+            Text("profile.preferences".localized)
+                .font(.headline)
+                .fontWeight(.semibold)
             
             // I am section
             VStack(alignment: .leading, spacing: 8) {
@@ -792,53 +838,37 @@ struct ProfileEditView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                 
-                HStack(spacing: 12) {
-                    // Man button
-                    Button(action: {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 10),
+                        GridItem(.flexible(), spacing: 10)
+                    ],
+                    spacing: 10
+                ) {
+                    ProfileSelectionChip(
+                        title: "profile.edit.gender.man".localized,
+                        isSelected: gender == "Man"
+                    ) {
                         gender = "Man"
                         customGender = ""
-                    }) {
-                        Text("profile.edit.gender.man".localized)
-                            .font(.system(size: 13, weight: .medium))
-                            .lineLimit(1)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(gender == "Man" ? Color.blue : Color.gray.opacity(0.1))
-                            .foregroundColor(gender == "Man" ? .white : .primary)
-                            .cornerRadius(20)
                     }
                     
-                    // Woman button
-                    Button(action: {
+                    ProfileSelectionChip(
+                        title: "profile.edit.gender.woman".localized,
+                        isSelected: gender == "Woman"
+                    ) {
                         gender = "Woman"
                         customGender = ""
-                    }) {
-                        Text("profile.edit.gender.woman".localized)
-                            .font(.system(size: 13, weight: .medium))
-                            .lineLimit(1)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(gender == "Woman" ? Color.blue : Color.gray.opacity(0.1))
-                            .foregroundColor(gender == "Woman" ? .white : .primary)
-                            .cornerRadius(20)
                     }
                     
-                    // Non-binary button
-                    Button(action: {
+                    ProfileSelectionChip(
+                        title: "profile.edit.gender.nonbinary".localized,
+                        isSelected: gender == "Non-binary"
+                    ) {
                         gender = "Non-binary"
                         customGender = ""
-                    }) {
-                        Text("profile.edit.gender.nonbinary".localized)
-                            .font(.system(size: 13, weight: .medium))
-                            .lineLimit(1)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(gender == "Non-binary" ? Color.blue : Color.gray.opacity(0.1))
-                            .foregroundColor(gender == "Non-binary" ? .white : .primary)
-                            .cornerRadius(20)
                     }
                 }
-                .fixedSize(horizontal: false, vertical: true)
             }
             
             Divider()
@@ -848,90 +878,45 @@ struct ProfileEditView: View {
             
             // Interested in section
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("profile.edit.interested.in".localized)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    
-                    Spacer()
-                    
-                    validationCheckmark(isValid: isInterestedInValid)
-                }
+                Text("profile.edit.interested.in".localized)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
                 
-                HStack(spacing: 12) {
-                    // Man button
-                    Button(action: {
-                        if selectedInterestedIn.contains("Man") {
-                            selectedInterestedIn.remove("Man")
-                        } else {
-                            selectedInterestedIn.insert("Man")
-                        }
-                    }) {
-                        Text("profile.edit.gender.man".localized)
-                            .font(.system(size: 13, weight: .medium))
-                            .lineLimit(1)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(selectedInterestedIn.contains("Man") ? Color.blue : Color.gray.opacity(0.1))
-                            .foregroundColor(selectedInterestedIn.contains("Man") ? .white : .primary)
-                            .cornerRadius(20)
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 10),
+                        GridItem(.flexible(), spacing: 10)
+                    ],
+                    spacing: 10
+                ) {
+                    ProfileSelectionChip(
+                        title: "profile.edit.gender.man".localized,
+                        isSelected: selectedInterestedIn.contains("Man")
+                    ) {
+                        toggleInterestedIn("Man")
                     }
                     
-                    // Woman button
-                    Button(action: {
-                        if selectedInterestedIn.contains("Woman") {
-                            selectedInterestedIn.remove("Woman")
-                        } else {
-                            selectedInterestedIn.insert("Woman")
-                        }
-                    }) {
-                        Text("profile.edit.gender.woman".localized)
-                            .font(.system(size: 13, weight: .medium))
-                            .lineLimit(1)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(selectedInterestedIn.contains("Woman") ? Color.blue : Color.gray.opacity(0.1))
-                            .foregroundColor(selectedInterestedIn.contains("Woman") ? .white : .primary)
-                            .cornerRadius(20)
+                    ProfileSelectionChip(
+                        title: "profile.edit.gender.woman".localized,
+                        isSelected: selectedInterestedIn.contains("Woman")
+                    ) {
+                        toggleInterestedIn("Woman")
                     }
                     
-                    // Non-binary button
-                    Button(action: {
-                        if selectedInterestedIn.contains("Non-binary") {
-                            selectedInterestedIn.remove("Non-binary")
-                        } else {
-                            selectedInterestedIn.insert("Non-binary")
-                        }
-                    }) {
-                        Text("profile.edit.gender.nonbinary".localized)
-                            .font(.system(size: 13, weight: .medium))
-                            .lineLimit(1)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(selectedInterestedIn.contains("Non-binary") ? Color.blue : Color.gray.opacity(0.1))
-                            .foregroundColor(selectedInterestedIn.contains("Non-binary") ? .white : .primary)
-                            .cornerRadius(20)
+                    ProfileSelectionChip(
+                        title: "profile.edit.gender.nonbinary".localized,
+                        isSelected: selectedInterestedIn.contains("Non-binary")
+                    ) {
+                        toggleInterestedIn("Non-binary")
                     }
                     
-                    // Anyone button
-                    Button(action: {
-                        if selectedInterestedIn.contains("Anyone") {
-                            selectedInterestedIn.remove("Anyone")
-                        } else {
-                            selectedInterestedIn.insert("Anyone")
-                        }
-                    }) {
-                        Text("profile.edit.interested.anyone".localized)
-                            .font(.system(size: 13, weight: .medium))
-                            .lineLimit(1)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(selectedInterestedIn.contains("Anyone") ? Color.blue : Color.gray.opacity(0.1))
-                            .foregroundColor(selectedInterestedIn.contains("Anyone") ? .white : .primary)
-                            .cornerRadius(20)
+                    ProfileSelectionChip(
+                        title: "profile.edit.interested.anyone".localized,
+                        isSelected: selectedInterestedIn.contains("Anyone")
+                    ) {
+                        toggleInterestedIn("Anyone")
                     }
                 }
-                .fixedSize(horizontal: false, vertical: true)
                 
                 // Show selected custom preferences (only for old custom text entries)
                 if !selectedInterestedIn.isEmpty {
@@ -970,72 +955,36 @@ struct ProfileEditView: View {
             
             // Looking for section
             VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("profile.edit.looking.for".localized)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    
-                    Spacer()
-                    
-                    validationCheckmark(isValid: isLookingForValid)
-                }
+                Text("profile.edit.looking.for".localized)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
                 
-                HStack(spacing: 12) {
-                    // Friendship button
-                    Button(action: {
-                        if selectedLookingFor.contains("Friendship") {
-                            selectedLookingFor.remove("Friendship")
-                        } else {
-                            selectedLookingFor.insert("Friendship")
-                        }
-                    }) {
-                        Text("profile.edit.looking.friendship".localized)
-                            .font(.system(size: 15, weight: .medium))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(selectedLookingFor.contains("Friendship") ? Color.blue : Color.gray.opacity(0.1))
-                            .foregroundColor(selectedLookingFor.contains("Friendship") ? .white : .primary)
-                            .cornerRadius(20)
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 10),
+                        GridItem(.flexible(), spacing: 10)
+                    ],
+                    spacing: 10
+                ) {
+                    ProfileSelectionChip(
+                        title: "profile.edit.looking.friendship".localized,
+                        isSelected: selectedLookingFor.contains("Friendship")
+                    ) {
+                        toggleLookingFor("Friendship")
                     }
                     
-                    // Relationship button
-                    Button(action: {
-                        if selectedLookingFor.contains("Relationship") {
-                            selectedLookingFor.remove("Relationship")
-                        } else {
-                            selectedLookingFor.insert("Relationship")
-                        }
-                    }) {
-                        Text("profile.edit.looking.relationship".localized)
-                            .font(.system(size: 15, weight: .medium))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(selectedLookingFor.contains("Relationship") ? Color.blue : Color.gray.opacity(0.1))
-                            .foregroundColor(selectedLookingFor.contains("Relationship") ? .white : .primary)
-                            .cornerRadius(20)
+                    ProfileSelectionChip(
+                        title: "profile.edit.looking.relationship".localized,
+                        isSelected: selectedLookingFor.contains("Relationship")
+                    ) {
+                        toggleLookingFor("Relationship")
                     }
                     
-                    // Not sure yet button
-                    Button(action: {
-                        if selectedLookingFor.contains("Not sure yet") {
-                            selectedLookingFor.remove("Not sure yet")
-                        } else {
-                            selectedLookingFor.insert("Not sure yet")
-                        }
-                    }) {
-                        Text("profile.edit.looking.not.sure".localized)
-                            .font(.system(size: 15, weight: .medium))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(selectedLookingFor.contains("Not sure yet") ? Color.blue : Color.gray.opacity(0.1))
-                            .foregroundColor(selectedLookingFor.contains("Not sure yet") ? .white : .primary)
-                            .cornerRadius(20)
+                    ProfileSelectionChip(
+                        title: "profile.edit.looking.not.sure".localized,
+                        isSelected: selectedLookingFor.contains("Not sure yet")
+                    ) {
+                        toggleLookingFor("Not sure yet")
                     }
                 }
             }
@@ -1046,125 +995,71 @@ struct ProfileEditView: View {
                 .padding(.vertical, 8)
             
             // Preferred Age section
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 14) {
                 Text("profile.edit.preferred.age".localized)
                     .font(.subheadline)
                     .fontWeight(.medium)
                 
-                VStack(spacing: 12) {
-                    // Age range display
-                    HStack {
-                        Text("\(Int(preferredAgeMin))-\(Int(preferredAgeMax))")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.blue)
-                        
-                        Spacer()
-                    }
-                    
-                    // Dual range slider
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            // Background track
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(height: 6)
-                                .cornerRadius(3)
-                            
-                            // Active range track
-                            Rectangle()
-                                .fill(Color.blue)
-                                .frame(height: 6)
-                                .cornerRadius(3)
-                                .offset(x: CGFloat(preferredAgeMin - 18) / CGFloat(80 - 18) * geometry.size.width)
-                                .frame(width: CGFloat(preferredAgeMax - preferredAgeMin) / CGFloat(80 - 18) * geometry.size.width)
-                            
-                            // Min thumb
-                            Circle()
-                                .fill(Color.blue)
-                                .frame(width: 20, height: 20)
-                                .shadow(radius: 2)
-                                .offset(x: CGFloat(preferredAgeMin - 18) / CGFloat(80 - 18) * geometry.size.width - 10)
-                                .gesture(
-                                    DragGesture()
-                                        .onChanged { value in
-                                            let newValue = Double(value.location.x / geometry.size.width * CGFloat(80 - 18) + 18)
-                                            let clampedValue = max(18, min(newValue, preferredAgeMax))
-                                            preferredAgeMin = clampedValue
-                                        }
-                                )
-                            
-                            // Max thumb
-                            Circle()
-                                .fill(Color.blue)
-                                .frame(width: 20, height: 20)
-                                .shadow(radius: 2)
-                                .offset(x: CGFloat(preferredAgeMax - 18) / CGFloat(80 - 18) * geometry.size.width - 10)
-                                .gesture(
-                                    DragGesture()
-                                        .onChanged { value in
-                                            let newValue = Double(value.location.x / geometry.size.width * CGFloat(80 - 18) + 18)
-                                            let clampedValue = max(preferredAgeMin, min(newValue, 80))
-                                            preferredAgeMax = clampedValue
-                                        }
-                                )
-                        }
-                    }
-                    .frame(height: 20)
-                }
+                Text("\(Int(preferredAgeMin))–\(Int(preferredAgeMax))")
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.blue.opacity(0.12))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.blue.opacity(0.45), lineWidth: 1.5)
+                    )
+                    .multilineTextAlignment(.center)
+                
+                PreferredAgeRangeSlider(
+                    minAge: $preferredAgeMin,
+                    maxAge: $preferredAgeMax,
+                    absoluteMin: absoluteAgeMin,
+                    absoluteMax: absoluteAgeMax,
+                    accentColor: .blue,
+                    onChangeMin: { updatePreferredAgeMin($0) },
+                    onChangeMax: { updatePreferredAgeMax($0) }
+                )
+                .frame(height: 40)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
+        .overlay(validationFrame(isValid: isGenderValid && isInterestedInValid && isLookingForValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
     
     // MARK: - My Interests Section
     private var myInterestsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("profile.my.interests".localized)
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                Spacer()
-                
-                validationCheckmark(isValid: isInterestsValid)
-            }
+            Text("profile.my.interests".localized)
+                .font(.headline)
+                .fontWeight(.semibold)
             
-            // Suggested Interests
-            VStack(alignment: .leading, spacing: 8) {
-//                Text("Select your interests")
-//                    .font(.subheadline)
-//                    .fontWeight(.medium)
-//                    .foregroundColor(.secondary)
-                
-                LazyVGrid(columns: [
-                    GridItem(.adaptive(minimum: 120))
-                ], spacing: 8) {
-                    ForEach(suggestedInterests, id: \.self) { interest in
-                        Button(action: {
-                            if selectedInterests.contains(interest) {
-                                selectedInterests.remove(interest)
-                            } else {
-                                selectedInterests.insert(interest)
-                            }
-                        }) {
-                            Text(localizedInterest(interest))
-                                .font(.system(size: 13, weight: .medium))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(selectedInterests.contains(interest) ? Color.blue : Color.gray.opacity(0.1))
-                                .foregroundColor(selectedInterests.contains(interest) ? .white : .primary)
-                                .cornerRadius(12)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(selectedInterests.contains(interest) ? Color.blue : Color.gray.opacity(0.3), lineWidth: 1)
-                                )
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 10),
+                    GridItem(.flexible(), spacing: 10)
+                ],
+                spacing: 10
+            ) {
+                ForEach(suggestedInterests, id: \.self) { interest in
+                    ProfileSelectionChip(
+                        title: localizedInterest(interest),
+                        isSelected: selectedInterests.contains(interest)
+                    ) {
+                        if selectedInterests.contains(interest) {
+                            selectedInterests.remove(interest)
+                        } else {
+                            selectedInterests.insert(interest)
                         }
-                        .buttonStyle(PlainButtonStyle())
                     }
                 }
             }
@@ -1173,6 +1068,7 @@ struct ProfileEditView: View {
         .padding()
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
+        .overlay(validationFrame(isValid: isInterestsValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
     
@@ -1192,8 +1088,9 @@ struct ProfileEditView: View {
                 showingGalleryPicker = true
             },
             maxRemoteVisible: 5,
-            showValidation: isPhotosValid
+            usesWhiteBackground: true
         )
+        .overlay(validationFrame(isValid: isPhotosValid))
     }
     
     
@@ -1267,14 +1164,82 @@ struct ProfileEditView: View {
         )
     }
     
-    // MARK: - Validation Checkmark View
-    private func validationCheckmark(isValid: Bool) -> some View {
-        Image(systemName: "checkmark")
-            .foregroundColor(isValid ? .green : .gray)
-            .font(.system(size: 20, weight: .bold))
+    // MARK: - Helper Methods
+    private func closeEdit() {
+        if embedsInTabBar {
+            selectedTab = 2 // Home / Discover
+        } else {
+            dismiss()
+        }
     }
     
-    // MARK: - Helper Methods
+    private func updatePreferredAgeMin(_ proposed: Double) {
+        let newMin = max(absoluteAgeMin, min(proposed, absoluteAgeMax))
+        
+        if preferredAgeMax - newMin > maxPreferredAgeSpan {
+            // Dragging min left past the 12-year window — slide max with it
+            let newMax = newMin + maxPreferredAgeSpan
+            if newMax > absoluteAgeMax {
+                preferredAgeMax = absoluteAgeMax
+                preferredAgeMin = max(absoluteAgeMin, absoluteAgeMax - maxPreferredAgeSpan)
+            } else {
+                preferredAgeMin = newMin
+                preferredAgeMax = newMax
+            }
+        } else if newMin > preferredAgeMax {
+            preferredAgeMin = preferredAgeMax
+        } else {
+            preferredAgeMin = newMin
+        }
+    }
+    
+    private func updatePreferredAgeMax(_ proposed: Double) {
+        let newMax = max(absoluteAgeMin, min(proposed, absoluteAgeMax))
+        
+        if newMax - preferredAgeMin > maxPreferredAgeSpan {
+            // Dragging max right past the 12-year window — slide min with it
+            let newMin = newMax - maxPreferredAgeSpan
+            if newMin < absoluteAgeMin {
+                preferredAgeMin = absoluteAgeMin
+                preferredAgeMax = min(absoluteAgeMax, absoluteAgeMin + maxPreferredAgeSpan)
+            } else {
+                preferredAgeMin = newMin
+                preferredAgeMax = newMax
+            }
+        } else if newMax < preferredAgeMin {
+            preferredAgeMax = preferredAgeMin
+        } else {
+            preferredAgeMax = newMax
+        }
+    }
+    
+    private func clampPreferredAgeSpanIfNeeded() {
+        preferredAgeMin = max(absoluteAgeMin, min(preferredAgeMin, absoluteAgeMax))
+        preferredAgeMax = max(absoluteAgeMin, min(preferredAgeMax, absoluteAgeMax))
+        if preferredAgeMin > preferredAgeMax {
+            swap(&preferredAgeMin, &preferredAgeMax)
+        }
+        if preferredAgeMax - preferredAgeMin > maxPreferredAgeSpan {
+            preferredAgeMax = min(absoluteAgeMax, preferredAgeMin + maxPreferredAgeSpan)
+        }
+    }
+    
+    private func toggleInterestedIn(_ value: String) {
+        if selectedInterestedIn.contains(value) {
+            selectedInterestedIn.remove(value)
+        } else {
+            selectedInterestedIn.insert(value)
+        }
+    }
+    
+    private func toggleLookingFor(_ value: String) {
+        if selectedLookingFor.contains(value) {
+            selectedLookingFor.remove(value)
+        } else {
+            selectedLookingFor.insert(value)
+        }
+    }
+    
     private func loadCurrentProfile() {
         // Clear any local photo cache first
         profilePhoto = nil
@@ -1372,20 +1337,18 @@ struct ProfileEditView: View {
             
             selectedLookingFor = loadedLookingFor
             
-            // Load preferred age range - always use saved values
-            // Ensure values are within valid range (18-80)
-            let savedMin = max(18, min(user.preferredAgeMin, 80))
-            let savedMax = max(18, min(user.preferredAgeMax, 80))
+            // Load preferred age range (18–80 absolute, max 12-year span)
+            let savedMin = max(Int(absoluteAgeMin), min(user.preferredAgeMin, Int(absoluteAgeMax)))
+            let savedMax = max(Int(absoluteAgeMin), min(user.preferredAgeMax, Int(absoluteAgeMax)))
             
-            // Ensure min <= max
             if savedMin <= savedMax {
                 preferredAgeMin = Double(savedMin)
                 preferredAgeMax = Double(savedMax)
             } else {
-                // Fallback to defaults if saved values are invalid
                 preferredAgeMin = Double(user.age)
-                preferredAgeMax = Double(min(user.age + 5, 80))
+                preferredAgeMax = Double(min(user.age + 5, Int(absoluteAgeMax)))
             }
+            clampPreferredAgeSpanIfNeeded()
             
             print("🔍 ProfileEditView - Loaded preferred age from user: \(user.preferredAgeMin)-\(user.preferredAgeMax)")
             print("🔍 ProfileEditView - Loaded preferred age (validated): \(Int(preferredAgeMin))-\(Int(preferredAgeMax))")
@@ -1425,6 +1388,14 @@ struct ProfileEditView: View {
             existingPhotos = []
             selectedLifestyle = ""
         }
+    }
+    
+    private func validationFrame(isValid: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(
+                (hasAttemptedSave && !isValid) ? Color.red : Color.clear,
+                lineWidth: 1.5
+            )
     }
     
     // MARK: - Validation Functions
@@ -1490,6 +1461,12 @@ struct ProfileEditView: View {
         return ageComponents.year ?? 0
     }
     
+    private func formattedBirthDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.setLocalizedDateFormatFromTemplate("yMMMMd")
+        return formatter.string(from: date)
+    }
     
     private func deletePhoto(_ photoURL: String) {
         photosToDelete.insert(photoURL)
@@ -1726,8 +1703,7 @@ struct ProfileEditView: View {
                     // Complete the initial profile setup
                     appState.completeInitialProfile()
                 } else {
-                    // Regular edit - just dismiss
-                    dismiss()
+                    closeEdit()
                 }
                 
             } catch {

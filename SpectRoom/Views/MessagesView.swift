@@ -975,6 +975,9 @@ struct MessageConversationModal: View {
             loadConversationMessages()
             startAutoRefresh()
         }
+        .onReceive(appState.newMessageReceivedPublisher) { newMessage in
+            appendIncomingMessageIfNeeded(newMessage)
+        }
         .onDisappear {
             // Determine the other user's ID
             let otherUserId = message.senderName == "You" ? message.recipientId : message.senderId
@@ -1481,6 +1484,31 @@ struct MessageConversationModal: View {
         // Refresh in background
         Task {
             await refreshConversationMessagesInBackground(otherUserId: otherUserId)
+        }
+    }
+    
+    private func appendIncomingMessageIfNeeded(_ newMessage: MessageDisplay) {
+        // Only handle messages from the other person in this open chat.
+        guard newMessage.senderId == otherUserId else { return }
+        
+        let key = newMessage.deduplicationKey
+        if conversationMessages.contains(where: { $0.deduplicationKey == key }) {
+            return
+        }
+        
+        conversationMessages.append(newMessage)
+        cachedMessagesPool = (cachedMessagesPool + [newMessage]).deduplicatedConversationMessages()
+        shouldScrollToBottom = true
+        previousMessageCount = conversationMessages.count
+        keyboardScrollToken += 1
+        persistConversationCache()
+        
+        // Play sound at the same moment the bubble is added (not when the
+        // Firestore listener first fires ahead of the UI refresh).
+        appState.playIncomingMessageSoundIfNeeded(for: key)
+        
+        Task {
+            await appState.markMessagesAsRead(from: otherUserId)
         }
     }
     

@@ -1286,6 +1286,29 @@ private struct StackAppearance: ViewModifier {
     }
 }
 
+private struct BlueFieldStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.blue.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
+            )
+    }
+}
+
+private extension View {
+    func blueFieldStyle() -> some View {
+        modifier(BlueFieldStyle())
+    }
+}
+
 struct FilterChip: View {
     let title: String
     let isSelected: Bool
@@ -1337,7 +1360,7 @@ private enum EnergyLevelOption: Int, CaseIterable {
         case .balancedEnergy:
             return Color(hex: "#ff9323")
         case .readyToChat:
-            return Color(hex: "#f1dc32")
+            return Color(hex: "#C9A000")
         case .fullySocialMode:
             return Color(hex: "#69c440")
         }
@@ -1368,6 +1391,20 @@ struct UserProfileModal: View {
         refreshedProfile ?? profile
     }
     
+    /// Always compute against the logged-in user so Matches (which used to omit %)
+    /// shows the same value as Home cards.
+    private var resolvedMatchPercentage: Int {
+        if let currentUser = appState.currentUser {
+            return ProfileCard.calculateMatchPercentage(
+                interests: displayProfile.interests,
+                age: displayProfile.age,
+                gender: displayProfile.gender,
+                currentUser: currentUser
+            )
+        }
+        return displayProfile.matchPercentage
+    }
+    
     var body: some View {
         let _ = print("🔍 UserProfileModal body being computed, profile name: \(profile.name)")
         NavigationView {
@@ -1378,6 +1415,9 @@ struct UserProfileModal: View {
                     
                     // My Photos Section (moved right after profile photo)
                     myPhotosSection
+                    
+                    // Match percentage (same as home card)
+                    matchSection
                     
                     // Age Section
                     ageSection
@@ -1503,6 +1543,7 @@ struct UserProfileModal: View {
                 .scaleEffect(0.8, anchor: .trailing)
                 .frame(width: 46, height: 28, alignment: .trailing)
         }
+        .blueFieldStyle()
         .padding()
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
@@ -1526,8 +1567,20 @@ struct UserProfileModal: View {
             // Fetch latest profile data from Firebase
             let refreshed = try await FirebaseAuthService.shared.fetchUserProfile(for: profile.userId)
             
-            // Keep the original distance from the profile card (already calculated)
-            // Update the refreshed profile with the original distance
+            // Keep the original distance from the profile card (already calculated).
+            // Recalculate match % from the latest current user + refreshed profile data.
+            let matchPercentage: Int
+            if let currentUser = appState.currentUser {
+                matchPercentage = ProfileCard.calculateMatchPercentage(
+                    interests: refreshed.interests,
+                    age: refreshed.age,
+                    gender: refreshed.gender,
+                    currentUser: currentUser
+                )
+            } else {
+                matchPercentage = refreshed.matchPercentage
+            }
+            
             let updatedProfile = ProfileCard(
                 userId: refreshed.userId,
                 name: refreshed.name,
@@ -1553,7 +1606,7 @@ struct UserProfileModal: View {
                 sensoryPreferences: refreshed.sensoryPreferences,
                 shareSensoryPreferences: refreshed.shareSensoryPreferences,
                 energyLevel: refreshed.energyLevel,
-                matchPercentage: profile.matchPercentage
+                matchPercentage: matchPercentage
             )
             
             await MainActor.run {
@@ -1568,16 +1621,28 @@ struct UserProfileModal: View {
     
     // MARK: - Profile Header Section
     private var profileHeaderSection: some View {
-        ProfileMainPhotoCard(
-            imageURL: displayProfile.imageURL,
-            onTap: {
-                let hasProfilePhoto = displayProfile.imageURL != nil && !(displayProfile.imageURL?.isEmpty ?? true)
-                let hasGalleryPhotos = !displayProfile.photos.isEmpty
-                if hasProfilePhoto || hasGalleryPhotos {
-                    selectedPhotoIndex = 0
-                    showingPhotoViewer = true
+        VStack(alignment: .leading, spacing: 12) {
+            Text("profile.edit.profile.photo".localized)
+                .font(.headline)
+                .fontWeight(.semibold)
+            
+            ProfileMainPhotoCard(
+                imageURL: displayProfile.imageURL,
+                onTap: {
+                    let hasProfilePhoto = displayProfile.imageURL != nil && !(displayProfile.imageURL?.isEmpty ?? true)
+                    let hasGalleryPhotos = !displayProfile.photos.isEmpty
+                    if hasProfilePhoto || hasGalleryPhotos {
+                        selectedPhotoIndex = 0
+                        showingPhotoViewer = true
+                    }
                 }
-            }
+            )
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: ProfilePhotoStyle.cardCorner, style: .continuous)
+                .fill(Color(.systemBackground))
         )
     }
     
@@ -1587,14 +1652,14 @@ struct UserProfileModal: View {
             Text("profile.age".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
-                .foregroundColor(.blue)
             
             Text("\(displayProfile.age) " + "profile.years.old".localized)
                 .font(.subheadline)
+                .blueFieldStyle()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.systemBackground))
+        .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -1605,34 +1670,58 @@ struct UserProfileModal: View {
             Text("profile.location".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
-                .foregroundColor(.blue)
             
             Text(displayProfile.distance)
                 .font(.subheadline)
+                .blueFieldStyle()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.systemBackground))
+        .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
     
     // MARK: - Energy Level Section
     private var energyLevelSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let energyOption = EnergyLevelOption(rawValue: displayProfile.energyLevel) ?? .fullySocialMode
+        let levelColor = energyOption.color
+        let levelBinding = Binding<Int>(
+            get: { displayProfile.energyLevel },
+            set: { _ in }
+        )
+        
+        return VStack(alignment: .leading, spacing: 14) {
             Text("profile.edit.energy.level".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
-                .foregroundColor(.blue)
             
-            let energyOption = EnergyLevelOption(rawValue: displayProfile.energyLevel) ?? .fullySocialMode
             Text(energyOption.title)
-                .font(.subheadline)
-                .foregroundColor(energyOption.color)
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundColor(levelColor)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.blue.opacity(0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
+                )
+                .multilineTextAlignment(.center)
+            
+            EnergyLevelSlider(
+                energyLevel: levelBinding,
+                levelColor: levelColor,
+                isEnabled: false
+            )
+            .frame(height: 40)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.systemBackground))
+        .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -1643,82 +1732,56 @@ struct UserProfileModal: View {
             Text("profile.about.me".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
-                .foregroundColor(.blue)
             
             Text(displayProfile.bio.isEmpty ? "profile.no.bio".localized : displayProfile.bio)
                 .font(.body)
-                .foregroundColor(.primary)
+                .foregroundColor(displayProfile.bio.isEmpty ? .secondary : .primary)
                 .multilineTextAlignment(.leading)
-            
-            Divider()
-                .frame(height: 2)
-                .background(Color.gray.opacity(0.3))
-                .padding(.vertical, 4)
+                .blueFieldStyle()
             
             if displayProfile.shareLifestyle {
                 Text("profile.lifestyle.title".localized)
                     .font(.headline)
                     .fontWeight(.semibold)
-                    .foregroundColor(.blue)
                 Text(formattedLifestyle(displayProfile.lifestyle))
                     .font(.body)
                     .foregroundColor(.primary)
+                    .blueFieldStyle()
             }
             
             if displayProfile.shareBodyType, !displayProfile.bodyType.isEmpty {
-                if displayProfile.shareLifestyle {
-                    Divider()
-                        .frame(height: 2)
-                        .background(Color.gray.opacity(0.3))
-                        .padding(.vertical, 4)
-                }
-                
                 Text("profile.body.type".localized)
                     .font(.headline)
                     .fontWeight(.semibold)
-                    .foregroundColor(.blue)
                 Text(formattedBodyType(displayProfile.bodyType))
                     .font(.body)
                     .foregroundColor(.primary)
+                    .blueFieldStyle()
             }
             
             if displayProfile.shareIdealFirstDate, !displayProfile.idealFirstDate.isEmpty {
-                if displayProfile.shareLifestyle || displayProfile.shareBodyType {
-                    Divider()
-                        .frame(height: 2)
-                        .background(Color.gray.opacity(0.3))
-                        .padding(.vertical, 4)
-                }
-                
                 Text("profile.ideal.first.date".localized)
                     .font(.headline)
                     .fontWeight(.semibold)
-                    .foregroundColor(.blue)
                 Text(formattedIdealFirstDate(displayProfile.idealFirstDate))
                     .font(.body)
                     .foregroundColor(.primary)
+                    .blueFieldStyle()
             }
             
             if displayProfile.shareSensoryPreferences, !displayProfile.sensoryPreferences.isEmpty {
-                if displayProfile.shareLifestyle || displayProfile.shareBodyType || displayProfile.shareIdealFirstDate {
-                    Divider()
-                        .frame(height: 2)
-                        .background(Color.gray.opacity(0.3))
-                        .padding(.vertical, 4)
-                }
-                
                 Text("profile.sensory.preferences".localized)
                     .font(.headline)
                     .fontWeight(.semibold)
-                    .foregroundColor(.blue)
                 Text(SensoryPreferenceOption.formattedTitles(displayProfile.sensoryPreferences))
                     .font(.body)
                     .foregroundColor(.primary)
+                    .blueFieldStyle()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.systemBackground))
+        .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -1729,21 +1792,22 @@ struct UserProfileModal: View {
             Text("profile.my.interests".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
-                .foregroundColor(.blue)
             
             if displayProfile.interests.isEmpty {
                 Text("profile.no.interests".localized)
                     .font(.body)
                     .foregroundColor(.secondary)
+                    .blueFieldStyle()
             } else {
                 Text(displayProfile.interests.map { localizedInterest($0) }.joined(separator: ", "))
                     .font(.body)
                     .foregroundColor(.primary)
+                    .blueFieldStyle()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.systemBackground))
+        .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -1760,7 +1824,6 @@ struct UserProfileModal: View {
             Text("profile.preferences".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
-                .foregroundColor(.blue)
             
             if hasGenderOrInterestedIn || hasLookingFor || hasCustomPreferredAge {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1813,11 +1876,13 @@ struct UserProfileModal: View {
                             .italic()
                     }
                 }
+                .blueFieldStyle()
             } else {
                 Text("profile.no.preferences".localized)
                     .font(.body)
                     .foregroundColor(.secondary)
                     .italic()
+                    .blueFieldStyle()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1924,12 +1989,49 @@ struct UserProfileModal: View {
     private var myPhotosSection: some View {
         ProfileGalleryPhotosCard(
             photoURLs: displayProfile.photos,
-            title: nil,
+            allowsPaging: false,
             onSelectRemote: { index in
                 selectedPhotoIndex = index + 1
                 showingPhotoViewer = true
-            }
+            },
+            usesWhiteBackground: true
         )
+    }
+    
+    private var matchSection: some View {
+        let matchPercentage = resolvedMatchPercentage
+        let profileFirstName = firstName(from: displayProfile.name)
+        let matchColor: Color = matchPercentage > 49 ? .green : .secondary
+        
+        return VStack(alignment: .leading, spacing: 8) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(height: 6)
+                    Capsule()
+                        .fill(matchColor)
+                        .frame(
+                            width: geo.size.width * CGFloat(max(0, min(matchPercentage, 100))) / 100.0,
+                            height: 6
+                        )
+                }
+            }
+            .frame(height: 6)
+            
+            (Text("search.match.prefix".localized)
+             + Text(String(format: "search.match.percent.part".localized, matchPercentage))
+                .foregroundColor(matchColor)
+             + Text(String(format: "search.match.suffix".localized, profileFirstName)))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.primary)
+                .lineLimit(2)
+        }
+        .blueFieldStyle()
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
 }
 
@@ -1986,20 +2088,15 @@ struct PhotoViewerModal: View {
                 }
             }
             
-            // Close button
+            // Done button
             VStack {
                 HStack {
                     Spacer()
-                    Button(action: {
+                    Button("common.done".localized) {
                         dismiss()
-                    }) {
-                        Image(systemName: "xmark")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .padding()
-                            .background(Color.black.opacity(0.5))
-                            .clipShape(Circle())
                     }
+                    .font(.headline)
+                    .foregroundColor(.white)
                     .padding(.trailing, 35)
                     .padding(.top, 24)
                 }

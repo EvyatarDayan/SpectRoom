@@ -33,7 +33,7 @@ private enum EnergyLevelOption: Int, CaseIterable {
         case .balancedEnergy:
             return Color(hex: "#ff9323")
         case .readyToChat:
-            return Color(hex: "#f1dc32")
+            return Color(hex: "#C9A000")
         case .fullySocialMode:
             return Color(hex: "#69c440")
         }
@@ -203,6 +203,10 @@ struct ProfileView: View {
             Text(appState.currentUser?.location.displayString.isEmpty == false ? appState.currentUser?.location.displayString ?? "" : "profile.location.not.specified".localized)
                 .font(.subheadline)
                 .foregroundColor(appState.currentUser?.location.displayString.isEmpty == false ? .primary : .secondary)
+            
+            Text("profile.location.privacy.notice".localized)
+                .font(.caption)
+                .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
@@ -213,18 +217,41 @@ struct ProfileView: View {
     
     // MARK: - Energy Level Section
     private var energyLevelSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let energyOption = EnergyLevelOption(rawValue: appState.currentUser?.energyLevel ?? 4) ?? .fullySocialMode
+        let levelColor = energyOption.color
+        let levelBinding = Binding<Int>(
+            get: { appState.currentUser?.energyLevel ?? 4 },
+            set: { _ in }
+        )
+        
+        return VStack(alignment: .leading, spacing: 14) {
             Text("profile.edit.energy.level".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
                 .foregroundColor(.blue)
             
-            if let user = appState.currentUser {
-                let energyOption = EnergyLevelOption(rawValue: user.energyLevel) ?? .fullySocialMode
-                Text(energyOption.title)
-                    .font(.subheadline)
-                    .foregroundColor(energyOption.color)
-            }
+            Text(energyOption.title)
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundColor(levelColor)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.blue.opacity(0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
+                )
+                .multilineTextAlignment(.center)
+            
+            EnergyLevelSlider(
+                energyLevel: levelBinding,
+                levelColor: levelColor,
+                isEnabled: false
+            )
+            .frame(height: 40)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
@@ -252,11 +279,6 @@ struct ProfileView: View {
                     .italic()
             }
             
-            Divider()
-                .frame(height: 2)
-                .background(Color.gray.opacity(0.3))
-                .padding(.vertical, 4)
-            
             if let user = appState.currentUser, user.shareLifestyle {
                 Text("profile.lifestyle.title".localized)
                     .font(.headline)
@@ -268,13 +290,6 @@ struct ProfileView: View {
             }
             
             if let user = appState.currentUser, user.shareBodyType, !user.bodyType.isEmpty {
-                if user.shareLifestyle {
-                    Divider()
-                        .frame(height: 2)
-                        .background(Color.gray.opacity(0.3))
-                        .padding(.vertical, 4)
-                }
-                
                 Text("profile.body.type".localized)
                     .font(.headline)
                     .fontWeight(.semibold)
@@ -285,13 +300,6 @@ struct ProfileView: View {
             }
             
             if let user = appState.currentUser, user.shareIdealFirstDate, !user.idealFirstDate.isEmpty {
-                if user.shareLifestyle || user.shareBodyType {
-                    Divider()
-                        .frame(height: 2)
-                        .background(Color.gray.opacity(0.3))
-                        .padding(.vertical, 4)
-                }
-                
                 Text("profile.ideal.first.date".localized)
                     .font(.headline)
                     .fontWeight(.semibold)
@@ -302,13 +310,6 @@ struct ProfileView: View {
             }
             
             if let user = appState.currentUser, user.shareSensoryPreferences, !user.sensoryPreferences.isEmpty {
-                if user.shareLifestyle || user.shareBodyType || user.shareIdealFirstDate {
-                    Divider()
-                        .frame(height: 2)
-                        .background(Color.gray.opacity(0.3))
-                        .padding(.vertical, 4)
-                }
-                
                 Text("profile.sensory.preferences".localized)
                     .font(.headline)
                     .fontWeight(.semibold)

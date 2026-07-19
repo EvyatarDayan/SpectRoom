@@ -120,6 +120,7 @@
 "profile.location" = "Plats";
 "profile.my.location" = "Min Plats";
 "profile.location.not.specified" = "Ej angiven";
+"profile.location.privacy.notice" = "Din adress delas aldrig";
 "profile.about.me" = "Om Mig";
 "profile.no.bio" = "Ingen biografi tillgänglig";
 "profile.my.interests" = "Mina Intressen";

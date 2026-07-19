@@ -28,149 +28,150 @@ struct AuthenticationView: View {
                     .aspectRatio(contentMode: .fill)
                     .ignoresSafeArea()
                 
-                ScrollView {
-                    VStack(spacing: 30) {
-                    // App logo and title
-                    VStack(spacing: 16) {
-                        Image(systemName: "heart.fill")
-                            .font(.system(size: 60))
-                            .foregroundColor(.blue)
-                        
-                        Text("app.name".localized)
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
-                            .foregroundColor(.primary)
-                        
-                        Text("app.tagline".localized)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(.top, 40)
-                    
-                    // Toggle between login and signup
-                    Picker("Mode", selection: $isLoginMode) {
-                        Text("auth.sign.in".localized).tag(true)
-                        Text("auth.sign.up".localized).tag(false)
-                    }
-                    .pickerStyle(SegmentedPickerStyle())
-                    .padding(.horizontal)
-                    
-                    // Form fields
-                    VStack(spacing: 20) {
-                        if !isLoginMode {
-                            // Name field for signup
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("auth.full.name".localized)
-                                    .font(.headline)
+                GeometryReader { geometry in
+                    ScrollView {
+                        VStack(spacing: 30) {
+                            // App logo and title
+                            VStack(spacing: 16) {
+                                // Keep heart footprint so title/form don't shift up
+                                Color.clear
+                                    .frame(width: 60, height: 60)
+                                
+                                Text("app.name".localized)
+                                    .font(.largeTitle)
+                                    .fontWeight(.bold)
                                     .foregroundColor(.primary)
                                 
-                                TextField("auth.name.placeholder".localized, text: $name)
-                                    .textFieldStyle(CustomTextFieldStyle())
-                            }
-                            
-                        }
-                        
-                        // Email field
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("auth.email".localized)
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                            
-                            TextField("auth.email.placeholder".localized, text: $email)
-                                .textFieldStyle(CustomTextFieldStyle())
-                                .keyboardType(.emailAddress)
-                                .autocapitalization(.none)
-                        }
-                        
-                        // Password field
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("auth.password".localized)
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                            
-                            PasswordField(
-                                text: $password,
-                                placeholder: "auth.password.placeholder".localized,
-                                isVisible: $isPasswordVisible
-                            )
-                        }
-                        
-                        // Confirm password field for signup
-                        if !isLoginMode {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("auth.confirm.password".localized)
-                                    .font(.headline)
-                                    .foregroundColor(.primary)
-                                
-                                PasswordField(
-                                    text: $confirmPassword,
-                                    placeholder: "auth.confirm.password.placeholder".localized,
-                                    isVisible: $isConfirmPasswordVisible
-                                )
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                    
-                    // Action button
-                    Button(action: {
-                        handleAuthentication()
-                    }) {
-                        HStack {
-                            if appState.isLoading {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                    .scaleEffect(0.8)
-                            }
-                            Text(isLoginMode ? "auth.sign.in".localized : "auth.sign.up".localized)
-                                .font(.headline)
-                                .foregroundColor(.white)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(buttonBackgroundColor)
-                        .cornerRadius(12)
-                    }
-                    .disabled(buttonIsDisabled)
-                    .padding(.horizontal)
-                    
-                    // Additional options
-                    if isLoginMode {
-                        VStack(spacing: 12) {
-                            Button("auth.forgot.password".localized) {
-                                handleForgotPassword()
-                            }
-                            .font(.subheadline)
-                            .foregroundColor(.blue)
-                            
-                            HStack {
-                                Text("auth.no.account".localized)
+                                Text("app.tagline".localized)
+                                    .font(.subheadline)
                                     .foregroundColor(.secondary)
-                                
-                                Button("auth.sign.up".localized) {
-                                    withAnimation {
-                                        isLoginMode = false
+                                    .multilineTextAlignment(.center)
+                            }
+                            .padding(.top, 40)
+                            
+                            // Toggle between login and signup
+                            Picker("Mode", selection: $isLoginMode) {
+                                Text("auth.sign.in".localized).tag(true)
+                                Text("auth.sign.up".localized).tag(false)
+                            }
+                            .pickerStyle(SegmentedPickerStyle())
+                            .padding(.horizontal)
+                            
+                            // Form fields
+                            VStack(spacing: 20) {
+                                if !isLoginMode {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("auth.full.name".localized)
+                                            .font(.headline)
+                                            .foregroundColor(.primary)
+                                        
+                                        TextField("auth.name.placeholder".localized, text: $name)
+                                            .textFieldStyle(CustomTextFieldStyle())
+                                            .autocorrectionDisabled(true)
+                                            .textInputAutocapitalization(.words)
                                     }
                                 }
-                                .foregroundColor(.blue)
-                            }
-                        }
-                    } else {
-                        HStack {
-                            Text("auth.have.account".localized)
-                                .foregroundColor(.secondary)
-                            
-                            Button("auth.sign.in".localized) {
-                                withAnimation {
-                                    isLoginMode = true
+                                
+                                // Email field
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("auth.email".localized)
+                                        .font(.headline)
+                                        .foregroundColor(.primary)
+                                    
+                                    TextField("auth.email.placeholder".localized, text: $email)
+                                        .textFieldStyle(CustomTextFieldStyle())
+                                        .keyboardType(.emailAddress)
+                                        .textContentType(.emailAddress)
+                                        .autocorrectionDisabled(true)
+                                        .textInputAutocapitalization(.never)
+                                }
+                                
+                                // Password field
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("auth.password".localized)
+                                        .font(.headline)
+                                        .foregroundColor(.primary)
+                                    
+                                    PasswordField(
+                                        text: $password,
+                                        placeholder: "auth.password.placeholder".localized,
+                                        isVisible: $isPasswordVisible
+                                    )
+                                }
+                                
+                                if !isLoginMode {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("auth.confirm.password".localized)
+                                            .font(.headline)
+                                            .foregroundColor(.primary)
+                                        
+                                        PasswordField(
+                                            text: $confirmPassword,
+                                            placeholder: "auth.confirm.password.placeholder".localized,
+                                            isVisible: $isConfirmPasswordVisible
+                                        )
+                                    }
                                 }
                             }
-                            .foregroundColor(.blue)
+                            .padding(.horizontal)
+                            
+                            // Action button
+                            Button(action: {
+                                handleAuthentication()
+                            }) {
+                                HStack {
+                                    if appState.isLoading {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                            .scaleEffect(0.8)
+                                    }
+                                    Text(isLoginMode ? "auth.sign.in".localized : "auth.sign.up".localized)
+                                        .font(.headline)
+                                        .foregroundColor(.white)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(buttonBackgroundColor)
+                                .cornerRadius(12)
+                            }
+                            .disabled(buttonIsDisabled)
+                            .padding(.horizontal)
+                            
+                            // Additional options
+                            VStack(spacing: 12) {
+                                if isLoginMode {
+                                    Button("auth.forgot.password".localized) {
+                                        handleForgotPassword()
+                                    }
+                                    .font(.subheadline)
+                                    .foregroundColor(.blue)
+                                    
+                                    HStack {
+                                        Text("auth.no.account".localized)
+                                            .foregroundColor(.secondary)
+                                        
+                                        Button("auth.sign.up".localized) {
+                                            isLoginMode = false
+                                        }
+                                        .foregroundColor(.blue)
+                                    }
+                                } else {
+                                    HStack {
+                                        Text("auth.have.account".localized)
+                                            .foregroundColor(.secondary)
+                                        
+                                        Button("auth.sign.in".localized) {
+                                            isLoginMode = true
+                                        }
+                                        .foregroundColor(.blue)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                            
+                            Spacer(minLength: 20)
                         }
-                    }
-                    
-                        Spacer(minLength: 20)
+                        .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
                     }
                 }
             }
@@ -291,6 +292,9 @@ struct PasswordField: View {
                     SecureField(placeholder, text: $text)
                 }
             }
+            .autocorrectionDisabled(true)
+            .textInputAutocapitalization(.never)
+            .textContentType(.password)
             .padding(.leading)
             .padding(.vertical)
             

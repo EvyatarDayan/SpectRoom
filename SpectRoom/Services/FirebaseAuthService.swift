@@ -1208,6 +1208,19 @@ class FirebaseAuthService: ObservableObject {
         let lastSeenInterval = userData["lastSeen"] as? TimeInterval
         let lastSeen = lastSeenInterval.map { Date(timeIntervalSince1970: $0) } ?? Date()
         
+        let matchPercentage: Int
+        let viewer = currentUser ?? AppStateManager.shared.currentUser
+        if let viewer {
+            matchPercentage = ProfileCard.calculateMatchPercentage(
+                interests: interests,
+                age: age,
+                gender: gender,
+                currentUser: viewer
+            )
+        } else {
+            matchPercentage = 0
+        }
+        
         return ProfileCard(
             userId: userId,
             name: name,
@@ -1232,7 +1245,8 @@ class FirebaseAuthService: ObservableObject {
             shareIdealFirstDate: shareIdealFirstDate,
             sensoryPreferences: sensoryPreferences,
             shareSensoryPreferences: shareSensoryPreferences,
-            energyLevel: energyLevel
+            energyLevel: energyLevel,
+            matchPercentage: matchPercentage
         )
     }
     

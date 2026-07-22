@@ -36,18 +36,30 @@
 "auth.alert.title" = "Por favor revisa tu información";
 
 // MARK: - Onboarding
-"onboarding.welcome.title" = "Bienvenido a SpectRoom";
-"onboarding.welcome.subtitle" = "Un espacio seguro y comprensivo para conexiones significativas";
-"onboarding.welcome.description" = "Conecta con personas que entienden y aprecian tu perspectiva única.";
-"onboarding.match.title" = "Encuentra tu Pareja";
-"onboarding.match.subtitle" = "Descubre personas con intereses y valores similares";
-"onboarding.match.description" = "Nuestro sistema de emparejamiento te ayuda a encontrar personas compatibles que comparten tus intereses y estilo de comunicación.";
-"onboarding.communication.title" = "Comunicación Segura";
-"onboarding.communication.subtitle" = "Chatea a tu propio ritmo en un ambiente cómodo";
-"onboarding.communication.description" = "Tómate tu tiempo para conocer a alguien. Sin presión, sin prisa, solo conexiones genuinas.";
-"onboarding.settings.title" = "Tu Espacio";
-"onboarding.settings.subtitle" = "Controla tu experiencia con configuraciones personalizables";
-"onboarding.settings.description" = "Establece tus preferencias para notificaciones, privacidad y cómo quieres interactuar con otros.";
+"onboarding.step.1" = "- Paso 1 -";
+"onboarding.step.2" = "- Paso 2 -";
+"onboarding.step.3" = "- Paso 3 -";
+"onboarding.step.4" = "- Paso 4 -";
+"onboarding.intro.title" = "Bienvenido a SpectRoom";
+"onboarding.intro.title.line1" = "Bienvenido a";
+"onboarding.intro.title.line2" = "SpectRoom";
+"onboarding.intro.subtitle" = "Un espacio seguro y comprensivo creado en torno a ti";
+"onboarding.intro.description" = "Conecta con personas que aprecian tu perspectiva única, a tu propio ritmo.";
+"onboarding.intro.notice" = "🎁 Gratis durante la Beta: SpectRoom está en acceso anticipado y es completamente gratis. ¡Como miembro temprano, nos ayudas a construir una mejor comunidad! Las funciones estándar seguirán siendo gratis, aunque introduciremos niveles de pago opcionales en el futuro";
+"onboarding.intro.notice.lead" = "🎁 Gratis durante la Beta:";
+"onboarding.intro.notice.body" = "SpectRoom está en acceso anticipado y es completamente gratis. ¡Como miembro temprano, nos ayudas a construir una mejor comunidad! Las funciones estándar seguirán siendo gratis, aunque introduciremos niveles de pago opcionales en el futuro";
+"onboarding.welcome.title" = "Completa Tu Perfil";
+"onboarding.welcome.subtitle" = "Comparte cómo conectas mejor";
+"onboarding.welcome.description" = "Añade tus intereses y preferencias sensoriales para que otros sepan cómo interactuar cómodamente contigo.";
+"onboarding.match.title" = "Descubre Conexiones";
+"onboarding.match.subtitle" = "Emparejamiento simple, sin presión";
+"onboarding.match.description" = "Explora tarjetas de perfil a tu ritmo. Toca o desliza a la derecha si sientes conexión, o pasa sin incomodidad.";
+"onboarding.communication.title" = "Chatea a Tu Ritmo";
+"onboarding.communication.subtitle" = "Sin presión, sin prisas";
+"onboarding.communication.description" = "Conecta por mensajes directos con herramientas integradas pensadas para empezar y llevar el ritmo de las conversaciones con comodidad.";
+"onboarding.settings.title" = "Adapta Tu Espacio";
+"onboarding.settings.subtitle" = "Define tus límites personales";
+"onboarding.settings.description" = "Personaliza notificaciones, controla quién ve tu perfil y ajusta la configuración sensorial cuando lo necesites.";
 "onboarding.previous" = "Anterior";
 "onboarding.next" = "Siguiente";
 "onboarding.get.started" = "Comenzar";
@@ -67,6 +79,7 @@
 "settings.notifications.description" = "Activar notificaciones";
 "settings.dark.mode" = "Modo Oscuro";
 "settings.dark.mode.description" = "Activar modo oscuro";
+"settings.light.mode" = "Modo Claro";
 "settings.language" = "Idioma";
 "settings.language.description" = "Seleccionar idioma de la app";
 "settings.support" = "Soporte";
@@ -142,9 +155,18 @@
 "profile.block.confirm.title" = "¿Estás seguro?";
 "profile.block.confirm.message" = "%@ no podrá verte ni comunicarse contigo.";
 "profile.block.confirm.action" = "Bloquear";
+"profile.actions.title" = "Acciones";
+"profile.unlike.title" = "Dejar de gustar este perfil";
+"profile.relike.title" = "Gustar este perfil";
+"profile.unlike.confirm.title" = "¿Estás seguro?";
+"profile.unlike.confirm.message" = "Este perfil se eliminará de Coincidencias";
+"profile.unlike.confirm.action" = "Dejar de gustar";
 
 // MARK: - Matches
 "matches.title" = "Coincidencias";
+"matches.search.placeholder" = "Buscar coincidencias";
+"matches.search.clear" = "Borrar búsqueda";
+"matches.search.no.results.hint" = "Prueba con otro nombre, interés o detalle del perfil";
 "matches.loading" = "Cargando coincidencias...";
 "matches.empty" = "Aún no hay coincidencias";
 "matches.empty.description" = "¡Comienza a deslizar para encontrar tu pareja perfecta!";
@@ -155,12 +177,13 @@
 "matches.matched" = "Coincidencia %@";
 "matches.message.button" = "Mensaje";
 "matches.message.label" = "Mensaje";
-"matches.distance.km" = "%@ km";
-"matches.distance.m" = "%@ m";
+"matches.distance.km" = "%@ km de distancia";
+"matches.distance.m" = "%@ m de distancia";
 "matches.error.no.profile" = "Error: No se seleccionó ningún perfil";
 "matches.error.no.recipient" = "Error: No se seleccionó ningún destinatario";
 "matches.default.message" = "Hola. Me gusta tu perfil.";
 "matches.pre.message.button" = "Mensaje rápido";
+"matches.pre.message.button.short" = "Msg rápido";
 "matches.pre.message.title" = "Mensaje rápido";
 "matches.pre.message.subtitle" = "Elige un mensaje preescrito";
 "matches.pre.message.option1" = "Hola. Buen match. Sin prisa para responder.";
@@ -178,6 +201,10 @@
 
 // MARK: - Messages
 "messages.title" = "Mensajes";
+"messages.search.placeholder" = "Buscar conversaciones";
+"messages.search.clear" = "Borrar búsqueda";
+"messages.search.no.results" = "No hay resultados";
+"messages.search.no.results.hint" = "Prueba con otro nombre o una palabra de un mensaje";
 "messages.loading" = "Cargando mensajes...";
 "messages.loading.conversation" = "Cargando conversación...";
 "messages.empty" = "Aún no hay mensajes";
@@ -208,6 +235,11 @@
 "messages.preview.photo" = "📷 Foto";
 "messages.preview.voice" = "🎤 Mensaje de voz";
 "messages.preview.voice.duration" = "🎤 Mensaje de voz • %@";
+"messages.date.today" = "Hoy";
+"messages.date.yesterday" = "Ayer";
+"messages.read.more" = "Leer más";
+"messages.image.retry" = "Toca para reintentar";
+"messages.tap.to.see.profile" = "Toca para ver el perfil";
 
 // MARK: - Match Modal
 "match.modal.title.prefix" = "¡Es una";

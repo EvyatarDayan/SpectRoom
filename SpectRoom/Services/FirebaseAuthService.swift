@@ -1099,6 +1099,35 @@ class FirebaseAuthService: ObservableObject {
         print("✅ Match created successfully")
     }
     
+    /// Removes the match for both users (best-effort on the other side).
+    func deleteMatch(with otherUserId: String) async throws {
+        guard let currentUserId = auth.currentUser?.uid else {
+            throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let matchId = matchDocumentId(for: currentUserId, and: otherUserId)
+        print("💕 Deleting match \(matchId) between \(currentUserId) and \(otherUserId)")
+        
+        let currentUserMatchRef = db.collection("users")
+            .document(currentUserId)
+            .collection("matches")
+            .document(matchId)
+        let otherUserMatchRef = db.collection("users")
+            .document(otherUserId)
+            .collection("matches")
+            .document(matchId)
+        
+        try await currentUserMatchRef.delete()
+        
+        do {
+            try await otherUserMatchRef.delete()
+        } catch {
+            print("⚠️ Unable to delete match on other user (\(otherUserId)): \(error.localizedDescription)")
+        }
+        
+        print("✅ Match deleted for current user")
+    }
+    
     func fetchMatches() async throws -> [MatchDisplay] {
         guard let currentUserId = auth.currentUser?.uid else {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
@@ -1435,11 +1464,14 @@ class FirebaseAuthService: ObservableObject {
                             }
                         } catch {
                             print("❌ Error fetching sender profile for new message: \(error)")
+                            // Lighter fallback — name-only lookup often still works.
+                            let fallbackName = (try? await self.fetchSenderName(for: senderId)) ?? "Unknown User"
+                            let fallbackPhoto = try? await self.fetchUserProfilePhotoURL(for: senderId)
                             await MainActor.run {
                                 completion(
                                     senderId,
-                                    "Unknown User",
-                                    nil,
+                                    fallbackName,
+                                    fallbackPhoto,
                                     messageDocId,
                                     content,
                                     messageType,
@@ -2020,6 +2052,49 @@ class FirebaseAuthService: ObservableObject {
         }
         
         return allMessages.sorted { $0.createdAt < $1.createdAt }
+    }
+    
+    /// Scan all of the current user's sent + incoming messages and return partner IDs
+    /// whose message content matches `query` (case-insensitive).
+    func findConversationPartnerIds(matching query: String) async throws -> Set<String> {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        guard let currentUserId = auth.currentUser?.uid else {
+            throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        async let sentSnapshotTask = db.collection("users")
+            .document(currentUserId)
+            .collection("sentMessages")
+            .getDocuments()
+        async let incomingSnapshotTask = db.collection("users")
+            .document(currentUserId)
+            .collection("incomingMessages")
+            .getDocuments()
+        
+        let sentSnapshot = try await sentSnapshotTask
+        let incomingSnapshot = try await incomingSnapshotTask
+        
+        var matchingPartnerIds = Set<String>()
+        
+        for document in sentSnapshot.documents {
+            let data = document.data()
+            guard let content = data["content"] as? String,
+                  content.localizedCaseInsensitiveContains(trimmed),
+                  let recipientId = data["recipientId"] as? String else { continue }
+            matchingPartnerIds.insert(recipientId)
+        }
+        
+        for document in incomingSnapshot.documents {
+            let data = document.data()
+            guard let content = data["content"] as? String,
+                  content.localizedCaseInsensitiveContains(trimmed),
+                  let senderId = data["senderId"] as? String else { continue }
+            matchingPartnerIds.insert(senderId)
+        }
+        
+        print("💬 History search for \"\(trimmed)\": \(matchingPartnerIds.count) conversation(s)")
+        return matchingPartnerIds
     }
     
     // Get latest message from each user (for conversation list)

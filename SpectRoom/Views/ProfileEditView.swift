@@ -202,14 +202,14 @@ struct ProfileEditView: View {
                         // Energy Level Section
                         energyLevelSection
                         
+                        // Gender & Preferences Section
+                        genderPreferencesSection
+                        
                         // About Me Section
                         aboutMeSection
                         
                         // My Interests Section
                         myInterestsSection
-                        
-                        // Gender & Preferences Section
-                        genderPreferencesSection
                     }
                     .padding(.horizontal)
                     .padding(.bottom, embedsInTabBar ? 100 : 30)
@@ -263,20 +263,27 @@ struct ProfileEditView: View {
             }
         }
         .onAppear {
-            // Reset loading state
-            isDataLoaded = false
+            // Show cached profile immediately when available
+            let hadCachedUser = appState.currentUser != nil
+            if hadCachedUser {
+                loadCurrentProfile()
+                isDataLoaded = true
+            } else {
+                isDataLoaded = false
+            }
             
-            // Force refresh user data from Firebase first, then load profile
+            // Refresh cache from Firebase in the background
             Task {
-                // Force refresh user data from Firebase to get latest data
                 await FirebaseAuthService.shared.forceRefreshUserData()
                 
                 await MainActor.run {
-                    // Load profile data with fresh data from Firebase
-                    loadCurrentProfile()
-                    
-                    // Mark data as loaded
-                    isDataLoaded = true
+                    // Only block on network when there was no cache to show.
+                    // If cache was already applied, keep it on screen and avoid
+                    // overwriting any edits the user may have started.
+                    if !hadCachedUser {
+                        loadCurrentProfile()
+                        isDataLoaded = true
+                    }
                 }
                 
                 // Sync photos from Firebase Storage (in background)

@@ -1369,6 +1369,7 @@ private enum EnergyLevelOption: Int, CaseIterable {
 
 struct UserProfileModal: View {
     let profile: ProfileCard
+    let showsUnlikeOption: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var appState: AppStateManager
@@ -1376,10 +1377,14 @@ struct UserProfileModal: View {
     @State private var selectedPhotoIndex = 0
     @State private var refreshedProfile: ProfileCard?
     @State private var showingBlockConfirmation = false
+    @State private var showingUnlikeConfirmation = false
+    @State private var isProfileUnliked = false
+    @State private var hasLoadedUnlikeState = false
     
-    init(profile: ProfileCard) {
+    init(profile: ProfileCard, showsUnlikeOption: Bool = false) {
         self.profile = profile
-        print("🔍 UserProfileModal INIT called with profile: \(profile.name), userId: \(profile.userId)")
+        self.showsUnlikeOption = showsUnlikeOption
+        print("🔍 UserProfileModal INIT called with profile: \(profile.name), userId: \(profile.userId), showsUnlikeOption: \(showsUnlikeOption)")
     }
     
     private var profileTitle: String {
@@ -1428,16 +1433,16 @@ struct UserProfileModal: View {
                     // Energy Level Section
                     energyLevelSection
                     
+                    // Gender & Preferences Section
+                    genderPreferencesSection
+                    
                     // About Me Section
                     aboutMeSection
                     
                     // My Interests Section
                     myInterestsSection
                     
-                    // Gender & Preferences Section
-                    genderPreferencesSection
-                    
-                    blockProfileSection
+                    profileActionsSection
                 }
                 .padding(.horizontal)
                 .padding(.top, 16)
@@ -1474,6 +1479,7 @@ struct UserProfileModal: View {
                 print("❌ Profile userId is empty!")
                 return
             }
+            loadUnlikeStateIfNeeded()
             // Refresh profile data in background after view renders
             // Use a longer delay to ensure view is fully rendered first
             Task {
@@ -1510,6 +1516,16 @@ struct UserProfileModal: View {
         } message: {
             Text(String(format: "profile.block.confirm.message".localized, firstName(from: displayProfile.name)))
         }
+        .alert("profile.unlike.confirm.title".localized, isPresented: $showingUnlikeConfirmation) {
+            Button("common.cancel".localized, role: .cancel) {}
+            Button("profile.unlike.confirm.action".localized, role: .destructive) {
+                isProfileUnliked = true
+                appState.unlikeUser(userId: displayProfile.userId)
+                dismiss()
+            }
+        } message: {
+            Text("profile.unlike.confirm.message".localized)
+        }
     }
     
     private var isProfileBlocked: Bool {
@@ -1529,25 +1545,96 @@ struct UserProfileModal: View {
         )
     }
     
-    private var blockProfileSection: some View {
-        HStack {
-            Image(systemName: "hand.raised.circle.fill")
-                .foregroundColor(.red)
-                .font(.title2)
-            Text(isProfileBlocked ? "profile.unblock.title".localized : "profile.block.title".localized)
+    private var unlikeToggleBinding: Binding<Bool> {
+        Binding(
+            get: { isProfileUnliked },
+            set: { newValue in
+                if newValue {
+                    showingUnlikeConfirmation = true
+                } else {
+                    isProfileUnliked = false
+                    appState.relikeUser(userId: displayProfile.userId)
+                }
+            }
+        )
+    }
+    
+    private var profileActionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("profile.actions.title".localized)
                 .font(.headline)
-                .lineLimit(2)
-                .minimumScaleFactor(0.85)
-            Spacer()
-            Toggle("", isOn: blockToggleBinding)
-                .scaleEffect(0.8, anchor: .trailing)
-                .frame(width: 46, height: 28, alignment: .trailing)
+                .fontWeight(.semibold)
+            
+            VStack(spacing: 0) {
+                if showsUnlikeOption {
+                    HStack {
+                        Image(systemName: "heart.slash.circle.fill")
+                            .foregroundColor(.pink)
+                            .font(.title2)
+                        Text(isProfileUnliked ? "profile.relike.title".localized : "profile.unlike.title".localized)
+                            .font(.headline)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.85)
+                        Spacer()
+                        Toggle("", isOn: unlikeToggleBinding)
+                            .scaleEffect(0.8, anchor: .trailing)
+                            .frame(width: 46, height: 28, alignment: .trailing)
+                    }
+                    
+                    Divider()
+                        .padding(.vertical, 10)
+                }
+                
+                HStack {
+                    Image(systemName: "hand.raised.circle.fill")
+                        .foregroundColor(.red)
+                        .font(.title2)
+                    Text(isProfileBlocked ? "profile.unblock.title".localized : "profile.block.title".localized)
+                        .font(.headline)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.85)
+                    Spacer()
+                    Toggle("", isOn: blockToggleBinding)
+                        .scaleEffect(0.8, anchor: .trailing)
+                        .frame(width: 46, height: 28, alignment: .trailing)
+                }
+            }
+            .blueFieldStyle()
         }
-        .blueFieldStyle()
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+    }
+    
+    private func loadUnlikeStateIfNeeded() {
+        guard showsUnlikeOption else { return }
+        
+        // Prefer cached match presence for a fast initial value.
+        let isMatch = appState.cachedMatches.contains { $0.otherUser.userId == displayProfile.userId }
+        if isMatch {
+            isProfileUnliked = false
+            hasLoadedUnlikeState = true
+        }
+        
+        Task {
+            do {
+                let swipeFilter = try await FirebaseAuthService.shared.fetchSwipeFilterState()
+                await MainActor.run {
+                    // Latest pass wins; otherwise keep matched/liked as not unliked.
+                    isProfileUnliked = swipeFilter.passedUserIds.contains(displayProfile.userId)
+                    hasLoadedUnlikeState = true
+                }
+            } catch {
+                await MainActor.run {
+                    if !hasLoadedUnlikeState {
+                        isProfileUnliked = !isMatch
+                        hasLoadedUnlikeState = true
+                    }
+                }
+            }
+        }
     }
     
     private func firstName(from fullName: String) -> String {

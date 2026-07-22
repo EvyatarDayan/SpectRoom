@@ -152,9 +152,55 @@ struct MessageDisplay: Identifiable {
         self.voiceDuration = message.voiceDuration
     }
     
+    init(
+        id: String,
+        content: String,
+        messageType: MessageType,
+        senderName: String,
+        recipientName: String,
+        senderId: String,
+        recipientId: String,
+        createdAt: Date,
+        isRead: Bool,
+        senderProfilePhotoURL: String?,
+        recipientProfilePhotoURL: String?,
+        voiceDuration: TimeInterval?
+    ) {
+        self.id = id
+        self.content = content
+        self.messageType = messageType
+        self.senderName = senderName
+        self.recipientName = recipientName
+        self.senderId = senderId
+        self.recipientId = recipientId
+        self.createdAt = createdAt
+        self.isRead = isRead
+        self.senderProfilePhotoURL = senderProfilePhotoURL
+        self.recipientProfilePhotoURL = recipientProfilePhotoURL
+        self.voiceDuration = voiceDuration
+    }
+    
     /// Stable identity for deduplicating optimistic vs server-fetched copies of the same message.
     var deduplicationKey: String {
         "\(senderId)_\(recipientId)_\(messageType.rawValue)_\(content)"
+    }
+    
+    func replacingPartnerIdentity(name: String, photoURL: String?, currentUserId: String) -> MessageDisplay {
+        let isOutgoing = senderId == currentUserId || senderName == "You"
+        return MessageDisplay(
+            id: id,
+            content: content,
+            messageType: messageType,
+            senderName: isOutgoing ? senderName : name,
+            recipientName: isOutgoing ? name : recipientName,
+            senderId: senderId,
+            recipientId: recipientId,
+            createdAt: createdAt,
+            isRead: isRead,
+            senderProfilePhotoURL: isOutgoing ? senderProfilePhotoURL : (photoURL ?? senderProfilePhotoURL),
+            recipientProfilePhotoURL: isOutgoing ? (photoURL ?? recipientProfilePhotoURL) : recipientProfilePhotoURL,
+            voiceDuration: voiceDuration
+        )
     }
 }
 
@@ -186,6 +232,46 @@ extension Date {
     func formattedTimestamp() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "dd MMM yyyy HH:mm"
+        return formatter.string(from: self)
+    }
+    
+    func formattedBubbleTime() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: self)
+    }
+    
+    /// Conversation list timestamp: "14:20" / "Yesterday" / "13/07/2026".
+    func formattedConversationListTime() -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(self) {
+            return formattedBubbleTime()
+        }
+        if calendar.isDateInYesterday(self) {
+            return "messages.date.yesterday".localized
+        }
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd/MM/yyyy"
+        return formatter.string(from: self)
+    }
+    
+    /// WhatsApp-style chat day label: Today / Yesterday / "Thu, 21 May".
+    func formattedChatDayTitle() -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(self) {
+            return "messages.date.today".localized
+        }
+        if calendar.isDateInYesterday(self) {
+            return "messages.date.yesterday".localized
+        }
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, d MMM"
+        if let selectedLanguage = UserDefaults.standard.string(forKey: "selectedLanguage"),
+           !selectedLanguage.isEmpty {
+            formatter.locale = Locale(identifier: selectedLanguage)
+        }
         return formatter.string(from: self)
     }
 }

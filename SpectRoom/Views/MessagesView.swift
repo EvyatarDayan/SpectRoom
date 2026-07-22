@@ -21,88 +21,78 @@ struct MessagesView: View {
     @State private var showingMessageModal = false
     @State private var selectedMessage: MessageDisplay?
     @State private var conversationMessages: [MessageDisplay] = []
+    @State private var searchText = ""
+    @State private var historyMatchPartnerIds: Set<String> = []
+    @State private var historySearchTask: Task<Void, Never>?
+    @FocusState private var isSearchFieldFocused: Bool
+    /// Same as search bar `.padding(.bottom, 10)`.
+    private let searchContentSpacing: CGFloat = 10
+    /// Height of the custom tab menu body (above the home indicator).
+    private let tabMenuBodyHeight: CGFloat = 70
+    
+    private var filteredConversations: [MessageDisplay] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return conversations }
+        return conversations.filter { conversationMatchesSearch($0, query: query) }
+    }
     
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                if isLoading {
-                    VStack(spacing: 20) {
-                        Spacer()
-                        ProgressView()
-                            .scaleEffect(1.5)
-                        Text("messages.loading".localized)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(
-                        Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .ignoresSafeArea()
-                    )
-                } else if conversations.isEmpty {
-                    VStack {
-                        Spacer()
+                messagesSearchBar
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+                    .padding(.bottom, searchContentSpacing)
+                
+                Group {
+                    if isLoading {
                         VStack(spacing: 20) {
-                            Image(systemName: "message")
-                                .font(.system(size: 80))
-                                .foregroundColor(.gray.opacity(0.6))
-                            Text("messages.empty".localized)
-                                .font(.title2)
-                                .fontWeight(.medium)
+                            Spacer()
+                            ProgressView()
+                                .scaleEffect(1.5)
+                            Text("messages.loading".localized)
+                                .font(.subheadline)
                                 .foregroundColor(.secondary)
-                            Text("messages.empty.description".localized)
-                                .font(.body)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 40)
-                            
-                            // Action button
-                            Button(action: {
-                                selectedTab = 2 // Navigate to Discover tab
-                            }) {
-                                Text("messages.start.swiping".localized)
-                                    .font(.headline)
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color.blue)
-                                    .cornerRadius(12)
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if conversations.isEmpty {
+                        emptyConversationsView
+                    } else {
+                        ZStack {
+                            List(filteredConversations) { conversation in
+                                let _ = print("💬 List: Rendering conversation with ID: \(conversation.id), recipient: \(conversation.recipientName)")
+                                ConversationRow(conversation: conversation) {
+                                    handleConversationTap(conversation)
+                                }
+                                .environmentObject(appState)
+                                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
                             }
-                            .padding(.horizontal, 30)
+                            .listStyle(PlainListStyle())
+                            .scrollContentBackground(.hidden)
+                            
+                            if filteredConversations.isEmpty {
+                                noSearchResultsView
+                                    .allowsHitTesting(false)
+                            }
                         }
-                        Spacer()
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(
-                        Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .ignoresSafeArea()
-                    )
-                } else {
-                    List(conversations) { conversation in
-                        let _ = print("💬 List: Rendering conversation with ID: \(conversation.id), recipient: \(conversation.recipientName)")
-                        ConversationRow(conversation: conversation) {
-                            handleConversationTap(conversation)
-                        }
-                        .environmentObject(appState)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                    }
-                    .listStyle(PlainListStyle())
-                    .scrollContentBackground(.hidden)
-                    .background(
-                        Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .ignoresSafeArea()
-                    )
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                
+                // Mirror top spacing: 10pt gap, then reserve space for the overlay menu.
+                Color.clear
+                    .frame(height: tabMenuBodyHeight)
+                    .padding(.top, searchContentSpacing)
             }
+            .background(
+                Image(colorScheme == .dark ? "ColorsDark" : "Colors")
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .ignoresSafeArea()
+            )
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -112,6 +102,9 @@ struct MessagesView: View {
             }
         }
         .navigationViewStyle(.stack)
+        .onChange(of: searchText) { _, newValue in
+            scheduleHistorySearch(for: newValue)
+        }
         .onReceive(appState.$cachedMessageConversations) { updatedConversations in
             let sorted = sortedConversations(updatedConversations)
             conversations = sorted
@@ -350,6 +343,185 @@ struct MessagesView: View {
     
     private func sortedConversations(_ list: [MessageDisplay]) -> [MessageDisplay] {
         list.sorted { $0.createdAt > $1.createdAt }
+    }
+    
+    private var messagesSearchBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.secondary)
+            
+            TextField("messages.search.placeholder".localized, text: $searchText)
+                .textFieldStyle(.plain)
+                .foregroundColor(.primary)
+                .autocorrectionDisabled(true)
+                .textInputAutocapitalization(.never)
+                .focused($isSearchFieldFocused)
+            
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                    isSearchFieldFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("messages.search.clear".localized)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.08), radius: 4, x: 0, y: 1)
+        )
+    }
+    
+    private var emptyConversationsView: some View {
+        VStack {
+            Spacer()
+            VStack(spacing: 20) {
+                Image(systemName: "message")
+                    .font(.system(size: 80))
+                    .foregroundColor(.gray.opacity(0.6))
+                Text("messages.empty".localized)
+                    .font(.title2)
+                    .fontWeight(.medium)
+                    .foregroundColor(.secondary)
+                Text("messages.empty.description".localized)
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+                
+                Button(action: {
+                    selectedTab = 2 // Navigate to Discover tab
+                }) {
+                    Text("messages.start.swiping".localized)
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .cornerRadius(12)
+                }
+                .padding(.horizontal, 30)
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    private var noSearchResultsView: some View {
+        VStack(spacing: 14) {
+            Spacer()
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 64, weight: .medium))
+                    .foregroundColor(Color.blue.opacity(0.75))
+                
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(6)
+                    .background(
+                        Circle()
+                            .fill(Color(.systemBackground))
+                    )
+                    .offset(x: 6, y: 6)
+            }
+            .padding(.bottom, 4)
+            
+            Text("messages.search.no.results".localized)
+                .font(.headline)
+                .foregroundColor(.primary.opacity(0.85))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            
+            Text("messages.search.no.results.hint".localized)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    private func conversationMatchesSearch(_ conversation: MessageDisplay, query: String) -> Bool {
+        let otherName = conversation.senderName == "You"
+            ? conversation.recipientName
+            : conversation.senderName
+        let partnerId = conversation.senderName == "You"
+            ? conversation.recipientId
+            : conversation.senderId
+        
+        if otherName.localizedCaseInsensitiveContains(query) {
+            return true
+        }
+        
+        // Match last-message preview text (including photo/voice labels via content when present).
+        if conversation.content.localizedCaseInsensitiveContains(query) {
+            return true
+        }
+        
+        switch conversation.messageType {
+        case .image:
+            if "messages.preview.photo".localized.localizedCaseInsensitiveContains(query) {
+                return true
+            }
+        case .voice:
+            if "messages.preview.voice".localized.localizedCaseInsensitiveContains(query) {
+                return true
+            }
+        default:
+            break
+        }
+        
+        // Match any message already loaded into this conversation's cache.
+        if let cached = appState.getCachedConversationMessages(for: partnerId),
+           cached.contains(where: { $0.content.localizedCaseInsensitiveContains(query) }) {
+            return true
+        }
+        
+        // Match results from full Firebase history scan.
+        if historyMatchPartnerIds.contains(partnerId) {
+            return true
+        }
+        
+        return false
+    }
+    
+    private func scheduleHistorySearch(for rawQuery: String) {
+        historySearchTask?.cancel()
+        
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            historyMatchPartnerIds = []
+            return
+        }
+        
+        // Instant matches from already-cached conversation history.
+        historyMatchPartnerIds = appState.partnerIdsMatchingCachedMessageHistory(query)
+        
+        historySearchTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            
+            do {
+                let matchedIds = try await FirebaseAuthService.shared.findConversationPartnerIds(matching: query)
+                await MainActor.run {
+                    let currentQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard currentQuery == query else { return }
+                    historyMatchPartnerIds = matchedIds.union(
+                        appState.partnerIdsMatchingCachedMessageHistory(query)
+                    )
+                }
+            } catch {
+                print("❌ Messages history search failed: \(error)")
+            }
+        }
     }
     
     private func mergeConversation(_ newMessage: MessageDisplay, into list: [MessageDisplay]) -> [MessageDisplay] {
@@ -630,32 +802,23 @@ struct ConversationRow: View {
                     }
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(otherUserName)
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.primary)
-                        
-                        Spacer()
-                        
-                        Text(conversation.createdAt.timeAgoDisplay())
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                    Text(otherUserName)
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                     
-                    HStack {
-                        Text(previewText)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                        
-                        Spacer()
-                        
-                        Image(systemName: conversation.senderName == "You" ? "paperplane.fill" : "envelope.fill")
-                            .foregroundColor(conversation.senderName == "You" ? .blue : .green)
-                            .font(.caption)
-                    }
+                    Text(previewText)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                
+                Text(conversation.createdAt.formattedConversationListTime())
+                    .font(.subheadline)
+                    .foregroundColor(.primary.opacity(0.75))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 16)
@@ -834,6 +997,10 @@ struct MessageConversationModal: View {
     @State private var keyboardScrollToken = 0
     @State private var edgeSwipeOffset: CGFloat = 0
     @State private var isEdgeSwiping = false
+    /// Long text messages stay collapsed until the user taps "Read more" in this open chat.
+    @State private var expandedLongMessageIds: Set<String> = []
+    @State private var showingOtherUserProfile = false
+    @State private var otherUserProfile: ProfileCard?
     
     private let conversationPageSize = 10
     private let conversationBottomAnchorID = "conversation-bottom-anchor"
@@ -862,6 +1029,39 @@ struct MessageConversationModal: View {
         message.senderName == "You" ? message.recipientName : message.senderName
     }
     
+    @ViewBuilder
+    private var chatHeaderAvatar: some View {
+        let photoURL = otherUserProfilePhotoURL
+            ?? (message.senderName == "You" ? message.recipientProfilePhotoURL : message.senderProfilePhotoURL)
+        
+        Group {
+            if let photoURL, !photoURL.isEmpty {
+                CachedAsyncImage(url: URL(string: photoURL)) { image in
+                    image
+                        .resizable()
+                        .scaledToFill()
+                } placeholder: {
+                    chatHeaderAvatarPlaceholder
+                }
+            } else {
+                chatHeaderAvatarPlaceholder
+            }
+        }
+        .frame(width: 36, height: 36)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 1))
+    }
+    
+    private var chatHeaderAvatarPlaceholder: some View {
+        Circle()
+            .fill(Color.blue.opacity(0.18))
+            .overlay(
+                Text(String(conversationTitle.prefix(1)).uppercased())
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.blue)
+            )
+    }
+    
     var body: some View {
         let _ = print("💬 MessageConversationModal body being computed, message: \(message.recipientName), isLoadingMessages: \(isLoadingMessages)")
         NavigationStack {
@@ -873,7 +1073,7 @@ struct MessageConversationModal: View {
                         .aspectRatio(contentMode: .fill)
                         .ignoresSafeArea()
                 }
-            .navigationTitle(conversationTitle)
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
@@ -888,14 +1088,44 @@ struct MessageConversationModal: View {
                     .accessibilityLabel("common.close".localized)
                 }
                 
+                ToolbarItem(placement: .principal) {
+                    Button {
+                        openOtherUserProfile()
+                    } label: {
+                        HStack(spacing: 8) {
+                            chatHeaderAvatar
+                            
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(conversationTitle)
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                
+                                Text("messages.tap.to.see.profile".localized)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                        }
+                        // Keep the tappable header compact so trailing actions still fit.
+                        .frame(maxWidth: 220, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    // Avoid the default press fade that makes the subtitle look like it vanishes.
+                    .buttonStyle(ChatHeaderButtonStyle())
+                }
+                
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showingPreMessageOptions = true
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "text.bubble")
-                            Text("matches.pre.message.button".localized)
+                            Text("matches.pre.message.button.short".localized)
                                 .font(.subheadline)
+                                .lineLimit(1)
                         }
                     }
                     .disabled(isBlockedByRecipient)
@@ -967,11 +1197,14 @@ struct MessageConversationModal: View {
             appState.currentlyOpenConversationSenderId = otherUserId
             print("💬 Set currentlyOpenConversationSenderId to: \(otherUserId) (from modal onAppear)")
             
+            expandedLongMessageIds.removeAll()
+            
             Task {
                 await updateConversationOpenStateInFirestore(userId: otherUserId, isOpen: true)
                 await checkBlockStatus()
             }
             
+            prefetchOtherUserProfile()
             loadConversationMessages()
             startAutoRefresh()
         }
@@ -1011,6 +1244,16 @@ struct MessageConversationModal: View {
                 selectedIndex: $selectedPhotoIndex,
                 conversationMessages: conversationMessages
             )
+        }
+        .sheet(isPresented: $showingOtherUserProfile, onDismiss: {
+            // Keep chat marked open after returning from profile.
+            // Keep `otherUserProfile` cached so reopening does not refetch/flicker the header.
+            appState.currentlyOpenConversationSenderId = otherUserId
+        }) {
+            if let otherUserProfile {
+                UserProfileModal(profile: otherUserProfile, showsUnlikeOption: true)
+                    .environmentObject(appState)
+            }
         }
         .alert("Microphone Access Needed", isPresented: $showingMicrophonePermissionAlert) {
             Button("OK", role: .cancel) {}
@@ -1148,12 +1391,31 @@ struct MessageConversationModal: View {
                                     .padding(.vertical, 8)
                             }
                             
-                            ForEach(conversationMessages) { msg in
+                            ForEach(Array(conversationMessages.enumerated()), id: \.element.id) { index, msg in
+                                let showDateHeader: Bool = {
+                                    guard index > 0 else { return true }
+                                    let previous = conversationMessages[index - 1]
+                                    return !Calendar.current.isDate(msg.createdAt, inSameDayAs: previous.createdAt)
+                                }()
+                                
+                                if showDateHeader {
+                                    ChatDateSeparator(title: msg.createdAt.formattedChatDayTitle())
+                                        .id("date-\(msg.id)")
+                                }
+                                
                                 MessageBubble(
                                     message: msg,
-                                    currentUserProfilePhotoURL: currentUserProfilePhotoURL,
-                                    otherUserProfilePhotoURL: otherUserProfilePhotoURL,
                                     conversationMessages: conversationMessages,
+                                    isLongMessageExpanded: expandedLongMessageIds.contains(msg.id),
+                                    onExpandLongMessage: {
+                                        // Expand in place — do not scroll; user continues reading from here.
+                                        shouldScrollToBottom = false
+                                        var transaction = Transaction()
+                                        transaction.disablesAnimations = true
+                                        withTransaction(transaction) {
+                                            expandedLongMessageIds.insert(msg.id)
+                                        }
+                                    },
                                     showingConversationPhotoViewer: $showingConversationPhotoViewer,
                                     selectedPhotoIndex: $selectedPhotoIndex,
                                     localImagePreview: localImagePreviews[msg.content],
@@ -1178,7 +1440,6 @@ struct MessageConversationModal: View {
                     .scrollContentBackground(.hidden)
                     .scrollIndicators(.hidden)
                     .scrollDismissesKeyboard(.interactively)
-                    .defaultScrollAnchor(.bottom)
                     .onAppear {
                         scheduleScrollToBottom(proxy: proxy, force: true, isInitial: true)
                     }
@@ -1228,6 +1489,45 @@ struct MessageConversationModal: View {
             for: nil
         )
         dismiss()
+    }
+    
+    private func prefetchOtherUserProfile() {
+        guard otherUserProfile == nil else { return }
+        let userId = otherUserId
+        Task {
+            do {
+                let profile = try await FirebaseAuthService.shared.fetchUserProfile(for: userId)
+                await MainActor.run {
+                    // Only set if still needed — avoid clobbering a newer fetch from tap.
+                    if otherUserProfile == nil {
+                        otherUserProfile = profile
+                    }
+                }
+            } catch {
+                print("❌ Failed to prefetch chat profile for \(userId): \(error)")
+            }
+        }
+    }
+    
+    private func openOtherUserProfile() {
+        // Prefer already-cached profile so the header never enters a loading state.
+        if otherUserProfile != nil {
+            showingOtherUserProfile = true
+            return
+        }
+        
+        let userId = otherUserId
+        Task {
+            do {
+                let profile = try await FirebaseAuthService.shared.fetchUserProfile(for: userId)
+                await MainActor.run {
+                    otherUserProfile = profile
+                    showingOtherUserProfile = true
+                }
+            } catch {
+                print("❌ Failed to open chat profile for \(userId): \(error)")
+            }
+        }
     }
     
     private func firstName(from fullName: String) -> String {
@@ -1325,7 +1625,7 @@ struct MessageConversationModal: View {
     private func loadConversationMessages() {
         print("💬 MessageConversationModal: Loading conversation messages for: \(message.content)")
         
-        // Restore the full cached scroll state when available.
+        // Restore the full cached scroll state when available for instant UI.
         if let cachedState = appState.getCachedConversationState(for: otherUserId) {
             print("💬 MessageConversationModal: Using cached conversation state (\(cachedState.visibleMessages.count) visible / \(cachedState.messagePool.count) total messages)")
             
@@ -1354,7 +1654,8 @@ struct MessageConversationModal: View {
                     }
                 }
                 
-                await refreshConversationMessagesInBackground(otherUserId: otherUserId)
+                // Always merge a fresh recent page so a thin/stale cache can't hide history.
+                await loadRecentConversationPageAndMerge(otherUserId: otherUserId)
             }
             return
         }
@@ -1407,6 +1708,32 @@ struct MessageConversationModal: View {
                 isLoadingMessages = false
                 shouldScrollToBottom = true
             }
+        }
+    }
+    
+    /// Fetches the latest page and merges it into the local pool so opening a chat
+    /// always restores history even if the cache only had a preview message.
+    private func loadRecentConversationPageAndMerge(otherUserId: String) async {
+        do {
+            let page = try await FirebaseAuthService.shared.fetchConversationMessagesPage(
+                with: otherUserId,
+                limit: conversationPageSize
+            )
+            
+            await MainActor.run {
+                cachedMessagesPool = (cachedMessagesPool + page.messages)
+                    .deduplicatedConversationMessages()
+                conversationMessages = Array(cachedMessagesPool.suffix(conversationPageSize))
+                hasMoreOlderMessages = page.hasMoreOlder
+                    || cachedMessagesPool.count > conversationPageSize
+                previousMessageCount = conversationMessages.count
+                shouldScrollToBottom = true
+                persistConversationCache()
+            }
+        } catch {
+            print("❌ MessageConversationModal: Error merging recent conversation page: \(error)")
+            // Fall back to newer-only refresh if the full page fetch fails.
+            await refreshConversationMessagesInBackground(otherUserId: otherUserId)
         }
     }
     
@@ -2131,6 +2458,8 @@ struct VoiceMessagePlayerView: View {
     let textColor: Color
     let baseColor: Color
     let waveColor: Color
+    var timestampText: String? = nil
+    var isOutgoing: Bool = true
     
     @State private var audioPlayer: AVAudioPlayer?
     @State private var isLoading = false
@@ -2180,18 +2509,29 @@ struct VoiceMessagePlayerView: View {
                 )
                 .frame(height: 24)
                 
-                Text(displayTime)
-                    .font(.caption2)
-                    .foregroundColor(textColor.opacity(0.65))
-                    .monospacedDigit()
+                HStack(alignment: .bottom) {
+                    Text(displayTime)
+                        .font(.caption2)
+                        .foregroundColor(textColor.opacity(0.65))
+                        .monospacedDigit()
+                    
+                    Spacer(minLength: 8)
+                    
+                    if let timestampText {
+                        Text(timestampText)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+        .padding(.leading, isOutgoing ? 0 : 7)
+        .padding(.trailing, isOutgoing ? 7 : 0)
         .frame(minWidth: 200, maxWidth: 260)
-        .background(baseColor)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(baseColor, in: ChatBubbleShape(isOutgoing: isOutgoing))
         .onAppear {
             if duration == 0, let displayDuration {
                 duration = displayDuration
@@ -2442,33 +2782,10 @@ struct ChatImageBubbleContent: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(maxWidth: 150, maxHeight: 150)
                     .cornerRadius(10)
-            }
-            
-            if let remoteURL {
-                AsyncImage(url: remoteURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: 150, maxHeight: 150)
-                            .cornerRadius(10)
-                    case .failure:
-                        if localImage == nil {
-                            Image(systemName: "photo")
-                                .foregroundColor(.gray)
-                                .frame(width: 150, height: 150)
-                        }
-                    case .empty:
-                        if localImage == nil {
-                            ProgressView()
-                                .frame(width: 150, height: 150)
-                        }
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
-            } else if localImage == nil {
+            } else if let remoteURL {
+                // Cache + retries (AsyncImage was failing intermittently in chat).
+                ChatCachedImage(url: remoteURL)
+            } else {
                 ProgressView()
                     .frame(width: 150, height: 150)
             }
@@ -2486,14 +2803,162 @@ struct ChatImageBubbleContent: View {
             }
         }
         .frame(maxWidth: 150, maxHeight: 150)
+        .onAppear {
+            // Warm the cache even when a local preview is shown (e.g. just-sent image).
+            if let remoteURL, localImage != nil {
+                ImageCacheService.shared.prefetch(remoteURL)
+            }
+        }
+    }
+}
+
+/// Keeps chat header label fully opaque while pressed (default styles fade it).
+private struct ChatHeaderButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+    }
+}
+
+/// Centered pill used to separate messages by calendar day.
+private struct ChatDateSeparator: View {
+    let title: String
+    
+    var body: some View {
+        HStack {
+            Spacer(minLength: 0)
+            Text(title)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary.opacity(0.75))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color(.systemBackground).opacity(0.82))
+                )
+                .shadow(color: Color.black.opacity(0.08), radius: 2, x: 0, y: 1)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+/// WhatsApp-style chat bubble with a small nozzle on the bottom corner.
+private struct ChatBubbleShape: Shape {
+    var isOutgoing: Bool
+    var cornerRadius: CGFloat = 14
+    
+    func path(in rect: CGRect) -> Path {
+        let r = cornerRadius
+        let tail: CGFloat = 6
+        var path = Path()
+        
+        if isOutgoing {
+            // Top edge
+            path.move(to: CGPoint(x: r, y: 0))
+            path.addLine(to: CGPoint(x: rect.maxX - r - tail, y: 0))
+            // Top-right corner
+            path.addArc(
+                center: CGPoint(x: rect.maxX - r - tail, y: r),
+                radius: r,
+                startAngle: .degrees(-90),
+                endAngle: .degrees(0),
+                clockwise: false
+            )
+            // Right edge down to near the tail
+            path.addLine(to: CGPoint(x: rect.maxX - tail, y: rect.maxY - r))
+            // Bottom-right corner into the nozzle
+            path.addArc(
+                center: CGPoint(x: rect.maxX - r - tail, y: rect.maxY - r),
+                radius: r,
+                startAngle: .degrees(0),
+                endAngle: .degrees(35),
+                clockwise: false
+            )
+            // Nozzle tip
+            path.addQuadCurve(
+                to: CGPoint(x: rect.maxX, y: rect.maxY),
+                control: CGPoint(x: rect.maxX - tail * 0.2, y: rect.maxY)
+            )
+            path.addQuadCurve(
+                to: CGPoint(x: rect.maxX - tail - 8, y: rect.maxY),
+                control: CGPoint(x: rect.maxX - 1, y: rect.maxY)
+            )
+            // Bottom edge
+            path.addLine(to: CGPoint(x: r, y: rect.maxY))
+            // Bottom-left corner
+            path.addArc(
+                center: CGPoint(x: r, y: rect.maxY - r),
+                radius: r,
+                startAngle: .degrees(90),
+                endAngle: .degrees(180),
+                clockwise: false
+            )
+            // Left edge
+            path.addLine(to: CGPoint(x: 0, y: r))
+            // Top-left corner
+            path.addArc(
+                center: CGPoint(x: r, y: r),
+                radius: r,
+                startAngle: .degrees(180),
+                endAngle: .degrees(270),
+                clockwise: false
+            )
+        } else {
+            // Top edge (incoming — nozzle on bottom-left)
+            path.move(to: CGPoint(x: r + tail, y: 0))
+            path.addLine(to: CGPoint(x: rect.maxX - r, y: 0))
+            // Top-right
+            path.addArc(
+                center: CGPoint(x: rect.maxX - r, y: r),
+                radius: r,
+                startAngle: .degrees(-90),
+                endAngle: .degrees(0),
+                clockwise: false
+            )
+            // Right edge
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
+            // Bottom-right
+            path.addArc(
+                center: CGPoint(x: rect.maxX - r, y: rect.maxY - r),
+                radius: r,
+                startAngle: .degrees(0),
+                endAngle: .degrees(90),
+                clockwise: false
+            )
+            // Bottom edge to nozzle
+            path.addLine(to: CGPoint(x: tail + 8, y: rect.maxY))
+            // Nozzle tip
+            path.addQuadCurve(
+                to: CGPoint(x: 0, y: rect.maxY),
+                control: CGPoint(x: 1, y: rect.maxY)
+            )
+            path.addQuadCurve(
+                to: CGPoint(x: tail, y: rect.maxY - r + 4),
+                control: CGPoint(x: tail * 0.2, y: rect.maxY)
+            )
+            // Left edge up
+            path.addLine(to: CGPoint(x: tail, y: r))
+            // Top-left
+            path.addArc(
+                center: CGPoint(x: r + tail, y: r),
+                radius: r,
+                startAngle: .degrees(180),
+                endAngle: .degrees(270),
+                clockwise: false
+            )
+        }
+        
+        path.closeSubpath()
+        return path
     }
 }
 
 struct MessageBubble: View {
     let message: MessageDisplay
-    let currentUserProfilePhotoURL: String?
-    let otherUserProfilePhotoURL: String?
     let conversationMessages: [MessageDisplay]
+    var isLongMessageExpanded: Bool = false
+    var onExpandLongMessage: (() -> Void)? = nil
     @Binding var showingConversationPhotoViewer: Bool
     @Binding var selectedPhotoIndex: Int
     var localImagePreview: UIImage? = nil
@@ -2501,219 +2966,135 @@ struct MessageBubble: View {
     @State private var showingSaveAlert = false
     @State private var saveSuccess = false
     
-    private let outgoingBubbleColor = Color.white
-    private let incomingBubbleColor = Color(red: 0.851, green: 0.992, blue: 0.827) // WhatsApp-style green (#D9FDD3)
+    private let outgoingBubbleColor = Color(red: 0.851, green: 0.992, blue: 0.827) // WhatsApp-style green (#D9FDD3)
+    private let incomingBubbleColor = Color.white
     private let bubbleTextColor = Color.black
     private let voiceAccentColor = Color(red: 0.07, green: 0.55, blue: 0.47)
+    private let longMessageCollapseLimit = 300
+    private let readMoreColor = Color(red: 0.07, green: 0.55, blue: 0.47)
+    
+    private var isOutgoing: Bool {
+        message.senderName == "You"
+    }
+    
+    private var bubbleColor: Color {
+        isOutgoing ? outgoingBubbleColor : incomingBubbleColor
+    }
+    
+    private var bubbleTimeText: String {
+        message.createdAt.formattedBubbleTime()
+    }
+    
+    private var bubbleShape: ChatBubbleShape {
+        ChatBubbleShape(isOutgoing: isOutgoing)
+    }
+    
+    private var isLongMessage: Bool {
+        message.content.count > longMessageCollapseLimit
+    }
+    
+    private var displayedText: String {
+        guard isLongMessage, !isLongMessageExpanded else {
+            return message.content
+        }
+        return String(message.content.prefix(longMessageCollapseLimit))
+    }
     
     var body: some View {
-        VStack(spacing: 4) {
-            HStack(alignment: .top, spacing: 8) {
-                if message.senderName == "You" {
-                    // Debug logging for current user photo
-                    let _ = print("🖼️ MessageBubble: Current user photo URL: \(currentUserProfilePhotoURL ?? "nil")")
-                    Spacer()
-                    
-                    VStack(alignment: .trailing, spacing: 4) {
-                        switch message.messageType {
-                        case .image:
-                            Button(action: {
-                                guard !isImageUploading, !message.content.hasPrefix("pending://") else { return }
-                                let imageMessages = conversationMessages.filter { $0.messageType == .image && !$0.content.hasPrefix("pending://") }
-                                if let index = imageMessages.firstIndex(where: { $0.id == message.id }) {
-                                    selectedPhotoIndex = index
-                                    showingConversationPhotoViewer = true
-                                }
-                            }) {
-                                ChatImageBubbleContent(
-                                    remoteURL: message.content.hasPrefix("pending://") ? nil : URL(string: message.content),
-                                    localImage: localImagePreview,
-                                    isUploading: isImageUploading
-                                )
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            .disabled(isImageUploading || message.content.hasPrefix("pending://"))
-                        case .voice:
-                            VoiceMessagePlayerView(
-                                audioURL: URL(string: message.content),
-                                displayDuration: message.voiceDuration,
-                                accentColor: voiceAccentColor,
-                                textColor: bubbleTextColor,
-                                baseColor: outgoingBubbleColor,
-                                waveColor: Color.gray.opacity(0.45)
-                            )
-                        default:
-                            Text(message.content)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .lineLimit(nil)
-                                .padding(8)
-                                .background(outgoingBubbleColor)
-                                .foregroundColor(bubbleTextColor)
-                                .cornerRadius(10)
-                        }
-                    }
-                    
-                    // Current user's profile photo - parallel to message text
-                    if let profilePhotoURL = currentUserProfilePhotoURL, !profilePhotoURL.isEmpty {
-                        Circle()
-                            .fill(Color.gray.opacity(0.1))
-                            .frame(width: 36, height: 36)
-                            .overlay(
-                                CachedAsyncImage(url: URL(string: profilePhotoURL)) { image in
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                } placeholder: {
-                                    Circle()
-                                        .fill(Color.blue.opacity(0.2))
-                                        .overlay(
-                                            Text("messages.you".localized.prefix(1).uppercased())
-                                                .font(.caption)
-                                                .fontWeight(.semibold)
-                                                .foregroundColor(.blue)
-                                        )
-                                }
-                                .frame(width: 30, height: 30)
-                                .clipShape(Circle())
-                            )
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                            )
-                            .id("current_user_photo_\(profilePhotoURL)") // Stable ID to prevent re-creation
-                    } else {
-                        Circle()
-                            .fill(Color.gray.opacity(0.1))
-                            .frame(width: 36, height: 36)
-                            .overlay(
-                                Circle()
-                                    .fill(Color.blue.opacity(0.2))
-                                    .frame(width: 30, height: 30)
-                                    .overlay(
-                                        Text("messages.you".localized.prefix(1).uppercased())
-                                            .font(.caption)
-                                            .fontWeight(.semibold)
-                                            .foregroundColor(.blue)
-                                    )
-                            )
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                            )
-                            .id("current_user_placeholder") // Stable ID for placeholder
-                    }
-                } else {
-                    // Debug logging for other user photo
-                    let _ = print("🖼️ MessageBubble: Other user photo URL: \(otherUserProfilePhotoURL ?? "nil")")
-                    
-                    // Other user's profile photo - parallel to message text
-                    if let profilePhotoURL = otherUserProfilePhotoURL, !profilePhotoURL.isEmpty {
-                        Circle()
-                            .fill(Color.gray.opacity(0.1))
-                            .frame(width: 36, height: 36)
-                            .overlay(
-                                CachedAsyncImage(url: URL(string: profilePhotoURL)) { image in
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                } placeholder: {
-                                    Circle()
-                                        .fill(Color.blue.opacity(0.2))
-                                        .overlay(
-                                            Text(String(message.senderName.prefix(1)).uppercased())
-                                                .font(.caption)
-                                                .fontWeight(.semibold)
-                                                .foregroundColor(.blue)
-                                        )
-                                }
-                                .frame(width: 30, height: 30)
-                                .clipShape(Circle())
-                            )
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                            )
-                            .id("other_user_photo_\(profilePhotoURL)") // Stable ID to prevent re-creation
-                    } else {
-                        Circle()
-                            .fill(Color.gray.opacity(0.1))
-                            .frame(width: 36, height: 36)
-                            .overlay(
-                                Circle()
-                                    .fill(Color.blue.opacity(0.2))
-                                    .frame(width: 30, height: 30)
-                                    .overlay(
-                                        Text(String(message.senderName.prefix(1)).uppercased())
-                                            .font(.caption)
-                                            .fontWeight(.semibold)
-                                            .foregroundColor(.blue)
-                                    )
-                            )
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                            )
-                            .id("other_user_placeholder_\(message.senderName)") // Stable ID for placeholder
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        switch message.messageType {
-                        case .image:
-                            Button(action: {
-                                let imageMessages = conversationMessages.filter { $0.messageType == .image && !$0.content.hasPrefix("pending://") }
-                                if let index = imageMessages.firstIndex(where: { $0.id == message.id }) {
-                                    selectedPhotoIndex = index
-                                    showingConversationPhotoViewer = true
-                                }
-                            }) {
-                                ChatImageBubbleContent(
-                                    remoteURL: URL(string: message.content),
-                                    localImage: localImagePreview,
-                                    isUploading: false
-                                )
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                        case .voice:
-                            VoiceMessagePlayerView(
-                                audioURL: URL(string: message.content),
-                                displayDuration: message.voiceDuration,
-                                accentColor: voiceAccentColor,
-                                textColor: bubbleTextColor,
-                                baseColor: incomingBubbleColor,
-                                waveColor: Color.gray.opacity(0.45)
-                            )
-                        default:
-                            Text(message.content)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .lineLimit(nil)
-                                .padding(8)
-                                .background(incomingBubbleColor)
-                                .foregroundColor(bubbleTextColor)
-                                .cornerRadius(10)
-                        }
-                    }
-                    Spacer()
-                }
-            }
-            
-            // Timestamp below the message
-            HStack {
-                if message.senderName == "You" {
-                    Spacer()
-                    Text(message.createdAt.formattedTimestamp())
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .padding(.trailing, 40) // Align with message bubble
-                } else {
-                    Text(message.createdAt.formattedTimestamp())
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .padding(.leading, 40) // Align with message bubble
-                    Spacer()
-                }
+        HStack(alignment: .top, spacing: 8) {
+            if isOutgoing {
+                Spacer(minLength: 48)
+                bubbleContent
+            } else {
+                bubbleContent
+                Spacer(minLength: 48)
             }
         }
         .padding(.vertical, 4)
+    }
+    
+    @ViewBuilder
+    private var bubbleContent: some View {
+        switch message.messageType {
+        case .image:
+            Button(action: {
+                guard !isImageUploading, !message.content.hasPrefix("pending://") else { return }
+                let imageMessages = conversationMessages.filter { $0.messageType == .image && !$0.content.hasPrefix("pending://") }
+                if let index = imageMessages.firstIndex(where: { $0.id == message.id }) {
+                    selectedPhotoIndex = index
+                    showingConversationPhotoViewer = true
+                }
+            }) {
+                ZStack(alignment: .bottomTrailing) {
+                    ChatImageBubbleContent(
+                        remoteURL: message.content.hasPrefix("pending://") ? nil : URL(string: message.content),
+                        localImage: localImagePreview,
+                        isUploading: isImageUploading
+                    )
+                    
+                    Text(bubbleTimeText)
+                        .font(.caption2)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.black.opacity(0.45))
+                        .clipShape(Capsule())
+                        .padding(6)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(3)
+                .padding(.leading, isOutgoing ? 0 : 7)
+                .padding(.trailing, isOutgoing ? 7 : 0)
+                .background(bubbleColor, in: bubbleShape)
+            }
+            .buttonStyle(PlainButtonStyle())
+            .disabled(isOutgoing && (isImageUploading || message.content.hasPrefix("pending://")))
+            
+        case .voice:
+            VoiceMessagePlayerView(
+                audioURL: URL(string: message.content),
+                displayDuration: message.voiceDuration,
+                accentColor: voiceAccentColor,
+                textColor: bubbleTextColor,
+                baseColor: bubbleColor,
+                waveColor: Color.gray.opacity(0.45),
+                timestampText: bubbleTimeText,
+                isOutgoing: isOutgoing
+            )
+            
+        default:
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(displayedText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(nil)
+                    .foregroundColor(bubbleTextColor)
+                    .multilineTextAlignment(.leading)
+                
+                HStack(alignment: .bottom, spacing: 8) {
+                    if isLongMessage && !isLongMessageExpanded {
+                        Button {
+                            onExpandLongMessage?()
+                        } label: {
+                            Text("messages.read.more".localized)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(readMoreColor)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        Spacer(minLength: 8)
+                    }
+                    
+                    Text(bubbleTimeText)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .padding(.leading, isOutgoing ? 0 : 7)
+            .padding(.trailing, isOutgoing ? 7 : 0)
+            .background(bubbleColor, in: bubbleShape)
+        }
     }
 }
 

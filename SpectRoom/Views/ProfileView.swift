@@ -66,14 +66,14 @@ struct ProfileView: View {
                     // Energy Level Section
                     energyLevelSection
                     
+                    // Gender & Preferences Section
+                    genderPreferencesSection
+                    
                     // About Me Section
                     aboutMeSection
                     
                     // My Interests Section
                     myInterestsSection
-                    
-                    // Gender & Preferences Section
-                    genderPreferencesSection
                 }
                 .padding(.horizontal)
                 .padding(.top, 16)

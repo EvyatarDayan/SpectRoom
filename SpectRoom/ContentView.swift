@@ -250,8 +250,11 @@ struct CustomFooterMenu: View {
                 Button(action: {
                     selectedTab = 2
                 }) {
-                    Image(systemName: "house.fill")
-                        .font(.system(size: 25, weight: .semibold))
+                    Image("profileCard")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 34, height: 34)
                         .foregroundColor(selectedTab == 2 ? .blue : .gray)
                         .floatingCircleButtonStyle(colorScheme: colorScheme)
                 }

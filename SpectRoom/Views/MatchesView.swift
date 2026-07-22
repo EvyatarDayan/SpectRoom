@@ -16,40 +16,68 @@ struct MatchesView: View {
     @State private var isLoading = true
     @State private var showingProfileModal = false
     @State private var selectedProfile: ProfileCard?
+    @State private var searchText = ""
+    @FocusState private var isSearchFieldFocused: Bool
 
-    private let gridPadding: CGFloat = 5
-    private let columnSpacing: CGFloat = -3
-    private let rowSpacing: CGFloat = 5
+    private let listPadding: CGFloat = 16
+    private let rowSpacing: CGFloat = 14
+    /// Same as search bar `.padding(.bottom, 10)`.
+    private let searchContentSpacing: CGFloat = 10
+    /// Height of the custom tab menu body (above the home indicator).
+    private let tabMenuBodyHeight: CGFloat = 70
 
     private var cardWidth: CGFloat {
         let screenWidth = UIScreen.main.bounds.width
-        let availableWidth = screenWidth - (gridPadding * 2) - columnSpacing
-        return floor(availableWidth / 2)
+        return floor(screenWidth - (listPadding * 2))
     }
-
-    private var gridColumns: [GridItem] {
-        [
-            GridItem(.fixed(cardWidth), spacing: columnSpacing),
-            GridItem(.fixed(cardWidth))
-        ]
+    
+    private var filteredMatches: [MatchDisplay] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return matches }
+        return matches.filter { matchMatchesSearch($0, query: query) }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            matchesHeader
-
-            Group {
-                if isLoading {
-                    loadingView
-                } else if matches.isEmpty {
-                    emptyMatchesView
-                } else {
-                    matchesGrid
+        NavigationView {
+            VStack(spacing: 0) {
+                matchesSearchBar
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+                    .padding(.bottom, searchContentSpacing)
+                
+                Group {
+                    if isLoading {
+                        loadingView
+                    } else if matches.isEmpty {
+                        emptyMatchesView
+                    } else {
+                        ZStack {
+                            matchesList
+                            
+                            if filteredMatches.isEmpty {
+                                noSearchResultsView
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                
+                // Mirror top spacing: 10pt gap, then reserve space for the overlay menu.
+                Color.clear
+                    .frame(height: tabMenuBodyHeight)
+                    .padding(.top, searchContentSpacing)
+            }
+            .background(colorsBackground)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("matches.title".localized)
+                        .font(.system(size: 28, weight: .bold))
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(colorsBackground)
+        .navigationViewStyle(.stack)
         .onReceive(appState.$cachedMatches) { updatedMatches in
             matches = updatedMatches
             isLoading = false
@@ -74,7 +102,7 @@ struct MatchesView: View {
             let _ = print("🔍 MatchesView Sheet closure EXECUTING - selectedProfile: \(selectedProfile?.name ?? "nil")")
             if let profile = selectedProfile {
                 let _ = print("🔍 MatchesView Creating UserProfileModal with profile: \(profile.name), userId: \(profile.userId), age: \(profile.age)")
-                UserProfileModal(profile: profile)
+                UserProfileModal(profile: profile, showsUnlikeOption: true)
                     .environmentObject(appState)
             } else {
                 let _ = print("❌ MatchesView selectedProfile is nil in sheet closure!")
@@ -124,6 +152,12 @@ struct MatchesView: View {
         appState.conversationToOpenSenderId = userId
         selectedTab = 0
     }
+    
+    private func matchMatchesSearch(_ match: MatchDisplay, query: String) -> Bool {
+        searchableProfileTexts(from: match.otherUser).contains {
+            $0.localizedCaseInsensitiveContains(query)
+        }
+    }
 }
 
 private extension MatchesView {
@@ -132,28 +166,6 @@ private extension MatchesView {
             .resizable()
             .aspectRatio(contentMode: .fill)
             .ignoresSafeArea()
-    }
-
-    var matchesHeader: some View {
-        HStack(spacing: 12) {
-            Button {
-                selectedTab = 2
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(.primary)
-                    .frame(width: 32, height: 32)
-            }
-
-            Text("matches.title".localized)
-                .font(.system(size: 28, weight: .bold))
-                .foregroundColor(.primary)
-
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
     }
 
     var loadingView: some View {
@@ -169,10 +181,10 @@ private extension MatchesView {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    var matchesGrid: some View {
+    var matchesList: some View {
         ScrollView {
-            LazyVGrid(columns: gridColumns, spacing: rowSpacing) {
-                ForEach(matches) { match in
+            LazyVStack(spacing: rowSpacing) {
+                ForEach(filteredMatches) { match in
                     MatchGridCard(
                         match: match,
                         cardWidth: cardWidth,
@@ -180,13 +192,165 @@ private extension MatchesView {
                         onMessage: { openMessage(for: match) }
                     )
                     .environmentObject(appState)
+                    .frame(maxWidth: .infinity)
                 }
             }
-            .padding(gridPadding)
-            .padding(.bottom, 84)
+            .padding(.horizontal, listPadding)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
         }
         .scrollContentBackground(.hidden)
         .background(Color.clear)
+    }
+    
+    var matchesSearchBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.secondary)
+            
+            TextField("matches.search.placeholder".localized, text: $searchText)
+                .textFieldStyle(.plain)
+                .foregroundColor(.primary)
+                .autocorrectionDisabled(true)
+                .textInputAutocapitalization(.never)
+                .focused($isSearchFieldFocused)
+            
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                    isSearchFieldFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("matches.search.clear".localized)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.08), radius: 4, x: 0, y: 1)
+        )
+    }
+    
+    var noSearchResultsView: some View {
+        VStack(spacing: 14) {
+            Spacer()
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 64, weight: .medium))
+                    .foregroundColor(Color.blue.opacity(0.75))
+                
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(6)
+                    .background(
+                        Circle()
+                            .fill(Color(.systemBackground))
+                    )
+                    .offset(x: 6, y: 6)
+            }
+            .padding(.bottom, 4)
+            
+            Text("messages.search.no.results".localized)
+                .font(.headline)
+                .foregroundColor(.primary.opacity(0.85))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            
+            Text("matches.search.no.results.hint".localized)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    func searchableProfileTexts(from profile: ProfileCard) -> [String] {
+        var texts = [profile.name]
+        
+        if !profile.bio.isEmpty {
+            texts.append(profile.bio)
+        }
+        
+        if profile.shareLifestyle {
+            texts.append(formattedLifestyle(profile.lifestyle))
+        }
+        
+        if profile.shareBodyType, !profile.bodyType.isEmpty {
+            texts.append(formattedBodyType(profile.bodyType))
+        }
+        
+        if profile.shareIdealFirstDate, !profile.idealFirstDate.isEmpty {
+            texts.append(formattedIdealFirstDate(profile.idealFirstDate))
+        }
+        
+        for interest in profile.interests {
+            texts.append(interest)
+            texts.append(localizedInterest(interest))
+        }
+        
+        return texts.filter { !$0.isEmpty }
+    }
+    
+    func formattedLifestyle(_ lifestyle: String) -> String {
+        switch lifestyle {
+        case "independent":
+            return "profile.edit.lifestyle.independent".localized
+        case "familySupport":
+            return "profile.edit.lifestyle.family".localized
+        case "assistedSetting":
+            return "profile.edit.lifestyle.assisted".localized
+        default:
+            return lifestyle.isEmpty ? "" : "profile.lifestyle.placeholder".localized
+        }
+    }
+    
+    func formattedBodyType(_ bodyType: String) -> String {
+        switch bodyType {
+        case "slim":
+            return "profile.edit.body.type.slim".localized
+        case "average":
+            return "profile.edit.body.type.average".localized
+        case "athletic":
+            return "profile.edit.body.type.athletic".localized
+        case "fullBodied":
+            return "profile.edit.body.type.full.bodied".localized
+        default:
+            return bodyType
+        }
+    }
+    
+    func localizedInterest(_ interest: String) -> String {
+        let key = "profile.edit.interest.\(interest.lowercased())"
+        let localized = key.localized
+        return localized == key ? interest : localized
+    }
+    
+    func formattedIdealFirstDate(_ idealFirstDate: [String]) -> String {
+        let formatted = idealFirstDate.map { option in
+            switch option {
+            case "relaxingParkWalk":
+                return "profile.edit.ideal.date.relaxing.park.walk".localized
+            case "cozyCafeMeet":
+                return "profile.edit.ideal.date.cozy.cafe.meet".localized
+            case "museumGalleryStroll":
+                return "profile.edit.ideal.date.museum.gallery.stroll".localized
+            case "cinemaMovieNight":
+                return "profile.edit.ideal.date.cinema.movie.night".localized
+            case "friendlyVideoChat":
+                return "profile.edit.ideal.date.friendly.video.chat".localized
+            default:
+                return option
+            }
+        }
+        return formatted.joined(separator: ", ")
     }
 
     var emptyMatchesView: some View {
@@ -230,108 +394,92 @@ struct MatchGridCard: View {
     let onTap: () -> Void
     let onMessage: () -> Void
     @EnvironmentObject private var appState: AppStateManager
+    @Environment(\.colorScheme) private var colorScheme
 
-    private let photoInset: CGFloat = 8
-    private let photoAspectRatio: CGFloat = 300 / 333
+    private let cardPadding: CGFloat = 10
+    private let contentSpacing: CGFloat = 12
 
     private var profile: ProfileCard { match.otherUser }
 
-    private var photoWidth: CGFloat {
-        cardWidth - (photoInset * 2)
+    private var photoSide: CGFloat {
+        floor((cardWidth - (cardPadding * 2) - contentSpacing) / 2)
     }
 
-    private var photoHeight: CGFloat {
-        photoWidth * photoAspectRatio
+    private var infoWidth: CGFloat {
+        photoSide
     }
 
     private var displayDistance: String? {
-        let distance = profile.distance
+        let distance = profile.distance.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !distance.isEmpty, distance != "Matched" else { return nil }
-        return compactDistance(from: distance)
-    }
-
-    private func compactDistance(from distance: String) -> String {
-        if let kmRange = distance.range(of: " km") {
-            return String(distance[distance.startIndex..<kmRange.upperBound])
-        }
-        if let mRange = distance.range(of: " m") {
-            return String(distance[distance.startIndex..<mRange.upperBound])
-        }
         return distance
+    }
+    
+    private var cardBackground: Color {
+        colorScheme == .dark
+            ? Color(white: 0.20)
+            : Color(.secondarySystemGroupedBackground)
+    }
+    
+    private var nameColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.92) : .primary
+    }
+    
+    private var distanceColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.62) : .secondary
+    }
+    
+    private var photoBorderColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.28) : Color.white.opacity(0.9)
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        HStack(alignment: .center, spacing: contentSpacing) {
             Button(action: onTap) {
-                ZStack {
-                    profileImage
-                        .frame(width: photoWidth, height: photoHeight)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.white.opacity(0.9), lineWidth: 2)
-                        )
-
-                    VStack(spacing: 0) {
-                        Spacer(minLength: 0)
-
-                        HStack(alignment: .bottom) {
-                            overlayBadge {
-                                Text("\(firstName(from: profile.name)), \(profile.age)")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-
-                            Spacer(minLength: 4)
-
-                            overlayBadge {
-                                HStack(spacing: 3) {
-                                    Circle()
-                                        .fill(profile.isOnline ? Color.green : Color.red)
-                                        .frame(width: 5, height: 5)
-                                    Text(profile.isOnline ? "search.online.now".localized : "search.offline".localized)
-                                        .font(.system(size: 10, weight: .bold))
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.7)
-                                }
-                            }
-                        }
-                    }
-                    .padding(8)
-                    .frame(width: photoWidth, height: photoHeight)
-                }
+                profileImage
+                    .frame(width: photoSide, height: photoSide)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(photoBorderColor, lineWidth: 2)
+                    )
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, photoInset)
-            .padding(.top, photoInset)
 
-            VStack(spacing: 0) {
-                HStack {
-                    messageButton
-                    Spacer()
-                    if let displayDistance {
-                        overlayBadge {
-                            HStack(spacing: 3) {
-                                Image(systemName: "location.fill")
-                                    .font(.system(size: 9))
-                                Text(displayDistance)
-                                    .font(.system(size: 10, weight: .bold))
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
+            ZStack(alignment: .bottom) {
+                Button(action: onTap) {
+                    VStack(spacing: 6) {
+                        Text("\(firstName(from: profile.name)), \(profile.age)")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(nameColor)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
+
+                        if let displayDistance {
+                            Text(displayDistance)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(distanceColor)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.8)
                         }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                Spacer(minLength: 0)
+                .buttonStyle(.plain)
+
+                messageButton
             }
-            .padding(8)
-            .frame(width: photoWidth, height: photoHeight)
-            .padding(.horizontal, photoInset)
-            .padding(.top, photoInset)
+            .frame(width: infoWidth, height: photoSide)
         }
-        .frame(width: cardWidth, height: photoHeight + photoInset, alignment: .top)
+        .padding(cardPadding)
+        .frame(width: cardWidth, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(cardBackground)
+        )
         .overlay {
             if isBlockedMatch {
                 BlockedProfileLabel(dimmed: false, slanted: false)
@@ -346,11 +494,22 @@ struct MatchGridCard: View {
 
     private var messageButton: some View {
         Button(action: onMessage) {
-            Image(systemName: "envelope.fill")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(width: 26, height: 26)
-                .background(Circle().fill(Color.blue))
+            HStack(spacing: 6) {
+                Image(systemName: "envelope.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("matches.message.button".localized)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(
+                Capsule()
+                    .fill(Color.blue)
+            )
         }
         .buttonStyle(.plain)
     }
@@ -373,22 +532,10 @@ struct MatchGridCard: View {
     private var imagePlaceholder: some View {
         Rectangle()
             .fill(Color.gray.opacity(0.3))
-            .frame(width: photoWidth, height: photoHeight)
             .overlay(
                 Image(systemName: "person.fill")
-                    .font(.system(size: 36))
+                    .font(.system(size: 40))
                     .foregroundColor(.gray)
-            )
-    }
-
-    private func overlayBadge<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .foregroundColor(.white)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.black.opacity(0.3))
             )
     }
 

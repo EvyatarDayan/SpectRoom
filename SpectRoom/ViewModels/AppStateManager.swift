@@ -600,6 +600,46 @@ class AppStateManager: ObservableObject {
         }
     }
 
+    @MainActor
+    func removeMatchFromCache(userId: String) {
+        cachedMatches.removeAll { $0.otherUser.userId == userId }
+        lastMatchesUpdate = Date()
+    }
+    
+    /// Unlike a profile: record a pass swipe and remove any existing match.
+    func unlikeUser(userId: String) {
+        Task {
+            await MainActor.run {
+                self.removeMatchFromCache(userId: userId)
+                self.cachedDiscoverProfiles.removeAll { $0.userId == userId }
+                if self.cachedDiscoverCardIndex >= self.cachedDiscoverProfiles.count {
+                    self.cachedDiscoverCardIndex = max(0, self.cachedDiscoverProfiles.count - 1)
+                }
+            }
+            
+            do {
+                try await firebaseAuth.recordSwipe(to: userId, action: .pass)
+                try await firebaseAuth.deleteMatch(with: userId)
+                _ = try? await refreshMatchesCache()
+            } catch {
+                print("⚠️ Unable to unlike user \(userId): \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    /// Re-like a previously unliked profile (toggle off).
+    func relikeUser(userId: String) {
+        Task {
+            do {
+                try await firebaseAuth.recordSwipe(to: userId, action: .like)
+                _ = try await firebaseAuth.checkForMatch(with: userId)
+                _ = try? await refreshMatchesCache()
+            } catch {
+                print("⚠️ Unable to re-like user \(userId): \(error.localizedDescription)")
+            }
+        }
+    }
+
     func blockUser(userId: String, name: String) {
         guard !isUserBlocked(userId) else { return }
         let blockedUser = BlockedUser(id: userId, name: name, blockedAt: Date())
@@ -909,6 +949,13 @@ class AppStateManager: ObservableObject {
                     return
                 }
                 
+                // Profile resolved — replace any temporary "Unknown User" in the list/chat.
+                self?.updateConversationPartnerDetails(
+                    userId: senderId,
+                    name: senderName,
+                    photoURL: senderPhotoURL
+                )
+                
                 print("💬 New message received from: \(senderName)")
                 print("💬 Sender ID: \(senderId), Message Doc ID: \(messageDocId)")
                 print("💬 Current showingNewMessageNotification state: \(self?.showingNewMessageNotification ?? false)")
@@ -947,16 +994,19 @@ class AppStateManager: ObservableObject {
                         
                         let hasPermission = await NotificationService.shared.checkNotificationPermission()
                         if hasPermission && NotificationService.shared.areNotificationsEnabled() {
-                            let badgeCount = await MainActor.run {
-                                self?.unreadMessageCount ?? 0
+                            let (badgeCount, displayName) = await MainActor.run {
+                                (
+                                    self?.unreadMessageCount ?? 0,
+                                    self?.resolvedPartnerName(for: senderId, preferred: senderName) ?? senderName
+                                )
                             }
                             NotificationService.shared.sendNewMessageNotification(
-                                senderName: senderName,
+                                senderName: displayName,
                                 messageContent: messageContent ?? content,
                                 senderId: senderId,
                                 badgeCount: badgeCount
                             )
-                            print("📱 Push notification sent for message from: \(senderName)")
+                            print("📱 Push notification sent for message from: \(displayName)")
                         }
                     }
                 }
@@ -1043,16 +1093,16 @@ class AppStateManager: ObservableObject {
             guard conversation.createdAt >= existing.createdAt else {
                 return
             }
-            updated[index] = conversation
-            print("💬 Updated conversation in cache: \(conversation.recipientName)")
+            updated[index] = conversationPreservingKnownIdentity(new: conversation, existing: existing)
+            print("💬 Updated conversation in cache: \(updated[index].senderName == "You" ? updated[index].recipientName : updated[index].senderName)")
         } else {
             updated.append(conversation)
-            print("💬 Added new conversation to cache: \(conversation.recipientName)")
+            print("💬 Added new conversation to cache: \(conversation.senderName == "You" ? conversation.recipientName : conversation.senderName)")
         }
         
         cachedMessageConversations = updated.sorted { $0.createdAt > $1.createdAt }
         lastMessageConversationsUpdate = Date()
-        newMessageReceivedSubject.send(conversation)
+        newMessageReceivedSubject.send(updated.first(where: { otherUserId(for: $0) == newOtherUserId }) ?? conversation)
     }
     
     @MainActor
@@ -1067,15 +1117,8 @@ class AppStateManager: ObservableObject {
     ) {
         guard let currentUserId = firebaseAuth.auth.currentUser?.uid else { return }
         
-        let resolvedName = senderName
-            ?? cachedMessageConversations.first(where: { otherUserId(for: $0) == senderId }).map { conversation in
-                conversation.senderName == "You" ? conversation.recipientName : conversation.senderName
-            }
-            ?? "Unknown User"
-        let cachedPhotoURL = cachedMessageConversations.first(where: { otherUserId(for: $0) == senderId }).flatMap { conversation in
-            conversation.senderName == "You" ? conversation.recipientProfilePhotoURL : conversation.senderProfilePhotoURL
-        }
-        let resolvedPhotoURL = senderPhotoURL ?? cachedPhotoURL
+        let resolvedName = resolvedPartnerName(for: senderId, preferred: senderName)
+        let resolvedPhotoURL = resolvedPartnerPhotoURL(for: senderId, preferred: senderPhotoURL)
         
         let message = Message(
             conversationId: UUID(),
@@ -1099,6 +1142,117 @@ class AppStateManager: ObservableObject {
         // Keep the open-chat message pool in sync so the conversation UI can show
         // the bubble at the same time as the in-app sound.
         updateConversationMessagesCache([messageDisplay], for: senderId)
+    }
+    
+    /// Patch conversation list + open-chat cache once the sender profile is known.
+    @MainActor
+    func updateConversationPartnerDetails(userId: String, name: String, photoURL: String?) {
+        let resolvedName = resolvedPartnerName(for: userId, preferred: name)
+        guard !isUnknownPartnerName(resolvedName) else { return }
+        guard let currentUserId = firebaseAuth.auth.currentUser?.uid else { return }
+        
+        var didUpdateList = false
+        cachedMessageConversations = cachedMessageConversations.map { conversation in
+            guard otherUserId(for: conversation) == userId else { return conversation }
+            let currentName = conversation.senderName == "You" ? conversation.recipientName : conversation.senderName
+            let currentPhoto = conversation.senderName == "You" ? conversation.recipientProfilePhotoURL : conversation.senderProfilePhotoURL
+            if currentName == resolvedName, (photoURL == nil || currentPhoto == photoURL) {
+                return conversation
+            }
+            didUpdateList = true
+            return conversation.replacingPartnerIdentity(
+                name: resolvedName,
+                photoURL: photoURL ?? currentPhoto,
+                currentUserId: currentUserId
+            )
+        }
+        
+        if didUpdateList {
+            lastMessageConversationsUpdate = Date()
+            if let updated = cachedMessageConversations.first(where: { otherUserId(for: $0) == userId }) {
+                newMessageReceivedSubject.send(updated)
+            }
+        }
+        
+        if var state = cachedConversationStates[userId] {
+            state.messagePool = state.messagePool.map {
+                $0.replacingPartnerIdentity(name: resolvedName, photoURL: photoURL, currentUserId: currentUserId)
+            }
+            state.visibleMessages = state.visibleMessages.map {
+                $0.replacingPartnerIdentity(name: resolvedName, photoURL: photoURL, currentUserId: currentUserId)
+            }
+            state.updatedAt = Date()
+            cachedConversationStates[userId] = state
+        }
+    }
+    
+    private func resolvedPartnerName(for userId: String, preferred: String?) -> String {
+        if let preferred, !isUnknownPartnerName(preferred) {
+            return preferred
+        }
+        
+        if let fromConversation = cachedMessageConversations.first(where: { otherUserId(for: $0) == userId }) {
+            let name = fromConversation.senderName == "You"
+                ? fromConversation.recipientName
+                : fromConversation.senderName
+            if !isUnknownPartnerName(name) {
+                return name
+            }
+        }
+        
+        if let fromMatch = cachedMatches.first(where: { $0.otherUser.userId == userId }),
+           !isUnknownPartnerName(fromMatch.otherUser.name) {
+            return fromMatch.otherUser.name
+        }
+        
+        return preferred?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? preferred!
+            : "Unknown User"
+    }
+    
+    private func resolvedPartnerPhotoURL(for userId: String, preferred: String?) -> String? {
+        if let preferred, !preferred.isEmpty {
+            return preferred
+        }
+        
+        if let fromConversation = cachedMessageConversations.first(where: { otherUserId(for: $0) == userId }) {
+            return fromConversation.senderName == "You"
+                ? fromConversation.recipientProfilePhotoURL
+                : fromConversation.senderProfilePhotoURL
+        }
+        
+        return cachedMatches.first(where: { $0.otherUser.userId == userId })?.otherUser.imageURL
+    }
+    
+    private func isUnknownPartnerName(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty
+            || trimmed.caseInsensitiveCompare("Unknown User") == .orderedSame
+            || trimmed.caseInsensitiveCompare("Unknown") == .orderedSame
+            || trimmed.caseInsensitiveCompare("Other User") == .orderedSame
+    }
+    
+    private func conversationPreservingKnownIdentity(new: MessageDisplay, existing: MessageDisplay) -> MessageDisplay {
+        guard let currentUserId = firebaseAuth.auth.currentUser?.uid else { return new }
+        
+        let existingName = existing.senderName == "You" ? existing.recipientName : existing.senderName
+        let newName = new.senderName == "You" ? new.recipientName : new.senderName
+        let existingPhoto = existing.senderName == "You" ? existing.recipientProfilePhotoURL : existing.senderProfilePhotoURL
+        let newPhoto = new.senderName == "You" ? new.recipientProfilePhotoURL : new.senderProfilePhotoURL
+        
+        let shouldKeepExistingName = isUnknownPartnerName(newName) && !isUnknownPartnerName(existingName)
+        let resolvedName = shouldKeepExistingName ? existingName : newName
+        let resolvedPhoto = (newPhoto?.isEmpty == false) ? newPhoto : existingPhoto
+        
+        if resolvedName == newName, resolvedPhoto == newPhoto {
+            return new
+        }
+        
+        return new.replacingPartnerIdentity(
+            name: resolvedName,
+            photoURL: resolvedPhoto,
+            currentUserId: currentUserId
+        )
     }
     
     @MainActor
@@ -1234,34 +1388,51 @@ class AppStateManager: ObservableObject {
         )
     }
     
-    /// Update conversation messages cache when new messages arrive
+    /// Update conversation messages cache when new messages arrive.
+    /// Only appends to an existing cache — never seeds a one-message cache from a preview,
+    /// or reopening the chat would hide the real history.
     func updateConversationMessagesCache(_ newMessages: [MessageDisplay], for otherUserId: String) {
-        if var existingState = cachedConversationStates[otherUserId] {
-            let existingKeys = Set(existingState.messagePool.map(\.deduplicationKey))
-            var appendedToVisible = false
-            
-            for newMessage in newMessages where !existingKeys.contains(newMessage.deduplicationKey) {
-                existingState.messagePool.append(newMessage)
-                existingState.visibleMessages.append(newMessage)
-                appendedToVisible = true
-            }
-            
-            existingState.messagePool = existingState.messagePool.deduplicatedConversationMessages()
-            if appendedToVisible {
-                existingState.visibleMessages = existingState.visibleMessages.deduplicatedConversationMessages()
-            }
-            existingState.updatedAt = Date()
-            cachedConversationStates[otherUserId] = existingState
-            print("💬 Updated conversation cache for \(otherUserId) (total: \(existingState.messagePool.count))")
-        } else {
-            cacheConversationMessages(newMessages, for: otherUserId)
+        guard var existingState = cachedConversationStates[otherUserId] else {
+            print("💬 Skipping conversation cache update for \(otherUserId) — no existing history cache")
+            return
         }
+        
+        let existingKeys = Set(existingState.messagePool.map(\.deduplicationKey))
+        var appendedToVisible = false
+        
+        for newMessage in newMessages where !existingKeys.contains(newMessage.deduplicationKey) {
+            existingState.messagePool.append(newMessage)
+            existingState.visibleMessages.append(newMessage)
+            appendedToVisible = true
+        }
+        
+        existingState.messagePool = existingState.messagePool.deduplicatedConversationMessages()
+        if appendedToVisible {
+            existingState.visibleMessages = existingState.visibleMessages.deduplicatedConversationMessages()
+        }
+        existingState.updatedAt = Date()
+        cachedConversationStates[otherUserId] = existingState
+        print("💬 Updated conversation cache for \(otherUserId) (total: \(existingState.messagePool.count))")
     }
     
     /// Clear cache for a specific conversation
     func clearConversationMessagesCache(for otherUserId: String) {
         cachedConversationStates.removeValue(forKey: otherUserId)
         print("💬 Cleared conversation cache for \(otherUserId)")
+    }
+    
+    /// Partner IDs whose currently cached conversation pools contain `query`.
+    func partnerIdsMatchingCachedMessageHistory(_ query: String) -> Set<String> {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        
+        var matches = Set<String>()
+        for (partnerId, state) in cachedConversationStates {
+            if state.messagePool.contains(where: { $0.content.localizedCaseInsensitiveContains(trimmed) }) {
+                matches.insert(partnerId)
+            }
+        }
+        return matches
     }
     
     // MARK: - App State Management for Push Notifications

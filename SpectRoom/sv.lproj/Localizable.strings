@@ -36,18 +36,30 @@
 "auth.alert.title" = "Granska dina uppgifter";
 
 // MARK: - Onboarding
-"onboarding.welcome.title" = "Välkommen till SpectRoom";
-"onboarding.welcome.subtitle" = "Ett säkert och förstående utrymme för meningsfulla kontakter";
-"onboarding.welcome.description" = "Koppla samman med människor som förstår och uppskattar ditt unika perspektiv.";
-"onboarding.match.title" = "Hitta Din Match";
-"onboarding.match.subtitle" = "Upptäck människor med liknande intressen och värderingar";
-"onboarding.match.description" = "Vårt matchningssystem hjälper dig att hitta kompatibla människor som delar dina intressen och kommunikationsstil.";
-"onboarding.communication.title" = "Säker Kommunikation";
-"onboarding.communication.subtitle" = "Chatta i din egen takt i en bekväm miljö";
-"onboarding.communication.description" = "Ta dig tid att lära känna någon. Inget tryck, ingen brådska - bara äkta kontakter.";
-"onboarding.settings.title" = "Ditt Utrymme";
-"onboarding.settings.subtitle" = "Kontrollera din upplevelse med anpassningsbara inställningar";
-"onboarding.settings.description" = "Ställ in dina preferenser för notifikationer, integritet och hur du vill interagera med andra.";
+"onboarding.step.1" = "- Steg 1 -";
+"onboarding.step.2" = "- Steg 2 -";
+"onboarding.step.3" = "- Steg 3 -";
+"onboarding.step.4" = "- Steg 4 -";
+"onboarding.intro.title" = "Välkommen till SpectRoom";
+"onboarding.intro.title.line1" = "Välkommen till";
+"onboarding.intro.title.line2" = "SpectRoom";
+"onboarding.intro.subtitle" = "Ett tryggt, förstående utrymme byggt runt dig";
+"onboarding.intro.description" = "Knyt kontakt med människor som uppskattar ditt unika perspektiv - i din egen takt.";
+"onboarding.intro.notice" = "🎁 Gratis under Betan: SpectRoom är i early access och helt gratis att använda. Som tidig medlem hjälper du oss bygga en bättre community! Standardfunktioner förblir gratis, men vi kommer att introducera valfria betaltjänster i framtiden";
+"onboarding.intro.notice.lead" = "🎁 Gratis under Betan:";
+"onboarding.intro.notice.body" = "SpectRoom är i early access och helt gratis att använda. Som tidig medlem hjälper du oss bygga en bättre community! Standardfunktioner förblir gratis, men vi kommer att introducera valfria betaltjänster i framtiden";
+"onboarding.welcome.title" = "Fyll i Din Profil";
+"onboarding.welcome.subtitle" = "Berätta hur du knyter kontakt bäst";
+"onboarding.welcome.description" = "Lägg till dina intressen och sensoriska preferenser så andra vet hur de kan interagera bekvämt med dig.";
+"onboarding.match.title" = "Upptäck Kontakter";
+"onboarding.match.subtitle" = "Enkel matchning utan press";
+"onboarding.match.description" = "Bläddra bland profilkort i din egen takt. Tryck eller svep höger om du känner en koppling, eller passera utan obehag.";
+"onboarding.communication.title" = "Chatta i Din Egen Takt";
+"onboarding.communication.subtitle" = "Ingen press, ingen brådska";
+"onboarding.communication.description" = "Knyt kontakt via direktmeddelanden med inbyggda verktyg som gör det bekvämt att starta och hålla takten i samtal.";
+"onboarding.settings.title" = "Anpassa Ditt Utrymme";
+"onboarding.settings.subtitle" = "Sätt dina personliga gränser";
+"onboarding.settings.description" = "Anpassa notifikationer, styr vem som ser din profil och justera sensoriska inställningar när du behöver.";
 "onboarding.previous" = "Föregående";
 "onboarding.next" = "Nästa";
 "onboarding.get.started" = "Kom Igång";
@@ -67,6 +79,7 @@
 "settings.notifications.description" = "Aktivera notifikationer";
 "settings.dark.mode" = "Mörkt Läge";
 "settings.dark.mode.description" = "Aktivera mörkt läge";
+"settings.light.mode" = "Ljust Läge";
 "settings.language" = "Språk";
 "settings.language.description" = "Välj appens språk";
 "settings.support" = "Support";
@@ -142,9 +155,18 @@
 "profile.block.confirm.title" = "Är du säker?";
 "profile.block.confirm.message" = "%@ kommer inte att kunna se eller kommunicera med dig.";
 "profile.block.confirm.action" = "Blockera";
+"profile.actions.title" = "Åtgärder";
+"profile.unlike.title" = "Sluta gilla denna profil";
+"profile.relike.title" = "Gilla denna profil";
+"profile.unlike.confirm.title" = "Är du säker?";
+"profile.unlike.confirm.message" = "Denna profil tas bort från Matchningar";
+"profile.unlike.confirm.action" = "Sluta gilla";
 
 // MARK: - Matches
 "matches.title" = "Matchningar";
+"matches.search.placeholder" = "Sök matchningar";
+"matches.search.clear" = "Rensa sökning";
+"matches.search.no.results.hint" = "Prova ett annat namn, intresse eller profildetalj";
 "matches.loading" = "Laddar matchningar...";
 "matches.empty" = "Inga matchningar ännu";
 "matches.empty.description" = "Börja swipa för att hitta din perfekta match!";
@@ -155,12 +177,13 @@
 "matches.matched" = "Matchade %@";
 "matches.message.button" = "Meddelande";
 "matches.message.label" = "Meddelande";
-"matches.distance.km" = "%@ km";
-"matches.distance.m" = "%@ m";
+"matches.distance.km" = "%@ km bort";
+"matches.distance.m" = "%@ m bort";
 "matches.error.no.profile" = "Fel: Ingen profil vald";
 "matches.error.no.recipient" = "Fel: Ingen mottagare vald";
 "matches.default.message" = "Hej. Jag gillar din profil.";
 "matches.pre.message.button" = "Snabbmeddelande";
+"matches.pre.message.button.short" = "Snabbmed.";
 "matches.pre.message.title" = "Snabbmeddelande";
 "matches.pre.message.subtitle" = "Välj ett förskrivet meddelande";
 "matches.pre.message.option1" = "Hej. Trevligt match. Ingen brådska att svara.";
@@ -178,6 +201,10 @@
 
 // MARK: - Messages
 "messages.title" = "Meddelanden";
+"messages.search.placeholder" = "Sök konversationer";
+"messages.search.clear" = "Rensa sökning";
+"messages.search.no.results" = "Inga resultat";
+"messages.search.no.results.hint" = "Prova ett annat namn eller ett ord från ett meddelande";
 "messages.loading" = "Laddar meddelanden...";
 "messages.loading.conversation" = "Laddar konversation...";
 "messages.empty" = "Inga meddelanden ännu";
@@ -208,6 +235,11 @@
 "messages.preview.photo" = "📷 Foto";
 "messages.preview.voice" = "🎤 Röstmeddelande";
 "messages.preview.voice.duration" = "🎤 Röstmeddelande • %@";
+"messages.date.today" = "Idag";
+"messages.date.yesterday" = "Igår";
+"messages.read.more" = "Läs mer";
+"messages.image.retry" = "Tryck för att försöka igen";
+"messages.tap.to.see.profile" = "Tryck för att se profil";
 
 // MARK: - Match Modal
 "match.modal.title.prefix" = "Det är en";

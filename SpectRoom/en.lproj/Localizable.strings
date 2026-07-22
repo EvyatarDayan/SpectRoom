@@ -36,18 +36,30 @@
 "auth.alert.title" = "Please review your information";
 
 // MARK: - Onboarding
-"onboarding.welcome.title" = "Welcome to SpectRoom";
-"onboarding.welcome.subtitle" = "A safe and understanding space for meaningful connections";
-"onboarding.welcome.description" = "Connect with people who understand and appreciate your unique perspective.";
-"onboarding.match.title" = "Find Your Match";
-"onboarding.match.subtitle" = "Discover people with similar interests and values";
-"onboarding.match.description" = "Our matching system helps you find compatible people who share your interests and communication style.";
-"onboarding.communication.title" = "Safe Communication";
-"onboarding.communication.subtitle" = "Chat at your own pace in a comfortable environment";
-"onboarding.communication.description" = "Take your time to get to know someone. No pressure, no rush - just genuine connections.";
-"onboarding.settings.title" = "Your Space";
-"onboarding.settings.subtitle" = "Control your experience with customizable settings";
-"onboarding.settings.description" = "Set your preferences for notifications, privacy, and how you want to interact with others.";
+"onboarding.step.1" = "- Step 1 -";
+"onboarding.step.2" = "- Step 2 -";
+"onboarding.step.3" = "- Step 3 -";
+"onboarding.step.4" = "- Step 4 -";
+"onboarding.intro.title" = "Welcome to SpectRoom";
+"onboarding.intro.title.line1" = "Welcome to";
+"onboarding.intro.title.line2" = "SpectRoom";
+"onboarding.intro.subtitle" = "A safe, understanding space built around you";
+"onboarding.intro.description" = "Connect with people who appreciate your unique perspective at your own pace.";
+"onboarding.intro.notice" = "🎁 Free during Beta: SpectRoom is currently in early access and completely free to use. As an early member, you’re helping us build a better community! Standard features will remain free, though we will introduce optional paid tiers in the future";
+"onboarding.intro.notice.lead" = "🎁 Free during Beta:";
+"onboarding.intro.notice.body" = "SpectRoom is currently in early access and completely free to use. As an early member, you’re helping us build a better community! Standard features will remain free, though we will introduce optional paid tiers in the future";
+"onboarding.welcome.title" = "Complete Your Profile";
+"onboarding.welcome.subtitle" = "Share how you connect best";
+"onboarding.welcome.description" = "Add your interests and sensory preferences so others know how to interact comfortably with you.";
+"onboarding.match.title" = "Discover Connections";
+"onboarding.match.subtitle" = "Simple, pressure-free matching";
+"onboarding.match.description" = "Browse profile cards at your own speed. Tap or swipe right if you feel a connection, or pass with no awkwardness.";
+"onboarding.communication.title" = "Chat at Your Own Pace";
+"onboarding.communication.subtitle" = "No pressure, no rush";
+"onboarding.communication.description" = "Connect through direct messaging with built-in tools designed to make starting and pacing conversations comfortable.";
+"onboarding.settings.title" = "Tailor Your Space";
+"onboarding.settings.subtitle" = "Set your personal boundaries";
+"onboarding.settings.description" = "Customize your notifications, control who sees your profile, and adjust sensory settings whenever you need to.";
 "onboarding.previous" = "Previous";
 "onboarding.next" = "Next";
 "onboarding.get.started" = "Get Started";
@@ -67,6 +79,7 @@
 "settings.notifications.description" = "Enable notifications";
 "settings.dark.mode" = "Dark Mode";
 "settings.dark.mode.description" = "Enable dark mode";
+"settings.light.mode" = "Light Mode";
 "settings.language" = "Language";
 "settings.language.description" = "Select app language";
 "settings.support" = "Support";
@@ -142,9 +155,18 @@
 "profile.block.confirm.title" = "Are you sure?";
 "profile.block.confirm.message" = "%@ will not be able to see or communicate with you.";
 "profile.block.confirm.action" = "Block";
+"profile.actions.title" = "Actions";
+"profile.unlike.title" = "Unlike this profile";
+"profile.relike.title" = "Like this profile";
+"profile.unlike.confirm.title" = "Are you sure?";
+"profile.unlike.confirm.message" = "This profile will be removed from Matches";
+"profile.unlike.confirm.action" = "Unlike";
 
 // MARK: - Matches
 "matches.title" = "Matches";
+"matches.search.placeholder" = "Search matches";
+"matches.search.clear" = "Clear search";
+"matches.search.no.results.hint" = "Try a different name, interest, or profile detail";
 "matches.loading" = "Loading matches...";
 "matches.empty" = "No matches yet";
 "matches.empty.description" = "Start swiping to find your perfect match!";
@@ -155,12 +177,13 @@
 "matches.matched" = "Matched %@";
 "matches.message.button" = "Message";
 "matches.message.label" = "Message";
-"matches.distance.km" = "%@ km";
-"matches.distance.m" = "%@ m";
+"matches.distance.km" = "%@ km away";
+"matches.distance.m" = "%@ m away";
 "matches.error.no.profile" = "Error: No profile selected";
 "matches.error.no.recipient" = "Error: No recipient selected";
 "matches.default.message" = "Hey. I like your profile.";
 "matches.pre.message.button" = "Quick message";
+"matches.pre.message.button.short" = "Quick msg";
 "matches.pre.message.title" = "Quick message";
 "matches.pre.message.subtitle" = "Choose a pre-written message";
 "matches.pre.message.option1" = "Hi. Nice match. No rush to reply.";
@@ -178,6 +201,10 @@
 
 // MARK: - Messages
 "messages.title" = "Messages";
+"messages.search.placeholder" = "Search conversations";
+"messages.search.clear" = "Clear search";
+"messages.search.no.results" = "There are no results";
+"messages.search.no.results.hint" = "Try a different name or a word from a message";
 "messages.loading" = "Loading messages...";
 "messages.loading.conversation" = "Loading conversation...";
 "messages.empty" = "No messages yet";
@@ -208,6 +235,11 @@
 "messages.preview.photo" = "📷 Photo";
 "messages.preview.voice" = "🎤 Voice message";
 "messages.preview.voice.duration" = "🎤 Voice message • %@";
+"messages.date.today" = "Today";
+"messages.date.yesterday" = "Yesterday";
+"messages.read.more" = "Read more";
+"messages.image.retry" = "Tap to retry";
+"messages.tap.to.see.profile" = "Tap to see profile";
 
 // MARK: - Match Modal
 "match.modal.title.prefix" = "It's a";

@@ -48,13 +48,13 @@
 "onboarding.intro.notice" = "🎁 Free during Beta: SpectRoom is currently in early access and completely free to use. As an early member, you’re helping us build a better community! Standard features will remain free, though we will introduce optional paid tiers in the future";
 "onboarding.intro.notice.lead" = "🎁 Free during Beta:";
 "onboarding.intro.notice.body" = "SpectRoom is currently in early access and completely free to use. As an early member, you’re helping us build a better community! Standard features will remain free, though we will introduce optional paid tiers in the future";
-"onboarding.welcome.title" = "Complete Your Profile";
+"onboarding.welcome.title" = "Customize Your Profile";
 "onboarding.welcome.subtitle" = "Share how you connect best";
-"onboarding.welcome.description" = "Add your interests and sensory preferences so others know how to interact comfortably with you.";
+"onboarding.welcome.description" = "Add interests and sensory preferences to your profile. It helps others see what matters to you and how to make interaction easy.";
 "onboarding.match.title" = "Discover Connections";
 "onboarding.match.subtitle" = "Simple, pressure-free matching";
-"onboarding.match.description" = "Browse profile cards at your own speed. Tap or swipe right if you feel a connection, or pass with no awkwardness.";
-"onboarding.communication.title" = "Chat at Your Own Pace";
+"onboarding.match.description" = "Browse up to 10 profiles a day at your own speed. Tap or swipe right if you feel a connection, or pass with no awkwardness.";
+"onboarding.communication.title" = "Chat Anytime";
 "onboarding.communication.subtitle" = "No pressure, no rush";
 "onboarding.communication.description" = "Connect through direct messaging with built-in tools designed to make starting and pacing conversations comfortable.";
 "onboarding.settings.title" = "Tailor Your Space";
@@ -80,6 +80,12 @@
 "settings.dark.mode" = "Dark Mode";
 "settings.dark.mode.description" = "Enable dark mode";
 "settings.light.mode" = "Light Mode";
+"settings.distance.limit" = "Search radius";
+"settings.distance.5km" = "5 km";
+"settings.distance.10km" = "10 km";
+"settings.distance.20km" = "20 km";
+"settings.distance.50km" = "50 km";
+"settings.distance.unlimited" = "Unlimited";
 "settings.language" = "Language";
 "settings.language.description" = "Select app language";
 "settings.support" = "Support";
@@ -125,7 +131,7 @@
 // MARK: - Profile
 "profile.title" = "Profile";
 "profile.title.with.name" = "%@'s profile";
-"profile.my.title" = "My profile";
+"profile.my.title" = "My Profile";
 "profile.edit" = "Edit";
 "profile.age" = "Age";
 "profile.my.age" = "My Age";
@@ -144,6 +150,10 @@
 "profile.interested.in" = "interested in";
 "profile.looking.for" = "Looking for";
 "profile.preferred.age" = "Preferred age: %@ to %@";
+"profile.my.preferred.age" = "My Preferred Age: %@ To %@";
+"profile.my.preferences" = "My Preferences";
+"profile.my.energy.level" = "My Energy Level Today";
+"profile.energy.level" = "Energy level today";
 "profile.no.preferences" = "No preferences set";
 "profile.my.photos" = "My Photos";
 "profile.no.photos" = "No photos added yet";
@@ -258,17 +268,17 @@
 "message.notification.later" = "Later";
 
 // MARK: - Search/Discover
-"search.empty.no.more.profiles.line1" = "You've seen all available profiles for now.";
-"search.empty.no.more.profiles.line2" = "This is a great time to message your matches!";
-"search.empty.matches.prefix" = "You have";
-"search.empty.matches.suffix" = "matches";
-"search.empty.messages.prefix" = "You have";
-"search.empty.messages.suffix" = "messages";
-"search.empty.start.over" = "Review passed profiles";
+"search.empty.no.more.profiles" = "Looks like you've reached everyone nearby. Try expanding your search radius.";
 "search.online.now" = "Online";
 "search.offline" = "Offline";
 "search.title" = "Discover";
 "search.loading" = "Loading profiles...";
+"search.daily.limit.reached" = "You've reached your limit for today!";
+"search.daily.limit.second.thoughts" = "Review today's passes";
+"search.daily.limit.second.thoughts.empty" = "No profiles were passed today.";
+"search.daily.limit.why" = "Why?";
+"search.daily.limit.why.title" = "Why can’t I see more profiles?";
+"search.daily.limit.why.message" = "In SpectRoom, we believe that taking the time to really see someone matters more than endless swiping. A gentle daily limit helps you stay present, give matches a real chance, and come back tomorrow with fresh energy - so connection can grow with intention, not rush.";
 "search.no.more.profiles" = "No more profiles";
 "search.no.more.profiles.description" = "Check back later for new people!";
 "search.pass" = "Pass";
@@ -278,15 +288,16 @@
 "search.distance.km" = "%@ km away";
 "search.distance.m" = "%@ m away";
 "search.match.prefix" = "You have ";
-"search.match.percent.part" = "%d%% match";
+"search.match.percent.part" = "%d%%";
+"search.match.label" = " match";
 "search.match.suffix" = " with %@";
 
 // MARK: - Profile Edit
 "profile.edit.title" = "Edit Profile";
 "profile.edit.complete.title" = "Complete Your Profile";
-"profile.edit.name" = "Name";
+"profile.edit.name" = "My Name";
 "profile.edit.name.placeholder" = "Enter your name";
-"profile.edit.date.of.birth" = "Date of Birth";
+"profile.edit.date.of.birth" = "My Date of Birth";
 "profile.edit.my.age" = "My Age: %@";
 "profile.edit.loading" = "Loading profile...";
 "profile.edit.saving" = "Saving...";
@@ -296,21 +307,21 @@
 "profile.edit.about.me" = "About Me";
 "profile.edit.character.counter.min" = "Min: %@ Max: 500";
 "profile.edit.character.counter.max" = "Max: %@";
-"profile.edit.interests" = "Interests";
+"profile.edit.interests" = "My Interests";
 "profile.edit.photos" = "Photos";
 "profile.edit.gender" = "Gender";
-"profile.edit.i.am" = "I am";
+"profile.edit.i.am" = "I Am";
 "profile.edit.gender.man" = "Man";
 "profile.edit.gender.woman" = "Woman";
 "profile.edit.gender.nonbinary" = "Non-binary";
-"profile.edit.interested.in" = "Interested in";
+"profile.edit.interested.in" = "I'm Interested In";
 "profile.edit.interested.anyone" = "Anyone";
-"profile.edit.looking.for" = "Looking for";
+"profile.edit.looking.for" = "I'm Looking For";
 "profile.edit.looking.friendship" = "Friendship";
 "profile.edit.looking.relationship" = "Relationship";
-"profile.edit.looking.not.sure" = "Not sure yet";
-"profile.edit.preferred.age" = "Preferred Age";
-"profile.edit.energy.level" = "Energy level today";
+"profile.edit.looking.not.sure" = "Not Sure Yet";
+"profile.edit.preferred.age" = "My Preferred Age";
+"profile.edit.energy.level" = "My Energy Level Today";
 "profile.edit.energy.quiet.calm" = "Quiet and Calm";
 "profile.edit.energy.soft.steady" = "Soft and Steady";
 "profile.edit.energy.balanced" = "Balanced Energy";
@@ -321,7 +332,7 @@
 "profile.edit.add.photo" = "Add Photo";
 "profile.edit.add" = "Add";
 "profile.edit.remove.photo" = "Remove Photo";
-"profile.edit.profile.photo" = "Profile Photo";
+"profile.edit.profile.photo" = "My Profile Photo";
 "profile.edit.profile.incomplete" = "Profile Incomplete";
 "profile.edit.validation.full.name" = "Enter your full name";
 "profile.edit.validation.age" = "You must be 18 years or older";
@@ -332,6 +343,8 @@
 "profile.edit.validation.gender" = "Select your gender";
 "profile.edit.validation.interested.in" = "Select who you're interested in";
 "profile.edit.validation.looking.for" = "Select what you're looking for";
+"profile.edit.validation.ideal.first.date" = "Select at least 1 ideal first date";
+"profile.edit.validation.sensory.preferences" = "Select at least 1 sensory preference";
 "profile.edit.error.updating" = "Error updating profile: %@";
 "profile.edit.gallery.photos" = "Gallery Photos";
 "profile.edit.search.address" = "Search Address";
@@ -340,6 +353,7 @@
 "common.ok" = "OK";
 "common.cancel" = "Cancel";
 "common.close" = "Close";
+"common.got.it" = "Got it";
 "common.save" = "Save";
 "common.edit" = "Edit";
 "common.delete" = "Delete";
@@ -360,17 +374,19 @@
 "profile.edit.lifestyle.family" = "I live with family or support staff";
 "profile.edit.lifestyle.assisted" = "I live in a shared or assisted setting";
 "profile.edit.lifestyle.prefer.not" = "Prefer not to share";
-"profile.edit.share.lifestyle" = "Share lifestyle";
-"profile.edit.share.body.type" = "Share body type";
-"profile.edit.ideal.first.date" = "Ideal First Date";
+"profile.edit.share.lifestyle" = "Share Lifestyle";
+"profile.edit.share.body.type" = "Share Body Type";
+"profile.edit.ideal.first.date" = "My Ideal First Date";
 "profile.edit.ideal.date.relaxing.park.walk" = "Relaxing Park Walk";
 "profile.edit.ideal.date.cozy.cafe.meet" = "Cozy Café Meet";
 "profile.edit.ideal.date.museum.gallery.stroll" = "Museum or Gallery Stroll";
 "profile.edit.ideal.date.cinema.movie.night" = "Cinema Movie Night";
 "profile.edit.ideal.date.friendly.video.chat" = "Friendly Video Chat";
 "profile.ideal.first.date" = "Ideal First Date";
-"profile.edit.sensory.preferences" = "Sensory Preferences";
+"profile.edit.sensory.preferences" = "My Sensory Preferences";
 "profile.sensory.preferences" = "Sensory Preferences";
+"profile.my.ideal.first.date" = "My Ideal First Date";
+"profile.my.sensory.preferences" = "My Sensory Preferences";
 "profile.sensory.low.noise.title" = "Low-noise environments";
 "profile.sensory.low.noise.subtitle" = "Prefers quiet spaces, low-volume music, or peaceful outdoor spots";
 "profile.sensory.dim.lighting.title" = "Dim / soft lighting";
@@ -392,6 +408,8 @@
 "profile.sensory.clear.touch.title" = "Deep-pressure / clear touch";
 "profile.sensory.clear.touch.subtitle" = "Prefers firm physical contact or clear verbal consent over unexpected light touches";
 "profile.body.type" = "Body type";
+"profile.my.body.type" = "My Body Type";
+"profile.edit.body.type.prefer.not" = "Prefer not to share";
 "profile.edit.body.type.slim" = "Slim";
 "profile.edit.body.type.average" = "Average";
 "profile.edit.body.type.athletic" = "Athletic";
@@ -418,3 +436,4 @@
 "profile.edit.interest.volunteering" = "Volunteering";
 
 "profile.lifestyle.title" = "Lifestyle";
+"profile.my.lifestyle.title" = "My Lifestyle";

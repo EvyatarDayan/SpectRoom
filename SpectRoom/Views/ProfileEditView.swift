@@ -99,12 +99,15 @@ struct ProfileEditView: View {
     }
     
     private enum LifestyleOption: String, CaseIterable {
+        case preferNot
         case independent
         case familySupport
         case assistedSetting
         
         var title: String {
             switch self {
+            case .preferNot:
+                return "profile.edit.lifestyle.prefer.not".localized
             case .independent:
                 return "profile.edit.lifestyle.independent".localized
             case .familySupport:
@@ -116,6 +119,7 @@ struct ProfileEditView: View {
     }
     
     private enum BodyTypeOption: String, CaseIterable {
+        case preferNot
         case slim
         case average
         case athletic
@@ -123,6 +127,8 @@ struct ProfileEditView: View {
         
         var title: String {
             switch self {
+            case .preferNot:
+                return "profile.edit.body.type.prefer.not".localized
             case .slim:
                 return "profile.edit.body.type.slim".localized
             case .average:
@@ -168,15 +174,12 @@ struct ProfileEditView: View {
     @State private var alertMessage = ""
     @State private var hasAttemptedSave = false
     @State private var showingAddressSearch = false
-    @State private var selectedLifestyle = ""
+    @State private var selectedLifestyle = LifestyleOption.preferNot.rawValue
     @State private var isDataLoaded = false // Track when profile data is loaded
-    @State private var shareLifestyle = false
-    @State private var shareBodyType = false
-    @State private var selectedBodyType: String = ""
-    @State private var shareIdealFirstDate = false
+    @State private var selectedBodyType: String = BodyTypeOption.preferNot.rawValue
     @State private var selectedIdealFirstDate: [String] = []
-    @State private var shareSensoryPreferences = false
     @State private var selectedSensoryPreferences: [String] = []
+    @State private var sensoryInfoOption: SensoryPreferenceOption? = nil
     @State private var isDatePickerExpanded = false
     
     var body: some View {
@@ -207,6 +210,18 @@ struct ProfileEditView: View {
                         
                         // About Me Section
                         aboutMeSection
+                        
+                        // Lifestyle Section
+                        lifestyleSection
+                        
+                        // Body Type Section
+                        bodyTypeSection
+                        
+                        // Ideal First Date Section
+                        idealFirstDateSection
+                        
+                        // Sensory Preferences Section
+                        sensoryPreferencesSection
                         
                         // My Interests Section
                         myInterestsSection
@@ -317,6 +332,19 @@ struct ProfileEditView: View {
             Button("common.ok".localized) { }
         } message: {
             Text(alertMessage)
+        }
+        .alert(
+            sensoryInfoOption?.title ?? "",
+            isPresented: Binding(
+                get: { sensoryInfoOption != nil },
+                set: { if !$0 { sensoryInfoOption = nil } }
+            )
+        ) {
+            Button("common.got.it".localized) {
+                sensoryInfoOption = nil
+            }
+        } message: {
+            Text(sensoryInfoOption?.subtitle ?? "")
         }
         .overlay {
             if isLoading {
@@ -559,268 +587,31 @@ struct ProfileEditView: View {
     
     // MARK: - About Me Section
     private var aboutMeSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("profile.edit.about.me".localized)
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    TextEditor(text: bioTextBinding)
-                        .frame(height: 200)
-                        .foregroundColor(.primary)
-                        .scrollContentBackground(.hidden)
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(Color.blue.opacity(0.08))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
-                        )
-                    
-                    // Character counter
-                    HStack {
-                        Spacer()
-                        Text(characterCounterText)
-                            .font(.caption)
-                            .foregroundColor(bio.count >= 500 ? .red : .secondary)
-                    }
-                }
-            }
+        VStack(alignment: .leading, spacing: 12) {
+            Text("profile.edit.about.me".localized)
+                .font(.headline)
+                .fontWeight(.semibold)
             
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                TextEditor(text: bioTextBinding)
+                    .frame(height: 200)
+                    .foregroundColor(.primary)
+                    .scrollContentBackground(.hidden)
+                    .padding()
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color.blue.opacity(0.08))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
+                    )
+                
                 HStack {
-                    Text("profile.edit.share.lifestyle".localized)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    
                     Spacer()
-                    
-                    Toggle("", isOn: $shareLifestyle)
-                        .labelsHidden()
-                        .scaleEffect(0.8)
-                        .frame(width: 42, height: 26)
-                }
-                
-                if shareLifestyle {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(LifestyleOption.allCases, id: \.self) { option in
-                            Button(action: {
-                                selectedLifestyle = option.rawValue
-                            }) {
-                                HStack(spacing: 12) {
-                                    Image(systemName: selectedLifestyle == option.rawValue ? "largecircle.fill.circle" : "circle")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(.blue)
-                                    Text(option.title)
-                                        .foregroundColor(.primary)
-                                }
-                                .padding(.vertical, 6)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(LifestyleOption.allCases, id: \.self) { option in
-                            HStack(spacing: 12) {
-                                Image(systemName: "circle")
-                                    .font(.system(size: 18))
-                                    .foregroundColor(.gray.opacity(0.5))
-                                Text(option.title)
-                                    .foregroundColor(.gray.opacity(0.5))
-                            }
-                            .padding(.vertical, 6)
-                        }
-                    }
-                }
-            }
-            
-            Divider()
-                .frame(height: 2)
-                .background(Color.gray.opacity(0.3))
-                .padding(.vertical, 8)
-            
-            // Share Body Type Section
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("profile.edit.share.body.type".localized)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    
-                    Spacer()
-                    
-                    Toggle("", isOn: $shareBodyType)
-                        .labelsHidden()
-                        .scaleEffect(0.8)
-                        .frame(width: 42, height: 26)
-                }
-                
-                if shareBodyType {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(BodyTypeOption.allCases, id: \.self) { option in
-                            Button(action: {
-                                selectedBodyType = option.rawValue
-                            }) {
-                                HStack(spacing: 12) {
-                                    Image(systemName: selectedBodyType == option.rawValue ? "largecircle.fill.circle" : "circle")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(.blue)
-                                    Text(option.title)
-                                        .foregroundColor(.primary)
-                                }
-                                .padding(.vertical, 6)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(BodyTypeOption.allCases, id: \.self) { option in
-                            HStack(spacing: 12) {
-                                Image(systemName: "circle")
-                                    .font(.system(size: 18))
-                                    .foregroundColor(.gray.opacity(0.5))
-                                Text(option.title)
-                                    .foregroundColor(.gray.opacity(0.5))
-                            }
-                            .padding(.vertical, 6)
-                        }
-                    }
-                }
-            }
-            
-            Divider()
-                .frame(height: 2)
-                .background(Color.gray.opacity(0.3))
-                .padding(.vertical, 8)
-            
-            // Ideal First Date Section
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("profile.edit.ideal.first.date".localized)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    
-                    Spacer()
-                    
-                    Toggle("", isOn: $shareIdealFirstDate)
-                        .labelsHidden()
-                        .scaleEffect(0.8)
-                        .frame(width: 42, height: 26)
-                }
-                
-                if shareIdealFirstDate {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(IdealFirstDateOption.allCases, id: \.self) { option in
-                            Button(action: {
-                                if selectedIdealFirstDate.contains(option.rawValue) {
-                                    selectedIdealFirstDate.removeAll { $0 == option.rawValue }
-                                } else {
-                                    selectedIdealFirstDate.append(option.rawValue)
-                                }
-                            }) {
-                                HStack(spacing: 12) {
-                                    Image(systemName: selectedIdealFirstDate.contains(option.rawValue) ? "checkmark.square.fill" : "square")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(.blue)
-                                    Text(option.title)
-                                        .foregroundColor(.primary)
-                                }
-                                .padding(.vertical, 6)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(IdealFirstDateOption.allCases, id: \.self) { option in
-                            HStack(spacing: 12) {
-                                Image(systemName: "square")
-                                    .font(.system(size: 18))
-                                    .foregroundColor(.gray.opacity(0.5))
-                                Text(option.title)
-                                    .foregroundColor(.gray.opacity(0.5))
-                            }
-                            .padding(.vertical, 6)
-                        }
-                    }
-                }
-            }
-            
-            Divider()
-                .frame(height: 2)
-                .background(Color.gray.opacity(0.3))
-                .padding(.vertical, 8)
-            
-            // Sensory Preferences Section
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("profile.edit.sensory.preferences".localized)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    
-                    Spacer()
-                    
-                    Toggle("", isOn: $shareSensoryPreferences)
-                        .labelsHidden()
-                        .scaleEffect(0.8)
-                        .frame(width: 42, height: 26)
-                }
-                
-                if shareSensoryPreferences {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(SensoryPreferenceOption.allCases, id: \.self) { option in
-                            Button(action: {
-                                if selectedSensoryPreferences.contains(option.rawValue) {
-                                    selectedSensoryPreferences.removeAll { $0 == option.rawValue }
-                                } else {
-                                    selectedSensoryPreferences.append(option.rawValue)
-                                }
-                            }) {
-                                HStack(alignment: .top, spacing: 12) {
-                                    Image(systemName: selectedSensoryPreferences.contains(option.rawValue) ? "checkmark.square.fill" : "square")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(.blue)
-                                        .padding(.top, 2)
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(option.title)
-                                            .foregroundColor(.primary)
-                                            .multilineTextAlignment(.leading)
-                                        Text(option.subtitle)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                            .multilineTextAlignment(.leading)
-                                    }
-                                }
-                                .padding(.vertical, 6)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(SensoryPreferenceOption.allCases, id: \.self) { option in
-                            HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: "square")
-                                    .font(.system(size: 18))
-                                    .foregroundColor(.gray.opacity(0.5))
-                                    .padding(.top, 2)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(option.title)
-                                        .foregroundColor(.gray.opacity(0.5))
-                                        .multilineTextAlignment(.leading)
-                                    Text(option.subtitle)
-                                        .font(.caption)
-                                        .foregroundColor(.gray.opacity(0.4))
-                                        .multilineTextAlignment(.leading)
-                                }
-                            }
-                            .padding(.vertical, 6)
-                        }
-                    }
+                    Text(characterCounterText)
+                        .font(.caption)
+                        .foregroundColor(bio.count >= 500 ? .red : .secondary)
                 }
             }
         }
@@ -832,10 +623,133 @@ struct ProfileEditView: View {
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
     
+    // MARK: - Lifestyle Section
+    private var lifestyleSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("profile.my.lifestyle.title".localized)
+                .font(.headline)
+                .fontWeight(.semibold)
+            
+            VStack(spacing: 10) {
+                ForEach(LifestyleOption.allCases, id: \.self) { option in
+                    ProfileSelectionChip(
+                        title: option.title,
+                        isSelected: selectedLifestyle == option.rawValue
+                    ) {
+                        selectedLifestyle = option.rawValue
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+    }
+    
+    // MARK: - Body Type Section
+    private var bodyTypeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("profile.my.body.type".localized)
+                .font(.headline)
+                .fontWeight(.semibold)
+            
+            VStack(spacing: 10) {
+                ForEach(BodyTypeOption.allCases, id: \.self) { option in
+                    ProfileSelectionChip(
+                        title: option.title,
+                        isSelected: selectedBodyType == option.rawValue
+                    ) {
+                        selectedBodyType = option.rawValue
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+    }
+    
+    // MARK: - Ideal First Date Section
+    private var idealFirstDateSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("profile.edit.ideal.first.date".localized)
+                .font(.headline)
+                .fontWeight(.semibold)
+            
+            VStack(spacing: 10) {
+                ForEach(IdealFirstDateOption.allCases, id: \.self) { option in
+                    ProfileSelectionChip(
+                        title: option.title,
+                        isSelected: selectedIdealFirstDate.contains(option.rawValue)
+                    ) {
+                        if selectedIdealFirstDate.contains(option.rawValue) {
+                            selectedIdealFirstDate.removeAll { $0 == option.rawValue }
+                        } else {
+                            selectedIdealFirstDate.append(option.rawValue)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(12)
+        .overlay(validationFrame(isValid: isIdealFirstDateValid))
+        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+    }
+    
+    // MARK: - Sensory Preferences Section
+    private var sensoryPreferencesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("profile.edit.sensory.preferences".localized)
+                .font(.headline)
+                .fontWeight(.semibold)
+            
+            VStack(spacing: 10) {
+                ForEach(SensoryPreferenceOption.allCases, id: \.self) { option in
+                    HStack(spacing: 10) {
+                        ProfileSelectionChip(
+                            title: option.title,
+                            isSelected: selectedSensoryPreferences.contains(option.rawValue)
+                        ) {
+                            if selectedSensoryPreferences.contains(option.rawValue) {
+                                selectedSensoryPreferences.removeAll { $0 == option.rawValue }
+                            } else {
+                                selectedSensoryPreferences.append(option.rawValue)
+                            }
+                        }
+                        
+                        Button {
+                            sensoryInfoOption = option
+                        } label: {
+                            Image(systemName: "exclamationmark.circle")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundColor(.blue)
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(option.subtitle)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(12)
+        .overlay(validationFrame(isValid: isSensoryPreferencesValid))
+        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+    }
+    
     // MARK: - Gender & Preferences Section
     private var genderPreferencesSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("profile.preferences".localized)
+            Text("profile.my.preferences".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
             
@@ -1146,6 +1060,30 @@ struct ProfileEditView: View {
         return !selectedInterestedIn.isEmpty
     }
     
+    private var isIdealFirstDateValid: Bool {
+        return !selectedIdealFirstDate.isEmpty
+    }
+    
+    private var isSensoryPreferencesValid: Bool {
+        return !selectedSensoryPreferences.isEmpty
+    }
+    
+    private var isSharingBodyType: Bool {
+        selectedBodyType != BodyTypeOption.preferNot.rawValue && !selectedBodyType.isEmpty
+    }
+    
+    private var bodyTypeToSave: String {
+        isSharingBodyType ? selectedBodyType : ""
+    }
+    
+    private var isSharingLifestyle: Bool {
+        selectedLifestyle != LifestyleOption.preferNot.rawValue && !selectedLifestyle.isEmpty
+    }
+    
+    private var lifestyleToSave: String {
+        isSharingLifestyle ? selectedLifestyle : ""
+    }
+    
     // MARK: - Character Counter Text
     private var characterCounterText: String {
         let currentCount = bio.count
@@ -1184,7 +1122,7 @@ struct ProfileEditView: View {
         let newMin = max(absoluteAgeMin, min(proposed, absoluteAgeMax))
         
         if preferredAgeMax - newMin > maxPreferredAgeSpan {
-            // Dragging min left past the 12-year window — slide max with it
+            // Dragging min left past the 12-year window - slide max with it
             let newMax = newMin + maxPreferredAgeSpan
             if newMax > absoluteAgeMax {
                 preferredAgeMax = absoluteAgeMax
@@ -1204,7 +1142,7 @@ struct ProfileEditView: View {
         let newMax = max(absoluteAgeMin, min(proposed, absoluteAgeMax))
         
         if newMax - preferredAgeMin > maxPreferredAgeSpan {
-            // Dragging max right past the 12-year window — slide min with it
+            // Dragging max right past the 12-year window - slide min with it
             let newMin = newMax - maxPreferredAgeSpan
             if newMin < absoluteAgeMin {
                 preferredAgeMin = absoluteAgeMin
@@ -1267,24 +1205,24 @@ struct ProfileEditView: View {
             locationLatitude = user.location.latitude
             locationLongitude = user.location.longitude
             bio = user.bio
-            // Handle migration from "preferNot" to empty string
-            if user.lifestyle == "preferNot" || user.lifestyle.isEmpty {
-                selectedLifestyle = ""
+            // Handle migration from "preferNot" / empty / not shared
+            if !user.shareLifestyle || user.lifestyle == "preferNot" || user.lifestyle.isEmpty {
+                selectedLifestyle = LifestyleOption.preferNot.rawValue
             } else {
                 selectedLifestyle = user.lifestyle
             }
-            shareLifestyle = user.shareLifestyle
-            selectedBodyType = user.bodyType
-            shareBodyType = user.shareBodyType
+            if !user.shareBodyType || user.bodyType.isEmpty || user.bodyType == "preferNot" {
+                selectedBodyType = BodyTypeOption.preferNot.rawValue
+            } else {
+                selectedBodyType = user.bodyType
+            }
             selectedIdealFirstDate = user.idealFirstDate
-            shareIdealFirstDate = user.shareIdealFirstDate
             selectedSensoryPreferences = user.sensoryPreferences
-            shareSensoryPreferences = user.shareSensoryPreferences
             
-            print("🔍 ProfileEditView - Loaded lifestyle: \(selectedLifestyle), shareLifestyle: \(shareLifestyle)")
-            print("🔍 ProfileEditView - Loaded bodyType: \(selectedBodyType), shareBodyType: \(shareBodyType)")
-            print("🔍 ProfileEditView - Loaded idealFirstDate: \(selectedIdealFirstDate), shareIdealFirstDate: \(shareIdealFirstDate)")
-            print("🔍 ProfileEditView - Loaded sensoryPreferences: \(selectedSensoryPreferences), shareSensoryPreferences: \(shareSensoryPreferences)")
+            print("🔍 ProfileEditView - Loaded lifestyle: \(selectedLifestyle)")
+            print("🔍 ProfileEditView - Loaded bodyType: \(selectedBodyType)")
+            print("🔍 ProfileEditView - Loaded idealFirstDate: \(selectedIdealFirstDate)")
+            print("🔍 ProfileEditView - Loaded sensoryPreferences: \(selectedSensoryPreferences)")
             
             // Load interests from database
             let previousInterests = selectedInterests
@@ -1393,7 +1331,7 @@ struct ProfileEditView: View {
             gender = ""
             selectedInterestedIn = []
             existingPhotos = []
-            selectedLifestyle = ""
+            selectedLifestyle = LifestyleOption.preferNot.rawValue
         }
     }
     
@@ -1407,7 +1345,7 @@ struct ProfileEditView: View {
     
     // MARK: - Validation Functions
     private func isFormValid() -> Bool {
-        return isNameValid && isAgeValid && isLocationValid && isBioValid && isPhotosValid && isInterestsValid && isGenderValid && isInterestedInValid && isLookingForValid
+        return isNameValid && isAgeValid && isLocationValid && isBioValid && isPhotosValid && isInterestsValid && isGenderValid && isInterestedInValid && isLookingForValid && isIdealFirstDateValid && isSensoryPreferencesValid
     }
     
     private func getValidationErrors() -> [String] {
@@ -1447,6 +1385,14 @@ struct ProfileEditView: View {
         
         if !isLookingForValid {
             errors.append("profile.edit.validation.looking.for".localized)
+        }
+        
+        if !isIdealFirstDateValid {
+            errors.append("profile.edit.validation.ideal.first.date".localized)
+        }
+        
+        if !isSensoryPreferencesValid {
+            errors.append("profile.edit.validation.sensory.preferences".localized)
         }
         
         return errors
@@ -1569,14 +1515,14 @@ struct ProfileEditView: View {
                         latitude: locationLatitude,
                         longitude: locationLongitude
                     )
-                    user.lifestyle = selectedLifestyle
-                    user.shareLifestyle = shareLifestyle
-                    user.bodyType = selectedBodyType
-                    user.shareBodyType = shareBodyType
+                    user.lifestyle = lifestyleToSave
+                    user.shareLifestyle = isSharingLifestyle
+                    user.bodyType = bodyTypeToSave
+                    user.shareBodyType = isSharingBodyType
                     user.idealFirstDate = selectedIdealFirstDate
-                    user.shareIdealFirstDate = shareIdealFirstDate
+                    user.shareIdealFirstDate = true
                     user.sensoryPreferences = selectedSensoryPreferences
-                    user.shareSensoryPreferences = shareSensoryPreferences
+                    user.shareSensoryPreferences = true
                     
                     // Update profile photo URL only if a new one was selected
                     if let newProfilePhotoURL = newProfilePhotoURL {
@@ -1623,14 +1569,14 @@ struct ProfileEditView: View {
                         lookingFor: finalLookingFor,
                         preferredAgeMin: Int(preferredAgeMin),
                         preferredAgeMax: Int(preferredAgeMax),
-                        lifestyle: selectedLifestyle,
-                        shareLifestyle: shareLifestyle,
-                        bodyType: selectedBodyType,
-                        shareBodyType: shareBodyType,
+                        lifestyle: lifestyleToSave,
+                        shareLifestyle: isSharingLifestyle,
+                        bodyType: bodyTypeToSave,
+                        shareBodyType: isSharingBodyType,
                         idealFirstDate: selectedIdealFirstDate,
-                        shareIdealFirstDate: shareIdealFirstDate,
+                        shareIdealFirstDate: true,
                         sensoryPreferences: selectedSensoryPreferences,
-                        shareSensoryPreferences: shareSensoryPreferences,
+                        shareSensoryPreferences: true,
                         energyLevel: energyLevel
                     )
                     newUser.profilePhotoURL = newProfilePhotoURL
@@ -1644,7 +1590,7 @@ struct ProfileEditView: View {
                 let interestsArray = Array(selectedInterests)
                 // Handle gender (directly use selected value, no custom text)
                 let finalGender = gender
-                let finalLifestyleValue = selectedLifestyle
+                let finalLifestyleValue = lifestyleToSave
                 print("🔍 ProfileEditView - Saving interests to Firebase: \(interestsArray)")
                 print("🔍 ProfileEditView - Interests count: \(interestsArray.count)")
                 print("🔍 ProfileEditView - Saving gender: \(finalGender)")
@@ -1676,13 +1622,13 @@ struct ProfileEditView: View {
                     "preferredAgeMin": Int(preferredAgeMin),
                     "preferredAgeMax": Int(preferredAgeMax),
                     "lifestyle": finalLifestyleValue,
-                    "shareLifestyle": shareLifestyle,
-                    "bodyType": selectedBodyType,
-                    "shareBodyType": shareBodyType,
+                    "shareLifestyle": isSharingLifestyle,
+                    "bodyType": bodyTypeToSave,
+                    "shareBodyType": isSharingBodyType,
                     "idealFirstDate": selectedIdealFirstDate,
-                    "shareIdealFirstDate": shareIdealFirstDate,
+                    "shareIdealFirstDate": true,
                     "sensoryPreferences": selectedSensoryPreferences,
-                    "shareSensoryPreferences": shareSensoryPreferences,
+                    "shareSensoryPreferences": true,
                     "energyLevel": energyLevel,
                     "location": [
                         "displayString": location,

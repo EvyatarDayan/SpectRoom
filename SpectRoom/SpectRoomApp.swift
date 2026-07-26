@@ -94,7 +94,7 @@ struct SpectRoomApp: App {
                         .environmentObject(appState)
                 }
             } else if appState.hasCompletedOnboarding {
-                // Skip welcome — either completed with "Don't show again", or mid-session after Get Started
+                // Skip welcome - either completed with "Don't show again", or mid-session after Get Started
                 AuthenticationView()
                     .environmentObject(appState)
             } else {

@@ -112,7 +112,7 @@ struct MatchDisplay: Identifiable {
     }
 }
 
-struct ProfileCard {
+struct ProfileCard: Codable {
     let userId: String // Firebase UID
     let name: String
     let age: Int

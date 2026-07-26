@@ -225,7 +225,7 @@ struct ProfileView: View {
         )
         
         return VStack(alignment: .leading, spacing: 14) {
-            Text("profile.edit.energy.level".localized)
+            Text("profile.my.energy.level".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
                 .foregroundColor(.blue)
@@ -280,7 +280,7 @@ struct ProfileView: View {
             }
             
             if let user = appState.currentUser, user.shareLifestyle {
-                Text("profile.lifestyle.title".localized)
+                Text("profile.my.lifestyle.title".localized)
                     .font(.headline)
                     .fontWeight(.semibold)
                     .foregroundColor(.blue)
@@ -290,7 +290,7 @@ struct ProfileView: View {
             }
             
             if let user = appState.currentUser, user.shareBodyType, !user.bodyType.isEmpty {
-                Text("profile.body.type".localized)
+                Text("profile.my.body.type".localized)
                     .font(.headline)
                     .fontWeight(.semibold)
                     .foregroundColor(.blue)
@@ -299,8 +299,8 @@ struct ProfileView: View {
                     .foregroundColor(.primary)
             }
             
-            if let user = appState.currentUser, user.shareIdealFirstDate, !user.idealFirstDate.isEmpty {
-                Text("profile.ideal.first.date".localized)
+            if let user = appState.currentUser, !user.idealFirstDate.isEmpty {
+                Text("profile.my.ideal.first.date".localized)
                     .font(.headline)
                     .fontWeight(.semibold)
                     .foregroundColor(.blue)
@@ -309,8 +309,8 @@ struct ProfileView: View {
                     .foregroundColor(.primary)
             }
             
-            if let user = appState.currentUser, user.shareSensoryPreferences, !user.sensoryPreferences.isEmpty {
-                Text("profile.sensory.preferences".localized)
+            if let user = appState.currentUser, !user.sensoryPreferences.isEmpty {
+                Text("profile.my.sensory.preferences".localized)
                     .font(.headline)
                     .fontWeight(.semibold)
                     .foregroundColor(.blue)
@@ -358,7 +358,7 @@ struct ProfileView: View {
     // MARK: - Gender & Preferences Section
     private var genderPreferencesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("profile.preferences".localized)
+            Text("profile.my.preferences".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
                 .foregroundColor(.blue)
@@ -420,7 +420,7 @@ struct ProfileView: View {
                     
                     // Preferred age display (only show if different from default range)
                     if hasCustomPreferredAge {
-                        Text(String(format: "profile.preferred.age".localized, "\(user.preferredAgeMin)", "\(user.preferredAgeMax)"))
+                        Text(String(format: "profile.my.preferred.age".localized, "\(user.preferredAgeMin)", "\(user.preferredAgeMax)"))
                             .font(.body)
                             .foregroundColor(.primary)
                             .italic()

@@ -1408,7 +1408,7 @@ struct MessageConversationModal: View {
                                     conversationMessages: conversationMessages,
                                     isLongMessageExpanded: expandedLongMessageIds.contains(msg.id),
                                     onExpandLongMessage: {
-                                        // Expand in place — do not scroll; user continues reading from here.
+                                        // Expand in place - do not scroll; user continues reading from here.
                                         shouldScrollToBottom = false
                                         var transaction = Transaction()
                                         transaction.disablesAnimations = true
@@ -1498,7 +1498,7 @@ struct MessageConversationModal: View {
             do {
                 let profile = try await FirebaseAuthService.shared.fetchUserProfile(for: userId)
                 await MainActor.run {
-                    // Only set if still needed — avoid clobbering a newer fetch from tap.
+                    // Only set if still needed - avoid clobbering a newer fetch from tap.
                     if otherUserProfile == nil {
                         otherUserProfile = profile
                     }
@@ -1874,7 +1874,7 @@ struct MessageConversationModal: View {
                     }
                     
                     previousMessageCount = oldCount + uniqueNew.count
-                    // Tip: newer messages often arrive right after open — keep scrolling to the end.
+                    // Tip: newer messages often arrive right after open - keep scrolling to the end.
                     keyboardScrollToken += 1
                 }
                 return
@@ -2905,7 +2905,7 @@ private struct ChatBubbleShape: Shape {
                 clockwise: false
             )
         } else {
-            // Top edge (incoming — nozzle on bottom-left)
+            // Top edge (incoming - nozzle on bottom-left)
             path.move(to: CGPoint(x: r + tail, y: 0))
             path.addLine(to: CGPoint(x: rect.maxX - r, y: 0))
             // Top-right

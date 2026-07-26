@@ -87,7 +87,7 @@ struct MessageComposerBar: View {
                             if pressing {
                                 didArmLongPressRecording = false
                             } else if didArmLongPressRecording {
-                                // Recording continues in the bottom sheet — stop from there.
+                                // Recording continues in the bottom sheet - stop from there.
                                 didArmLongPressRecording = false
                             } else {
                                 onShortMicTap()

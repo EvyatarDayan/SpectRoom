@@ -287,7 +287,7 @@ private extension MatchesView {
             texts.append(formattedBodyType(profile.bodyType))
         }
         
-        if profile.shareIdealFirstDate, !profile.idealFirstDate.isEmpty {
+        if !profile.idealFirstDate.isEmpty {
             texts.append(formattedIdealFirstDate(profile.idealFirstDate))
         }
         

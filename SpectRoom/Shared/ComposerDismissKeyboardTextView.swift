@@ -129,7 +129,7 @@ struct ComposerDismissKeyboardTextView: UIViewRepresentable {
             shouldChangeTextIn range: NSRange,
             replacementText text: String
         ) -> Bool {
-            // Native Done key sends "\n" — use it to hide the keyboard.
+            // Native Done key sends "\n" - use it to hide the keyboard.
             if text == "\n" {
                 parent.isFocused = false
                 textView.resignFirstResponder()

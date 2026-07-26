@@ -16,7 +16,7 @@ enum ProfilePhotoStyle {
     static let cardShadow = Color.black.opacity(0.12)
 }
 
-/// Large primary profile photo — full-bleed rounded card.
+/// Large primary profile photo - full-bleed rounded card.
 struct ProfileMainPhotoCard: View {
     let imageURL: String?
     let localImage: UIImage?

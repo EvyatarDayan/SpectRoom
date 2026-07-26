@@ -170,7 +170,7 @@ struct AddressSearchView: View {
                     }
                 }
                 
-                // Map — Sweden by default, zooms to selected address
+                // Map - Sweden by default, zooms to selected address
                 ZStack(alignment: .topLeading) {
                     Map(coordinateRegion: $mapRegion, annotationItems: mapAnnotations) { annotation in
                         MapAnnotation(coordinate: annotation.coordinate) {

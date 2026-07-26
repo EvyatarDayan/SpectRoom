@@ -412,6 +412,7 @@ struct OnboardingPageView: View {
                         currentImageName: staticImageName,
                         imageNames: OnboardingImageCarousel.stepImageNames
                     )
+                    .padding(.top, 20)
                 } else {
                     // Reserves the same space as the photo so layout/text sizing stay unchanged
                     Color.clear
@@ -419,6 +420,7 @@ struct OnboardingPageView: View {
                             width: WelcomeSlideshowController.imageSize,
                             height: WelcomeSlideshowController.imageSize
                         )
+                        .padding(.top, 20)
                         .anchorPreference(
                             key: WelcomeSlideshowAnchorKey.self,
                             value: .bounds
@@ -426,7 +428,7 @@ struct OnboardingPageView: View {
                 }
             }
             
-            // Text content — original sizes
+            // Text content - original sizes
             VStack(spacing: page.showsImage ? 40 : 50) {
                 if let step = page.step {
                     Text(step)
@@ -461,7 +463,11 @@ struct OnboardingPageView: View {
                 
                 Text(page.description)
                     .font(.body)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Color(UIColor { traits in
+                        traits.userInterfaceStyle == .dark
+                            ? UIColor(white: 0.78, alpha: 1)
+                            : UIColor(white: 0.28, alpha: 1)
+                    }))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
                     .lineSpacing(4)
@@ -484,7 +490,7 @@ struct OnboardingPageView: View {
     
     /// Taller notice on large phones (e.g. iPhone 15 Plus / Pro Max).
     private var noticeMaxHeight: CGFloat {
-        UIScreen.main.bounds.height >= 900 ? 400 : 180
+        UIScreen.main.bounds.height >= 900 ? 380 : 180
     }
     
     @ViewBuilder

@@ -207,7 +207,7 @@ struct CustomFooterMenu: View {
                 Spacer()
                     .frame(width: 64) // Space for Discover button
                 
-                // Profile button — tap again while open returns to Home
+                // Profile button - tap again while open returns to Home
                 Button(action: {
                     selectedTab = selectedTab == 3 ? 2 : 3
                 }) {

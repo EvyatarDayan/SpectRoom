@@ -8,6 +8,125 @@
 import SwiftUI
 import Foundation
 
+/// Tracks how many discover like/pass actions each account has used today (local day).
+enum DiscoverDailyLimit {
+    static let maxSwipesPerDay = 10
+    private static let legacyDateKey = "discoverDailySwipeDate"
+    private static let legacyCountKey = "discoverDailySwipeCount"
+    
+    private static var todayKey: String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar.current
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
+    }
+    
+    /// Prefer Firebase uid; fall back to email so the quota is per account, not per device.
+    private static var accountKey: String? {
+        if let uid = FirebaseAuthService.shared.auth.currentUser?.uid, !uid.isEmpty {
+            return uid
+        }
+        if let email = FirebaseAuthService.shared.auth.currentUser?.email?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+           !email.isEmpty {
+            return email
+        }
+        return nil
+    }
+    
+    private static func dateStorageKey(for accountKey: String) -> String {
+        "discoverDailySwipeDate_\(accountKey)"
+    }
+    
+    private static func countStorageKey(for accountKey: String) -> String {
+        "discoverDailySwipeCount_\(accountKey)"
+    }
+    
+    private static func clearLegacyDeviceKeys() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: legacyDateKey)
+        defaults.removeObject(forKey: legacyCountKey)
+    }
+    
+    private static func secondThoughtsStorageKey(for accountKey: String) -> String {
+        "discoverSecondThoughtsUsed_\(accountKey)"
+    }
+    
+    private static func secondThoughtsDateStorageKey(for accountKey: String) -> String {
+        "discoverSecondThoughtsDate_\(accountKey)"
+    }
+    
+    static func currentCount() -> Int {
+        clearLegacyDeviceKeys()
+        guard let accountKey else { return 0 }
+        
+        let defaults = UserDefaults.standard
+        let dateKey = dateStorageKey(for: accountKey)
+        let countKey = countStorageKey(for: accountKey)
+        
+        if defaults.string(forKey: dateKey) != todayKey {
+            defaults.set(todayKey, forKey: dateKey)
+            defaults.set(0, forKey: countKey)
+            defaults.set(todayKey, forKey: secondThoughtsDateStorageKey(for: accountKey))
+            defaults.set(false, forKey: secondThoughtsStorageKey(for: accountKey))
+            return 0
+        }
+        return defaults.integer(forKey: countKey)
+    }
+    
+    @discardableResult
+    static func recordSwipe() -> Int {
+        clearLegacyDeviceKeys()
+        guard let accountKey else { return 0 }
+        
+        let count = currentCount() + 1
+        let defaults = UserDefaults.standard
+        defaults.set(todayKey, forKey: dateStorageKey(for: accountKey))
+        defaults.set(count, forKey: countStorageKey(for: accountKey))
+        return count
+    }
+    
+    static var hasReachedLimit: Bool {
+        currentCount() >= maxSwipesPerDay
+    }
+    
+    static func hasUsedSecondThoughtsToday() -> Bool {
+        clearLegacyDeviceKeys()
+        guard let accountKey else { return true }
+        let defaults = UserDefaults.standard
+        let dateKey = secondThoughtsDateStorageKey(for: accountKey)
+        if defaults.string(forKey: dateKey) != todayKey {
+            defaults.set(todayKey, forKey: dateKey)
+            defaults.set(false, forKey: secondThoughtsStorageKey(for: accountKey))
+            return false
+        }
+        return defaults.bool(forKey: secondThoughtsStorageKey(for: accountKey))
+    }
+    
+    static func markSecondThoughtsUsed() {
+        clearLegacyDeviceKeys()
+        guard let accountKey else { return }
+        let defaults = UserDefaults.standard
+        defaults.set(todayKey, forKey: secondThoughtsDateStorageKey(for: accountKey))
+        defaults.set(true, forKey: secondThoughtsStorageKey(for: accountKey))
+    }
+    
+    /// Clears today's discover swipe quota for the signed-in account (e.g. Reset user data).
+    static func reset() {
+        clearLegacyDeviceKeys()
+        guard let accountKey else { return }
+        
+        let defaults = UserDefaults.standard
+        defaults.set(todayKey, forKey: dateStorageKey(for: accountKey))
+        defaults.set(0, forKey: countStorageKey(for: accountKey))
+        defaults.set(todayKey, forKey: secondThoughtsDateStorageKey(for: accountKey))
+        defaults.set(false, forKey: secondThoughtsStorageKey(for: accountKey))
+    }
+}
+
 struct SearchView: View {
     @Binding var selectedTab: Int
     @EnvironmentObject var appState: AppStateManager
@@ -23,9 +142,6 @@ struct SearchView: View {
     @State private var selectedProfile: ProfileCard?
     @State private var showingNewMessageModal = false
     @State private var matchCheckTimer: Timer?
-    @State private var matchesCount: Int = 0
-    @State private var messagesCount: Int = 0
-    @State private var canReviewPassedProfiles = false
     @State private var hasCompletedDiscoverLoad = false
     @State private var programmaticSwipeDirection: String? = nil // "left" or "right" for button-triggered swipes
     @State private var lastFetchedUserDocumentId: String?
@@ -34,6 +150,22 @@ struct SearchView: View {
     @State private var isLoadingMoreProfiles = false
     @State private var cachedSwipeFilter: FirebaseAuthService.SwipeFilterState?
     @State private var pendingDiscoverProfiles: [ProfileCard] = []
+    @State private var dailySwipeCount = DiscoverDailyLimit.currentCount()
+    @State private var hasUsedSecondThoughtsToday = DiscoverDailyLimit.hasUsedSecondThoughtsToday()
+    @State private var isReviewingTodaysPasses = false
+    @State private var isLoadingSecondThoughts = false
+    @State private var savedProfilesBeforeSecondThoughts: [ProfileCard] = []
+    @State private var savedCardIndexBeforeSecondThoughts = 0
+    @State private var secondThoughtsErrorMessage: String?
+    
+    private var hasReachedDailyLimit: Bool {
+        dailySwipeCount >= DiscoverDailyLimit.maxSwipesPerDay
+    }
+    
+    /// Locked overlay on the top card (not while reviewing today's passes).
+    private var showsDailyLimitOverlay: Bool {
+        hasReachedDailyLimit && !isReviewingTodaysPasses
+    }
     
     private enum DiscoverConstants {
         /// How many discover cards to surface per load.
@@ -70,6 +202,9 @@ struct SearchView: View {
                                     SwipeableProfileCard(
                                         profile: profile,
                                         isTopCard: index == currentCardIndex,
+                                        isDailyLimitReached: showsDailyLimitOverlay,
+                                        canUseSecondThoughts: !hasUsedSecondThoughtsToday,
+                                        isLoadingSecondThoughts: isLoadingSecondThoughts,
                                         programmaticSwipeDirection: index == currentCardIndex ? Binding(
                                             get: { programmaticSwipeDirection },
                                             set: { programmaticSwipeDirection = $0 }
@@ -81,6 +216,7 @@ struct SearchView: View {
                                             handleSwipeLeft(profile: profile)
                                         },
                                         onTap: {
+                                            guard !showsDailyLimitOverlay else { return }
                                             print("🔍 Card tapped for profile: \(profile.name)")
                                             print("🔍 Profile userId: \(profile.userId), age: \(profile.age)")
                                             print("🔍 Setting selectedProfile to: \(profile.name)")
@@ -91,6 +227,9 @@ struct SearchView: View {
                                             print("🔍 showingProfileModal after: \(showingProfileModal)")
                                             print("🔍 Selected profile set: \(selectedProfile?.name ?? "nil")")
                                             print("🔍 Modal should show: \(showingProfileModal)")
+                                        },
+                                        onSecondThoughtsTap: {
+                                            startSecondThoughtsReview()
                                         }
                                     )
                                     .zIndex(Double(3 - (index - currentCardIndex))) // Higher zIndex for cards closer to front
@@ -107,28 +246,13 @@ struct SearchView: View {
                                     .foregroundColor(.secondary)
                             }
                         } else {
-                            // No more profiles - show card with matches and messages count
-                            EmptyStateCard(
-                                matchesCount: matchesCount,
-                                messagesCount: messagesCount,
-                                canReviewPassedProfiles: canReviewPassedProfiles,
-                                onMatchesTap: {
-                                    selectedTab = 1 // Navigate to Matches tab
-                                },
-                                onMessagesTap: {
-                                    selectedTab = 0 // Navigate to Messages tab
-                                },
-                                onStartOverTap: {
-                                    resetUnlikedProfiles()
+                            // Pool exhausted (e.g. distance filter) - not the daily swipe limit.
+                            EmptyStateCard()
+                                .onAppear {
+                                    if hasMoreUsersToLoad {
+                                        prefetchMoreProfilesIfNeeded()
+                                    }
                                 }
-                            )
-                            .onAppear {
-                                if hasMoreUsersToLoad {
-                                    prefetchMoreProfilesIfNeeded()
-                                } else {
-                                    loadMatchesAndMessagesCount()
-                                }
-                            }
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -147,41 +271,58 @@ struct SearchView: View {
                     VStack {
                         Spacer()
                         
-                        HStack(spacing: 20) {
-                            // Pass button (left side)
-                            Button(action: {
-                                // Haptic feedback for pass
-                                let feedback = UINotificationFeedbackGenerator()
-                                feedback.notificationOccurred(.error)
-                                // Trigger programmatic swipe left
-                                programmaticSwipeDirection = "left"
-                            }) {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 30, weight: .bold))
-                                    .foregroundColor(.red)
-                                    .floatingCircleButtonStyle(colorScheme: colorScheme, size: 76)
+                        ZStack {
+                            HStack(spacing: 20) {
+                                // Pass button (left side)
+                                Button(action: {
+                                    guard !showsDailyLimitOverlay else { return }
+                                    // Haptic feedback for pass
+                                    let feedback = UINotificationFeedbackGenerator()
+                                    feedback.notificationOccurred(.error)
+                                    // Trigger programmatic swipe left
+                                    programmaticSwipeDirection = "left"
+                                }) {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 30, weight: .bold))
+                                        .foregroundColor(.red)
+                                        .floatingCircleButtonStyle(colorScheme: colorScheme, size: 76)
+                                }
+                                .disabled(showsDailyLimitOverlay)
+                                
+                                Spacer()
+                                
+                                // Like button (right side)
+                                Button(action: {
+                                    guard !showsDailyLimitOverlay else { return }
+                                    // Haptic feedback for like
+                                    let feedback = UINotificationFeedbackGenerator()
+                                    feedback.notificationOccurred(.success)
+                                    // Trigger programmatic swipe right
+                                    programmaticSwipeDirection = "right"
+                                }) {
+                                    Image(systemName: "heart.fill")
+                                        .font(.system(size: 30))
+                                        .foregroundColor(.green)
+                                        .floatingCircleButtonStyle(colorScheme: colorScheme, size: 76)
+                                }
+                                .disabled(showsDailyLimitOverlay)
                             }
+                            .padding(.horizontal, 260)
                             
-                            Spacer()
-                            
-                            // Like button (right side)
-                            Button(action: {
-                                // Haptic feedback for like
-                                let feedback = UINotificationFeedbackGenerator()
-                                feedback.notificationOccurred(.success)
-                                // Trigger programmatic swipe right
-                                programmaticSwipeDirection = "right"
-                            }) {
-                                Image(systemName: "heart.fill")
-                                    .font(.system(size: 30))
-                                    .foregroundColor(.green)
-                                    .floatingCircleButtonStyle(colorScheme: colorScheme, size: 76)
-                            }
+                            // DEBUG: big centered count between X and heart (own layer, not clipped by padding)
+                            Text("\(max(0, profiles.count - currentCardIndex))")
+                                .font(.system(size: 28, weight: .black, design: .rounded))
+                                .foregroundColor(.yellow)
+                                .shadow(color: .black, radius: 0, x: 1, y: 1)
+                                .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 1)
+                                .allowsHitTesting(false)
                         }
-                        .padding(.horizontal, 260) // Reduced from individual padding
-                        .padding(.bottom, 100) // Moved down a bit
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, 100)
+                        .blur(radius: showsDailyLimitOverlay ? 8 : 0)
+                        .opacity(showsDailyLimitOverlay ? 0.85 : 1)
                     }
-                    .allowsHitTesting(true)
+                    .allowsHitTesting(!showsDailyLimitOverlay)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -200,10 +341,47 @@ struct SearchView: View {
 //            .allowsHitTesting(false) // Allow taps to pass through to cards
         }
         .onAppear {
+            dailySwipeCount = DiscoverDailyLimit.currentCount()
+            hasUsedSecondThoughtsToday = DiscoverDailyLimit.hasUsedSecondThoughtsToday()
             restoreDiscoverSessionIfAvailable()
+        }
+        .onChange(of: selectedTab) { tab in
+            if tab == 2 {
+                dailySwipeCount = DiscoverDailyLimit.currentCount()
+                hasUsedSecondThoughtsToday = DiscoverDailyLimit.hasUsedSecondThoughtsToday()
+                // Distance (or other filters) may have cleared the cache from Settings.
+                // While the daily limit is active, never rebuild the frozen blurry deck.
+                if !appState.hasValidDiscoverProfilesCache
+                    && !isLoading
+                    && DiscoverDailyLimit.currentCount() < DiscoverDailyLimit.maxSwipesPerDay {
+                    restoreDiscoverSessionIfAvailable()
+                }
+            }
+        }
+        .onChange(of: appState.currentUser?.id) { _ in
+            dailySwipeCount = DiscoverDailyLimit.currentCount()
+            hasUsedSecondThoughtsToday = DiscoverDailyLimit.hasUsedSecondThoughtsToday()
+        }
+        .alert(
+            "search.daily.limit.second.thoughts".localized,
+            isPresented: Binding(
+                get: { secondThoughtsErrorMessage != nil },
+                set: { if !$0 { secondThoughtsErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                secondThoughtsErrorMessage = nil
+            }
+        } message: {
+            Text(secondThoughtsErrorMessage ?? "")
         }
         .onChange(of: appState.currentUser?.id) { _ in
             guard appState.currentUser != nil else { return }
+            appState.loadPersistedDiscoverProfilesCacheIfNeeded()
+            if profiles.isEmpty {
+                restoreDiscoverSessionIfAvailable()
+                return
+            }
             guard !appState.hasValidDiscoverProfilesCache else { return }
             guard !hasCompletedDiscoverLoad else { return }
             loadDiscoverProfilesWhenReady()
@@ -374,8 +552,7 @@ struct SearchView: View {
         likedUserIds: Set<String>,
         passedUserIds: Set<String>,
         blockedUserIds: Set<String>,
-        ignorePassedFilter: Bool,
-        requirePassedOnly: Bool = false
+        ignorePassedFilter: Bool
     ) -> Bool {
         let userId = user.firebaseDocumentId ?? user.id.uuidString
 
@@ -387,9 +564,11 @@ struct SearchView: View {
             return false
         }
 
-        if requirePassedOnly {
-            guard passedUserIds.contains(userId) else { return false }
-        } else if !ignorePassedFilter && passedUserIds.contains(userId) {
+        if !ignorePassedFilter && passedUserIds.contains(userId) {
+            return false
+        }
+
+        if !matchesDistancePreference(currentUser: currentUser, otherUser: user) {
             return false
         }
 
@@ -420,8 +599,25 @@ struct SearchView: View {
 
         return true
     }
+    
+    private func matchesDistancePreference(currentUser: SpectRoomUser, otherUser: SpectRoomUser) -> Bool {
+        guard let maxKm = DiscoverDistanceLimit.currentOption.maxKilometers else {
+            return true
+        }
+        guard let distanceKm = calculateDistance(from: currentUser.location, to: otherUser.location) else {
+            // Without coordinates we cannot verify the radius - exclude when a limit is set.
+            return false
+        }
+        return distanceKm <= maxKm
+    }
 
     private func restoreDiscoverSessionIfAvailable() {
+        applyPendingDistanceRefreshIfAllowed()
+        
+        if !appState.hasValidDiscoverProfilesCache {
+            appState.loadPersistedDiscoverProfilesCacheIfNeeded()
+        }
+        
         if appState.hasValidDiscoverProfilesCache, !appState.cachedDiscoverProfiles.isEmpty {
             profiles = appState.cachedDiscoverProfiles
             currentCardIndex = appState.cachedDiscoverCardIndex
@@ -429,12 +625,18 @@ struct SearchView: View {
             isLoading = false
             print("🔍 SearchView: Restored \(profiles.count) cached profiles at index \(currentCardIndex)")
             if currentCardIndex >= profiles.count {
-                if hasMoreUsersToLoad {
+                if hasMoreUsersToLoad
+                    && DiscoverDailyLimit.currentCount() < DiscoverDailyLimit.maxSwipesPerDay {
                     prefetchMoreProfilesIfNeeded()
-                } else {
-                    loadMatchesAndMessagesCount()
                 }
             }
+            return
+        }
+
+        // Daily limit with no frozen deck yet: still load so the blurry overlay has cards.
+        if DiscoverDailyLimit.currentCount() >= DiscoverDailyLimit.maxSwipesPerDay {
+            print("🔍 SearchView: Daily limit active without cache — loading deck for limit overlay")
+            loadDiscoverProfilesWhenReady(allowWhileDailyLimitReached: true)
             return
         }
 
@@ -443,9 +645,26 @@ struct SearchView: View {
         }
         loadDiscoverProfilesWhenReady()
     }
+    
+    /// Distance may have changed while the daily limit froze the deck - refresh once unlocked.
+    private func applyPendingDistanceRefreshIfAllowed() {
+        guard DiscoverDistanceLimit.hasPendingDeckRefresh else { return }
+        guard DiscoverDailyLimit.currentCount() < DiscoverDailyLimit.maxSwipesPerDay else { return }
+        DiscoverDistanceLimit.hasPendingDeckRefresh = false
+        appState.clearDiscoverProfilesCache()
+        print("🔍 SearchView: Applying deferred distance-limit deck refresh")
+    }
 
-    private func loadDiscoverProfilesWhenReady() {
+    private func loadDiscoverProfilesWhenReady(allowWhileDailyLimitReached: Bool = false) {
         guard appState.isAuthenticated else {
+            isLoading = false
+            return
+        }
+
+        // Keep the frozen blurry deck while the daily swipe limit is active.
+        if DiscoverDailyLimit.currentCount() >= DiscoverDailyLimit.maxSwipesPerDay,
+           !allowWhileDailyLimitReached {
+            hasCompletedDiscoverLoad = true
             isLoading = false
             return
         }
@@ -660,10 +879,6 @@ struct SearchView: View {
                         hasMoreUsersToLoad = hasMoreRemoteUsers || !pendingDiscoverProfiles.isEmpty
                         print("✅ SearchView: Loaded initial \(profiles.count) profiles, \(pendingDiscoverProfiles.count) queued by match %")
                         markDiscoverLoadCompleted()
-                        
-                        if profiles.isEmpty && !hasMoreUsersToLoad {
-                            loadMatchesAndMessagesCount()
-                        }
                     }
                     
                     syncDiscoverCache()
@@ -684,6 +899,10 @@ struct SearchView: View {
     }
     
     private func prefetchMoreProfilesIfNeeded() {
+        // Don't rebuild/extend the deck while the daily limit freezes the UI.
+        guard DiscoverDailyLimit.currentCount() < DiscoverDailyLimit.maxSwipesPerDay
+                || isReviewingTodaysPasses else { return }
+        
         let remainingCards = profiles.count - currentCardIndex
         // When the user reaches the 7th card of a 10-card batch, remaining == 4.
         guard remainingCards <= DiscoverConstants.prefetchRemainingThreshold,
@@ -706,8 +925,13 @@ struct SearchView: View {
     }
     
     private func handleSwipeRight(profile: ProfileCard) {
-        // Advance the deck immediately — never wait on network for the next-card animation.
+        guard !showsDailyLimitOverlay else { return }
+        
+        // Advance the deck immediately - never wait on network for the next-card animation.
         print("✅ Liked: \(profile.name)")
+        if !isReviewingTodaysPasses {
+            dailySwipeCount = DiscoverDailyLimit.recordSwipe()
+        }
         moveToNextCard()
         
         Task {
@@ -725,7 +949,7 @@ struct SearchView: View {
                 
                 if !isMatch {
                     // Cloud Function may create the match shortly after the swipe is saved.
-                    // Poll briefly in the background — UI already advanced.
+                    // Poll briefly in the background - UI already advanced.
                     for _ in 0..<4 {
                         try await Task.sleep(nanoseconds: 500_000_000)
                         isMatch = try await FirebaseAuthService.shared.matchExists(with: profile.userId)
@@ -748,8 +972,13 @@ struct SearchView: View {
     }
     
     private func handleSwipeLeft(profile: ProfileCard) {
-        // Advance the deck immediately — never wait on network for the next-card animation.
+        guard !showsDailyLimitOverlay else { return }
+        
+        // Advance the deck immediately - never wait on network for the next-card animation.
         print("❌ Passed: \(profile.name)")
+        if !isReviewingTodaysPasses {
+            dailySwipeCount = DiscoverDailyLimit.recordSwipe()
+        }
         moveToNextCard()
         
         Task {
@@ -765,13 +994,88 @@ struct SearchView: View {
         withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
             currentCardIndex += 1
         }
-        syncDiscoverCache()
         
-        if currentCardIndex >= profiles.count && !profiles.isEmpty && !hasMoreUsersToLoad {
-            loadMatchesAndMessagesCount()
-        } else {
-            prefetchMoreProfilesIfNeeded()
+        if isReviewingTodaysPasses {
+            if currentCardIndex >= profiles.count {
+                finishSecondThoughtsReview()
+            }
+            return
         }
+        
+        syncDiscoverCache()
+        prefetchMoreProfilesIfNeeded()
+    }
+    
+    private func startSecondThoughtsReview() {
+        guard showsDailyLimitOverlay,
+              !hasUsedSecondThoughtsToday,
+              !isLoadingSecondThoughts,
+              !isReviewingTodaysPasses else { return }
+        
+        isLoadingSecondThoughts = true
+        
+        Task {
+            do {
+                let passedIds = try await FirebaseAuthService.shared.fetchTodaysPassedUserIds()
+                guard let currentUser = FirebaseAuthService.shared.currentUser else {
+                    await MainActor.run {
+                        isLoadingSecondThoughts = false
+                        secondThoughtsErrorMessage = "search.daily.limit.second.thoughts.empty".localized
+                    }
+                    return
+                }
+                
+                guard !passedIds.isEmpty else {
+                    await MainActor.run {
+                        DiscoverDailyLimit.markSecondThoughtsUsed()
+                        hasUsedSecondThoughtsToday = true
+                        isLoadingSecondThoughts = false
+                        secondThoughtsErrorMessage = "search.daily.limit.second.thoughts.empty".localized
+                    }
+                    return
+                }
+                
+                let users = try await FirebaseAuthService.shared.fetchUsers(byIds: passedIds)
+                let cards = sortProfilesByMatchPercentage(
+                    users.map { makeProfileCard(from: $0, currentUser: currentUser) }
+                )
+                
+                await MainActor.run {
+                    guard !cards.isEmpty else {
+                        DiscoverDailyLimit.markSecondThoughtsUsed()
+                        hasUsedSecondThoughtsToday = true
+                        isLoadingSecondThoughts = false
+                        secondThoughtsErrorMessage = "search.daily.limit.second.thoughts.empty".localized
+                        return
+                    }
+                    
+                    savedProfilesBeforeSecondThoughts = profiles
+                    savedCardIndexBeforeSecondThoughts = currentCardIndex
+                    profiles = cards
+                    currentCardIndex = 0
+                    isReviewingTodaysPasses = true
+                    DiscoverDailyLimit.markSecondThoughtsUsed()
+                    hasUsedSecondThoughtsToday = true
+                    isLoadingSecondThoughts = false
+                }
+            } catch {
+                print("❌ Error loading today's passed profiles: \(error)")
+                await MainActor.run {
+                    isLoadingSecondThoughts = false
+                    secondThoughtsErrorMessage = "search.daily.limit.second.thoughts.empty".localized
+                }
+            }
+        }
+    }
+    
+    private func finishSecondThoughtsReview() {
+        isReviewingTodaysPasses = false
+        profiles = savedProfilesBeforeSecondThoughts
+        currentCardIndex = min(savedCardIndexBeforeSecondThoughts, max(profiles.count - 1, 0))
+        savedProfilesBeforeSecondThoughts = []
+        savedCardIndexBeforeSecondThoughts = 0
+        dailySwipeCount = DiscoverDailyLimit.currentCount()
+        hasUsedSecondThoughtsToday = true
     }
     
     private func startCheckingForMatches() {
@@ -833,91 +1137,40 @@ struct SearchView: View {
             print("❌ Error checking for matches: \(error)")
         }
     }
+}
+
+struct EmptyStateCard: View {
+    private let cardWidth = UIScreen.main.bounds.width - 60
+    private let cardHeight: CGFloat = 500
     
-    // MARK: - Load matches and messages count
-    private func loadMatchesAndMessagesCount() {
-        Task {
-            do {
-                async let matchesTask = FirebaseAuthService.shared.fetchMatches()
-                async let unreadCountTask = FirebaseAuthService.shared.countUnreadIncomingMessages()
-                async let swipeFilterTask = FirebaseAuthService.shared.fetchSwipeFilterState(preferServer: true)
-
-                let matches = try await matchesTask
-                let unreadCount = try await unreadCountTask
-                let swipeFilter = try await swipeFilterTask
-
-                let reviewablePassedCount: Int
-                if let currentUser = FirebaseAuthService.shared.currentUser {
-                    let passedUsers = try await FirebaseAuthService.shared.fetchUsers(
-                        byIds: Array(swipeFilter.passedUserIds)
-                    )
-                    let blockedUserIds = Set(appState.blockedUsers.map(\.id))
-                    reviewablePassedCount = passedUsers.filter { user in
-                        isUserEligibleForDeck(
-                            user: user,
-                            currentUser: currentUser,
-                            likedUserIds: swipeFilter.likedUserIds,
-                            passedUserIds: swipeFilter.passedUserIds,
-                            blockedUserIds: blockedUserIds,
-                            ignorePassedFilter: true,
-                            requirePassedOnly: true
-                        )
-                    }.count
-                } else {
-                    reviewablePassedCount = 0
-                }
-
-                await MainActor.run {
-                    matchesCount = matches.count
-                    messagesCount = unreadCount
-                    canReviewPassedProfiles = reviewablePassedCount > 0
-                }
-                
-                print("📊 Loaded counts: \(matches.count) matches, \(unreadCount) unread messages, \(reviewablePassedCount) reviewable passed profiles")
-            } catch {
-                print("❌ Error loading matches/messages count: \(error)")
-                await MainActor.run {
-                    canReviewPassedProfiles = false
-                }
-            }
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+                .frame(width: cardWidth, height: cardHeight)
+                .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
+            
+            Text("search.empty.no.more.profiles".localized)
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .foregroundColor(.primary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 28)
         }
-    }
-
-    private func resetUnlikedProfiles() {
-        guard !isLoading, canReviewPassedProfiles else { return }
-        isLoading = true
-        hasCompletedDiscoverLoad = false
-        appState.clearDiscoverProfilesCache()
-        lastFetchedUserDocumentId = nil
-        hasMoreUsersToLoad = true
-        cachedSwipeFilter = nil
-        pendingDiscoverProfiles = []
-
-        Task {
-            do {
-                try await FirebaseAuthService.shared.resetPassSwipesToNew()
-                await MainActor.run {
-                    currentCardIndex = 0
-                    profiles = []
-                }
-                loadDiscoverProfiles(ignorePassedFilter: true, preferServerSwipeData: true)
-            } catch {
-                print("❌ Error resetting passed profiles: \(error)")
-                await MainActor.run {
-                    isLoading = false
-                }
-            }
-        }
+        .frame(width: cardWidth, height: cardHeight)
     }
 }
 
 struct SwipeableProfileCard: View {
     let profile: ProfileCard
     let isTopCard: Bool
+    var isDailyLimitReached: Bool = false
+    var canUseSecondThoughts: Bool = false
+    var isLoadingSecondThoughts: Bool = false
     @Binding var programmaticSwipeDirection: String?
     let onSwipeRight: () -> Void
     let onSwipeLeft: () -> Void
     let onTap: () -> Void
+    var onSecondThoughtsTap: (() -> Void)? = nil
     
     private let cardWidth = UIScreen.main.bounds.width - 60
     private let cardHeight: CGFloat = 500
@@ -934,8 +1187,243 @@ struct SwipeableProfileCard: View {
     @State private var isDragging = false
     @State private var programmaticDragOffset = CGSize.zero
     @State private var isProcessingProgrammaticSwipe = false
+    @State private var showingDailyLimitWhy = false
     
     var body: some View {
+        ZStack {
+            cardContent
+                .blur(radius: isDailyLimitReached ? 8 : 0)
+            
+            if isDailyLimitReached {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color.black.opacity(0.28))
+                    .frame(width: cardWidth, height: cardHeight)
+                
+                // Limit message only on the front card; pile tips stay blurred/dimmed.
+                if isTopCard {
+                    VStack(spacing: 18) {
+                        Text("search.daily.limit.reached".localized)
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 28)
+                            .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 2)
+                        
+                        if canUseSecondThoughts {
+                            Button(action: {
+                                onSecondThoughtsTap?()
+                            }) {
+                                Group {
+                                    if isLoadingSecondThoughts {
+                                        ProgressView()
+                                            .tint(.white)
+                                    } else {
+                                        Text("search.daily.limit.second.thoughts".localized)
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .multilineTextAlignment(.center)
+                                    }
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 24)
+                            }
+                            .disabled(isLoadingSecondThoughts || onSecondThoughtsTap == nil)
+                            .buttonStyle(.plain)
+                        }
+                        
+                        Button(action: {
+                            showingDailyLimitWhy = true
+                        }) {
+                            Text("search.daily.limit.why".localized)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.92))
+                                .underline()
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, canUseSecondThoughts ? 2 : 0)
+                    }
+                }
+            }
+            
+            // Swipe indicators overlay (centered on card)
+            if isTopCard && !isDailyLimitReached {
+                let combinedOffset = CGSize(
+                    width: dragOffset.width + programmaticDragOffset.width,
+                    height: dragOffset.height + programmaticDragOffset.height
+                )
+                
+                // X indicator for left swipe (pass)
+                if combinedOffset.width < 0 {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 160))
+                        .foregroundColor(.red)
+                        .opacity(min(abs(combinedOffset.width) / 170.0, 1.0))
+                }
+                
+                // Heart indicator for right swipe (like)
+                if combinedOffset.width > 0 {
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 160))
+                        .foregroundColor(.green)
+                        .opacity(min(combinedOffset.width / 170.0, 1.0))
+                }
+            }
+        }
+        .frame(width: cardWidth, height: cardHeight)
+        .offset(CGSize(
+            width: isDailyLimitReached ? 0 : dragOffset.width + programmaticDragOffset.width,
+            height: isDailyLimitReached ? 0 : dragOffset.height + programmaticDragOffset.height
+        ))
+        .rotationEffect(.degrees(isDailyLimitReached ? 0 : rotationAngle + Double(programmaticDragOffset.width / 20)))
+        .onTapGesture {
+            guard !isDailyLimitReached else { return }
+            onTap()
+        }
+        .alert(
+            "search.daily.limit.why.title".localized,
+            isPresented: $showingDailyLimitWhy
+        ) {
+            Button("common.ok".localized, role: .cancel) {}
+        } message: {
+            Text("search.daily.limit.why.message".localized)
+        }
+        .onAppear {
+            // Reset state when card becomes the top card
+            if isTopCard {
+                programmaticDragOffset = .zero
+                dragOffset = .zero
+                rotationAngle = 0
+                isProcessingProgrammaticSwipe = false
+            }
+        }
+        .onChange(of: isTopCard) { newValue in
+            // Reset state when card becomes the top card
+            if newValue {
+                programmaticDragOffset = .zero
+                dragOffset = .zero
+                rotationAngle = 0
+                isProcessingProgrammaticSwipe = false
+            }
+        }
+        .onChange(of: programmaticSwipeDirection) { newDirection in
+            guard !isDailyLimitReached else {
+                programmaticSwipeDirection = nil
+                return
+            }
+            guard let direction = newDirection, isTopCard, !isProcessingProgrammaticSwipe else { return }
+            
+            // Set flag to prevent re-triggering
+            isProcessingProgrammaticSwipe = true
+            
+            // Store the direction locally before clearing
+            let swipeDirection = direction
+            
+            // Reset programmatic drag state
+            programmaticDragOffset = .zero
+            
+            // Clear the binding immediately to prevent onChange from triggering again
+            programmaticSwipeDirection = nil
+            
+            // Step 1: Animate indicator appearing fully (reach 170pt for full opacity)
+            withAnimation(.easeOut(duration: 0.6)) {
+                if swipeDirection == "right" {
+                    programmaticDragOffset = CGSize(width: 170, height: 0)
+                } else if swipeDirection == "left" {
+                    programmaticDragOffset = CGSize(width: -170, height: 0)
+                }
+            }
+            
+            // Step 2: After indicator is fully visible (full opacity), animate card off-screen
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    if swipeDirection == "right" {
+                        programmaticDragOffset = CGSize(width: 1000, height: 0)
+                        rotationAngle = 30
+                    } else if swipeDirection == "left" {
+                        programmaticDragOffset = CGSize(width: -1000, height: 0)
+                        rotationAngle = -30
+                    }
+                }
+                
+                // Call handler after animation starts
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    if swipeDirection == "right" {
+                        onSwipeRight()
+                    } else if swipeDirection == "left" {
+                        onSwipeLeft()
+                    }
+                    
+                    // Reset flag after handler is called
+                    // Don't reset visual state - keep card off-screen
+                    // The state will be reset when a new card becomes the top card
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        isProcessingProgrammaticSwipe = false
+                    }
+                }
+            }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    guard !isDailyLimitReached else { return }
+                    if isTopCard {
+                        // Set dragging flag to prevent premature completion
+                        if !isDragging {
+                            isDragging = true
+                        }
+                        // Update visual feedback during drag
+                        dragOffset = value.translation
+                        rotationAngle = Double(value.translation.width / 20)
+                    }
+                }
+                .onEnded { value in
+                    guard !isDailyLimitReached else { return }
+                    if isTopCard {
+                        // Mark dragging as ended - user lifted their hand
+                        isDragging = false
+                        
+                        let threshold: CGFloat = 100
+                        
+                        // Only complete swipe action if user lifted their hand (drag ended)
+                        if value.translation.width > threshold {
+                            // Swipe right - Like
+                            withAnimation(.spring()) {
+                                dragOffset = CGSize(width: 1000, height: 0)
+                                rotationAngle = 30
+                            }
+                            // Action only executes after user lifts hand (onEnded)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                // Double-check: only execute if user has lifted hand
+                                if !isDragging {
+                                    onSwipeRight()
+                                }
+                            }
+                        } else if value.translation.width < -threshold {
+                            // Swipe left - Pass
+                            withAnimation(.spring()) {
+                                dragOffset = CGSize(width: -1000, height: 0)
+                                rotationAngle = -30
+                            }
+                            // Action only executes after user lifts hand (onEnded)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                // Double-check: only execute if user has lifted hand
+                                if !isDragging {
+                                    onSwipeLeft()
+                                }
+                            }
+                        } else {
+                            // Return to center
+                            withAnimation(.spring()) {
+                                dragOffset = .zero
+                                rotationAngle = 0
+                            }
+                        }
+                    }
+                }
+        )
+        .allowsHitTesting(true)
+    }
+    
+    private var cardContent: some View {
         ZStack {
             // Card background with fixed width
             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -1000,7 +1488,7 @@ struct SwipeableProfileCard: View {
                     .frame(height: 140)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                     
-                    // Distance — top trailing
+                    // Distance - top trailing
                     VStack {
                         HStack {
                             Spacer()
@@ -1020,7 +1508,7 @@ struct SwipeableProfileCard: View {
                         Spacer()
                     }
                     
-                    // Name, age, online — bottom of photo
+                    // Name, age, online - bottom of photo
                     HStack(alignment: .bottom, spacing: 10) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("\(firstName(from: profile.name)), \(profile.age)")
@@ -1054,7 +1542,7 @@ struct SwipeableProfileCard: View {
                     )
                 )
                 
-                // Bio + match — clean footer, no nested boxes
+                // Bio + match - clean footer, no nested boxes
                 VStack(alignment: .leading, spacing: 30) {
                     Text(profile.bio)
                         .font(.system(size: 16, weight: .medium))
@@ -1087,6 +1575,7 @@ struct SwipeableProfileCard: View {
                         (Text("search.match.prefix".localized)
                          + Text(String(format: "search.match.percent.part".localized, matchPercentage))
                             .foregroundColor(matchColor)
+                         + Text("search.match.label".localized)
                          + Text(String(format: "search.match.suffix".localized, profileFirstName)))
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(.primary)
@@ -1100,168 +1589,7 @@ struct SwipeableProfileCard: View {
             }
             .frame(width: cardWidth, height: cardHeight)
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            
-            // Swipe indicators overlay (centered on card)
-            if isTopCard {
-                let combinedOffset = CGSize(
-                    width: dragOffset.width + programmaticDragOffset.width,
-                    height: dragOffset.height + programmaticDragOffset.height
-                )
-                
-                // X indicator for left swipe (pass)
-                if combinedOffset.width < 0 {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 160))
-                        .foregroundColor(.red)
-                        .opacity(min(abs(combinedOffset.width) / 170.0, 1.0))
-                }
-                
-                // Heart indicator for right swipe (like)
-                if combinedOffset.width > 0 {
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: 160))
-                        .foregroundColor(.green)
-                        .opacity(min(combinedOffset.width / 170.0, 1.0))
-                }
-            }
         }
-        .frame(width: cardWidth, height: cardHeight)
-        .offset(CGSize(
-            width: dragOffset.width + programmaticDragOffset.width,
-            height: dragOffset.height + programmaticDragOffset.height
-        ))
-        .rotationEffect(.degrees(rotationAngle + Double(programmaticDragOffset.width / 20)))
-        .onTapGesture {
-            onTap()
-        }
-        .onAppear {
-            // Reset state when card becomes the top card
-            if isTopCard {
-                programmaticDragOffset = .zero
-                dragOffset = .zero
-                rotationAngle = 0
-                isProcessingProgrammaticSwipe = false
-            }
-        }
-        .onChange(of: isTopCard) { newValue in
-            // Reset state when card becomes the top card
-            if newValue {
-                programmaticDragOffset = .zero
-                dragOffset = .zero
-                rotationAngle = 0
-                isProcessingProgrammaticSwipe = false
-            }
-        }
-        .onChange(of: programmaticSwipeDirection) { newDirection in
-            guard let direction = newDirection, isTopCard, !isProcessingProgrammaticSwipe else { return }
-            
-            // Set flag to prevent re-triggering
-            isProcessingProgrammaticSwipe = true
-            
-            // Store the direction locally before clearing
-            let swipeDirection = direction
-            
-            // Reset programmatic drag state
-            programmaticDragOffset = .zero
-            
-            // Clear the binding immediately to prevent onChange from triggering again
-            programmaticSwipeDirection = nil
-            
-            // Step 1: Animate indicator appearing fully (reach 170pt for full opacity)
-            withAnimation(.easeOut(duration: 0.6)) {
-                if swipeDirection == "right" {
-                    programmaticDragOffset = CGSize(width: 170, height: 0)
-                } else if swipeDirection == "left" {
-                    programmaticDragOffset = CGSize(width: -170, height: 0)
-                }
-            }
-            
-            // Step 2: After indicator is fully visible (full opacity), animate card off-screen
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                    if swipeDirection == "right" {
-                        programmaticDragOffset = CGSize(width: 1000, height: 0)
-                        rotationAngle = 30
-                    } else if swipeDirection == "left" {
-                        programmaticDragOffset = CGSize(width: -1000, height: 0)
-                        rotationAngle = -30
-                    }
-                }
-                
-                // Call handler after animation starts
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    if swipeDirection == "right" {
-                        onSwipeRight()
-                    } else if swipeDirection == "left" {
-                        onSwipeLeft()
-                    }
-                    
-                    // Reset flag after handler is called
-                    // Don't reset visual state - keep card off-screen
-                    // The state will be reset when a new card becomes the top card
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        isProcessingProgrammaticSwipe = false
-                    }
-                }
-            }
-        }
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    if isTopCard {
-                        // Set dragging flag to prevent premature completion
-                        if !isDragging {
-                            isDragging = true
-                        }
-                        // Update visual feedback during drag
-                        dragOffset = value.translation
-                        rotationAngle = Double(value.translation.width / 20)
-                    }
-                }
-                .onEnded { value in
-                    if isTopCard {
-                        // Mark dragging as ended - user lifted their hand
-                        isDragging = false
-                        
-                        let threshold: CGFloat = 100
-                        
-                        // Only complete swipe action if user lifted their hand (drag ended)
-                        if value.translation.width > threshold {
-                            // Swipe right - Like
-                            withAnimation(.spring()) {
-                                dragOffset = CGSize(width: 1000, height: 0)
-                                rotationAngle = 30
-                            }
-                            // Action only executes after user lifts hand (onEnded)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                // Double-check: only execute if user has lifted hand
-                                if !isDragging {
-                                    onSwipeRight()
-                                }
-                            }
-                        } else if value.translation.width < -threshold {
-                            // Swipe left - Pass
-                            withAnimation(.spring()) {
-                                dragOffset = CGSize(width: -1000, height: 0)
-                                rotationAngle = -30
-                            }
-                            // Action only executes after user lifts hand (onEnded)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                // Double-check: only execute if user has lifted hand
-                                if !isDragging {
-                                    onSwipeLeft()
-                                }
-                            }
-                        } else {
-                            // Return to center
-                            withAnimation(.spring()) {
-                                dragOffset = .zero
-                                rotationAngle = 0
-                            }
-                        }
-                    }
-                }
-        )
     }
 }
 
@@ -1779,7 +2107,7 @@ struct UserProfileModal: View {
         )
         
         return VStack(alignment: .leading, spacing: 14) {
-            Text("profile.edit.energy.level".localized)
+            Text("profile.energy.level".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
             
@@ -1846,7 +2174,7 @@ struct UserProfileModal: View {
                     .blueFieldStyle()
             }
             
-            if displayProfile.shareIdealFirstDate, !displayProfile.idealFirstDate.isEmpty {
+            if !displayProfile.idealFirstDate.isEmpty {
                 Text("profile.ideal.first.date".localized)
                     .font(.headline)
                     .fontWeight(.semibold)
@@ -1856,7 +2184,7 @@ struct UserProfileModal: View {
                     .blueFieldStyle()
             }
             
-            if displayProfile.shareSensoryPreferences, !displayProfile.sensoryPreferences.isEmpty {
+            if !displayProfile.sensoryPreferences.isEmpty {
                 Text("profile.sensory.preferences".localized)
                     .font(.headline)
                     .fontWeight(.semibold)
@@ -2109,6 +2437,7 @@ struct UserProfileModal: View {
             (Text("search.match.prefix".localized)
              + Text(String(format: "search.match.percent.part".localized, matchPercentage))
                 .foregroundColor(matchColor)
+             + Text("search.match.label".localized)
              + Text(String(format: "search.match.suffix".localized, profileFirstName)))
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(.primary)
@@ -2440,125 +2769,6 @@ struct NewMessageModal: View {
             print("❌ Error sending message: \(error)")
             // TODO: Show error alert to user
         }
-    }
-}
-
-struct EmptyStateCard: View {
-    let matchesCount: Int
-    let messagesCount: Int
-    let canReviewPassedProfiles: Bool
-    let onMatchesTap: () -> Void
-    let onMessagesTap: () -> Void
-    let onStartOverTap: () -> Void
-    
-    private let cardWidth = UIScreen.main.bounds.width - 60
-    private let cardHeight: CGFloat = 500
-    private let photoAreaHeight: CGFloat = 340
-    
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
-                .frame(width: cardWidth, height: cardHeight)
-                .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
-            
-            VStack(spacing: 0) {
-                // Immersive faded photo header — same proportions as discover cards
-                ZStack {
-                    Color.clear
-                        .frame(width: cardWidth, height: photoAreaHeight)
-                        .overlay {
-                            Image("profile1")
-                                .resizable()
-                                .scaledToFill()
-                                .opacity(0.1)
-                        }
-                        .clipped()
-                    
-                    VStack(spacing: 10) {
-                        Text("search.empty.no.more.profiles.line1".localized)
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .foregroundColor(.primary)
-                            .multilineTextAlignment(.center)
-                        
-                        Text("search.empty.no.more.profiles.line2".localized)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(.horizontal, 24)
-                }
-                .frame(width: cardWidth, height: photoAreaHeight)
-                .clipShape(
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: 24,
-                        bottomLeadingRadius: 0,
-                        bottomTrailingRadius: 0,
-                        topTrailingRadius: 24,
-                        style: .continuous
-                    )
-                )
-                
-                // Clean footer actions
-                VStack(spacing: 12) {
-                    emptyStateActionButton(
-                        icon: "heart.fill",
-                        label: Text("search.empty.matches.prefix".localized)
-                            + Text(" \(matchesCount)")
-                            + Text(" " + "search.empty.matches.suffix".localized),
-                        action: onMatchesTap
-                    )
-                    
-                    emptyStateActionButton(
-                        icon: "message.fill",
-                        label: Text("search.empty.messages.prefix".localized)
-                            + Text(" \(messagesCount)")
-                            + Text(" " + "search.empty.messages.suffix".localized),
-                        action: onMessagesTap
-                    )
-                    
-                    Button(action: onStartOverTap) {
-                        Text("search.empty.start.over".localized)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(canReviewPassedProfiles ? .blue : .secondary.opacity(0.45))
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 4)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canReviewPassedProfiles)
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 16)
-                .padding(.bottom, 18)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            }
-            .frame(width: cardWidth, height: cardHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        }
-        .frame(width: cardWidth, height: cardHeight)
-    }
-    
-    private func emptyStateActionButton(
-        icon: String,
-        label: Text,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .bold))
-                label
-                    .font(.system(size: 16, weight: .bold))
-            }
-            .foregroundColor(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.blue)
-            )
-        }
-        .buttonStyle(.plain)
     }
 }
 

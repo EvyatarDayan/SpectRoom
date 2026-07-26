@@ -102,6 +102,7 @@ class AppStateManager: ObservableObject {
                         await self?.updateOnlineStatus(isOnline: true)
                         await self?.preloadUserPhotos()
                     }
+                    self?.loadPersistedDiscoverProfilesCacheIfNeeded()
                     // Start listening for new matches when authenticated
                     // This will notify users when they receive a match (even if they didn't swipe)
                     self?.startListeningForMatches()
@@ -118,7 +119,11 @@ class AppStateManager: ObservableObject {
                     self?.currentUser = nil
                     self?.unreadMessageCount = 0
                     self?.clearMessageConversationsCache() // Clear message conversations cache
-                    self?.clearDiscoverProfilesCache()
+                    // Keep persisted discover deck on disk so a daily-limit freeze survives relaunch.
+                    // Explicit sign-out / reset clears the persisted cache separately.
+                    self?.cachedDiscoverProfiles = []
+                    self?.cachedDiscoverCardIndex = 0
+                    self?.isDiscoverProfilesCacheValid = false
                     Task { @MainActor in
                         NotificationService.shared.setAppIconBadgeCount(0)
                     }
@@ -417,14 +422,73 @@ class AppStateManager: ObservableObject {
             return
         }
         cachedDiscoverProfiles = profiles
-        cachedDiscoverCardIndex = cardIndex
+        // Allow index == count for the empty end-of-deck state.
+        cachedDiscoverCardIndex = max(0, min(cardIndex, profiles.count))
         isDiscoverProfilesCacheValid = true
+        persistDiscoverProfilesCache()
     }
 
     func clearDiscoverProfilesCache() {
         cachedDiscoverProfiles = []
         cachedDiscoverCardIndex = 0
         isDiscoverProfilesCacheValid = false
+        clearPersistedDiscoverProfilesCache()
+    }
+    
+    private var discoverCacheAccountKey: String? {
+        if let uid = firebaseAuth.auth.currentUser?.uid, !uid.isEmpty {
+            return uid
+        }
+        if let email = firebaseAuth.auth.currentUser?.email?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+           !email.isEmpty {
+            return email
+        }
+        return nil
+    }
+    
+    private func discoverProfilesStorageKey(for accountKey: String) -> String {
+        "discoverProfilesCache_\(accountKey)"
+    }
+    
+    private func discoverCardIndexStorageKey(for accountKey: String) -> String {
+        "discoverCardIndexCache_\(accountKey)"
+    }
+    
+    private func persistDiscoverProfilesCache() {
+        guard let accountKey = discoverCacheAccountKey else { return }
+        let encoder = JSONEncoder()
+        if let data = try? encoder.encode(cachedDiscoverProfiles) {
+            UserDefaults.standard.set(data, forKey: discoverProfilesStorageKey(for: accountKey))
+            UserDefaults.standard.set(cachedDiscoverCardIndex, forKey: discoverCardIndexStorageKey(for: accountKey))
+        }
+    }
+    
+    private func clearPersistedDiscoverProfilesCache() {
+        guard let accountKey = discoverCacheAccountKey else { return }
+        UserDefaults.standard.removeObject(forKey: discoverProfilesStorageKey(for: accountKey))
+        UserDefaults.standard.removeObject(forKey: discoverCardIndexStorageKey(for: accountKey))
+    }
+    
+    func loadPersistedDiscoverProfilesCacheIfNeeded() {
+        guard !isDiscoverProfilesCacheValid || cachedDiscoverProfiles.isEmpty else { return }
+        loadPersistedDiscoverProfilesCache()
+    }
+    
+    private func loadPersistedDiscoverProfilesCache() {
+        guard let accountKey = discoverCacheAccountKey else { return }
+        let decoder = JSONDecoder()
+        guard let data = UserDefaults.standard.data(forKey: discoverProfilesStorageKey(for: accountKey)),
+              let profiles = try? decoder.decode([ProfileCard].self, from: data),
+              !profiles.isEmpty else {
+            return
+        }
+        let storedIndex = UserDefaults.standard.integer(forKey: discoverCardIndexStorageKey(for: accountKey))
+        cachedDiscoverProfiles = profiles
+        cachedDiscoverCardIndex = max(0, min(storedIndex, profiles.count))
+        isDiscoverProfilesCacheValid = true
+        print("📱 Restored \(profiles.count) discover profiles from disk at index \(cachedDiscoverCardIndex)")
     }
     
     // MARK: - Conversations
@@ -515,6 +579,8 @@ class AppStateManager: ObservableObject {
                     blockedByUsers = []
                     clearMessageConversationsCache() // Clear message conversations cache
                     clearDiscoverProfilesCache()
+                    DiscoverDailyLimit.reset()
+                    DiscoverDistanceLimit.resetToDefault()
                     UserDefaults.standard.set(false, forKey: "dontShowWelcomeAgain")
                     saveAppState()
                     print("🔄 All app state reset - app will start fresh")
@@ -531,6 +597,8 @@ class AppStateManager: ObservableObject {
                     conversations = []
                     clearMessageConversationsCache()
                     clearDiscoverProfilesCache()
+                    DiscoverDailyLimit.reset()
+                    DiscoverDistanceLimit.resetToDefault()
                     UserDefaults.standard.set(false, forKey: "dontShowWelcomeAgain")
                     saveAppState()
                 }
@@ -612,8 +680,13 @@ class AppStateManager: ObservableObject {
             await MainActor.run {
                 self.removeMatchFromCache(userId: userId)
                 self.cachedDiscoverProfiles.removeAll { $0.userId == userId }
-                if self.cachedDiscoverCardIndex >= self.cachedDiscoverProfiles.count {
-                    self.cachedDiscoverCardIndex = max(0, self.cachedDiscoverProfiles.count - 1)
+                if self.cachedDiscoverProfiles.isEmpty {
+                    self.clearDiscoverProfilesCache()
+                } else {
+                    if self.cachedDiscoverCardIndex > self.cachedDiscoverProfiles.count {
+                        self.cachedDiscoverCardIndex = self.cachedDiscoverProfiles.count
+                    }
+                    self.persistDiscoverProfilesCache()
                 }
             }
             
@@ -648,8 +721,13 @@ class AppStateManager: ObservableObject {
             await MainActor.run {
                 self.blockedUsers.append(blockedUser)
                 self.cachedDiscoverProfiles.removeAll { $0.userId == userId }
-                if self.cachedDiscoverCardIndex >= self.cachedDiscoverProfiles.count {
-                    self.cachedDiscoverCardIndex = max(0, self.cachedDiscoverProfiles.count - 1)
+                if self.cachedDiscoverProfiles.isEmpty {
+                    self.clearDiscoverProfilesCache()
+                } else {
+                    if self.cachedDiscoverCardIndex > self.cachedDiscoverProfiles.count {
+                        self.cachedDiscoverCardIndex = self.cachedDiscoverProfiles.count
+                    }
+                    self.persistDiscoverProfilesCache()
                 }
                 if var current = self.currentUser {
                     current.blockedUsers = self.blockedUsers
@@ -949,7 +1027,7 @@ class AppStateManager: ObservableObject {
                     return
                 }
                 
-                // Profile resolved — replace any temporary "Unknown User" in the list/chat.
+                // Profile resolved - replace any temporary "Unknown User" in the list/chat.
                 self?.updateConversationPartnerDetails(
                     userId: senderId,
                     name: senderName,
@@ -1389,11 +1467,11 @@ class AppStateManager: ObservableObject {
     }
     
     /// Update conversation messages cache when new messages arrive.
-    /// Only appends to an existing cache — never seeds a one-message cache from a preview,
+    /// Only appends to an existing cache - never seeds a one-message cache from a preview,
     /// or reopening the chat would hide the real history.
     func updateConversationMessagesCache(_ newMessages: [MessageDisplay], for otherUserId: String) {
         guard var existingState = cachedConversationStates[otherUserId] else {
-            print("💬 Skipping conversation cache update for \(otherUserId) — no existing history cache")
+            print("💬 Skipping conversation cache update for \(otherUserId) - no existing history cache")
             return
         }
         

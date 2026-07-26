@@ -204,20 +204,20 @@ If the badge does not appear when the app is closed, check these items in order:
 
 1. **Deploy the updated cloud function** (badge code only works after deploy)
 2. **APNs key in Firebase Console** → Project Settings → Cloud Messaging → Apple app configuration
-3. **Test on a real iPhone** (not the simulator — push badges do not work on simulator)
+3. **Test on a real iPhone** (not the simulator - push badges do not work on simulator)
 4. **Notification permission granted** including badge (iOS Settings → SpectRoom → Notifications → Badges ON)
 5. **Recipient has `fcmToken` in Firestore** under `users/{userId}/fcmToken` (open app once while logged in)
 6. **Build type matches APNs environment**:
    - Debug/Xcode run → `SpectRoom.entitlements` uses `development`
    - TestFlight/App Store → `SpectRoom-Release.entitlements` uses `production`
-7. **Stale `openConversationUserId`** — fixed: app now clears this when backgrounded; cloud function only skips push when app is active AND chat is open
+7. **Stale `openConversationUserId`** - fixed: app now clears this when backgrounded; cloud function only skips push when app is active AND chat is open
 
 ### Verify push is being sent
 
 In Firebase Console → Functions → `sendMessageNotification` → Logs, look for:
-- `✅ Message notification sent successfully (badge: N)` — working
-- `No FCM token for recipient` — recipient needs to open the app while logged in
-- `APNs authentication error` — upload APNs .p8 key in Firebase Console
-- `Conversation with ... is open and app is active, skipping` — expected only when user is actively in that chat
+- `✅ Message notification sent successfully (badge: N)` - working
+- `No FCM token for recipient` - recipient needs to open the app while logged in
+- `APNs authentication error` - upload APNs .p8 key in Firebase Console
+- `Conversation with ... is open and app is active, skipping` - expected only when user is actively in that chat
 
 

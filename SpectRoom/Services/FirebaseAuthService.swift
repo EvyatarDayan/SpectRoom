@@ -741,13 +741,20 @@ class FirebaseAuthService: ObservableObject {
         
         print("💕 Recording swipe: \(action.rawValue) from \(currentUserId) to \(targetUserId)")
         
-        let swipeData: [String: Any] = [
+        var swipeData: [String: Any] = [
             "id": UUID().uuidString,
             "fromUserId": currentUserId,
             "toUserId": targetUserId,
             "action": action.rawValue,
             "createdAt": Date().timeIntervalSince1970
         ]
+        
+        // Passes are counted: 1st pass = hide for 1 month, 2nd pass = never show again.
+        if action == .pass {
+            let passCount = try await nextPassCount(for: targetUserId, currentUserId: currentUserId)
+            swipeData["passCount"] = passCount
+            print("💕 Pass count for \(targetUserId): \(passCount)")
+        }
         
         // Save swipe action to current user's swipes collection
         let swipeRef = db.collection("users").document(currentUserId).collection("swipes").document()
@@ -756,12 +763,40 @@ class FirebaseAuthService: ObservableObject {
         print("✅ Swipe recorded successfully")
     }
     
+    /// Next pass number for a target (1 or 2+), based on existing pass docs.
+    private func nextPassCount(for targetUserId: String, currentUserId: String) async throws -> Int {
+        let snapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("swipes")
+            .whereField("toUserId", isEqualTo: targetUserId)
+            .whereField("action", isEqualTo: SwipeType.pass.rawValue)
+            .getDocuments()
+        
+        let previous = effectivePassCount(from: snapshot.documents.map { $0.data() })
+        return previous + 1
+    }
+    
+    /// Prefer stored `passCount`; fall back to number of pass docs for legacy rows.
+    private func effectivePassCount(from passDocuments: [[String: Any]]) -> Int {
+        guard !passDocuments.isEmpty else { return 0 }
+        let maxStored = passDocuments.compactMap { $0["passCount"] as? Int }.max() ?? 0
+        return max(passDocuments.count, maxStored)
+    }
+    
     // MARK: - Fetch Swipe Filter State
     
     struct SwipeFilterState {
+        /// Latest action is like / super_like.
         let likedUserIds: Set<String>
+        /// Currently hidden from discover: 1st pass still in cooldown, or 2nd+ pass forever.
         let passedUserIds: Set<String>
+        /// 2nd (or more) pass - never show again.
+        let permanentlyPassedUserIds: Set<String>
+        /// 1st pass still within the 1-month cooldown (eligible for "review passed" / start over).
+        let reviewablePassedUserIds: Set<String>
     }
+    
+    private static let firstPassCooldownDays: TimeInterval = 30 * 24 * 60 * 60
     
     func fetchSwipeFilterState(preferServer: Bool = false) async throws -> SwipeFilterState {
         guard let currentUserId = auth.currentUser?.uid else {
@@ -779,6 +814,8 @@ class FirebaseAuthService: ObservableObject {
         }
         
         var latestSwipeByUser: [String: (action: String, createdAt: TimeInterval)] = [:]
+        var passDocsByUser: [String: [[String: Any]]] = [:]
+        
         for document in snapshot.documents {
             let data = document.data()
             guard let toUserId = data["toUserId"] as? String,
@@ -788,28 +825,52 @@ class FirebaseAuthService: ObservableObject {
             
             let createdAt = data["createdAt"] as? TimeInterval ?? 0
             if let existing = latestSwipeByUser[toUserId], existing.createdAt >= createdAt {
-                continue
+                // keep existing as latest
+            } else {
+                latestSwipeByUser[toUserId] = (action, createdAt)
             }
             
-            latestSwipeByUser[toUserId] = (action, createdAt)
+            if action == SwipeType.pass.rawValue {
+                passDocsByUser[toUserId, default: []].append(data)
+            }
         }
         
         var likedUserIds = Set<String>()
         var passedUserIds = Set<String>()
+        var permanentlyPassedUserIds = Set<String>()
+        var reviewablePassedUserIds = Set<String>()
+        let now = Date().timeIntervalSince1970
         
         for (userId, state) in latestSwipeByUser {
             switch state.action {
             case SwipeType.like.rawValue, SwipeType.superLike.rawValue:
                 likedUserIds.insert(userId)
             case SwipeType.pass.rawValue:
-                passedUserIds.insert(userId)
+                let passDocs = passDocsByUser[userId] ?? []
+                let passCount = effectivePassCount(from: passDocs)
+                let latestPassAt = passDocs.compactMap { $0["createdAt"] as? TimeInterval }.max() ?? state.createdAt
+                
+                if passCount >= 2 {
+                    permanentlyPassedUserIds.insert(userId)
+                    passedUserIds.insert(userId)
+                } else if now - latestPassAt < Self.firstPassCooldownDays {
+                    // 1st pass still within 1 month - hide for now, reviewable via start over
+                    passedUserIds.insert(userId)
+                    reviewablePassedUserIds.insert(userId)
+                }
+                // else: 1st pass older than 1 month → eligible again (not in passedUserIds)
             default:
                 print("⚠️ Unknown swipe action '\(state.action)' for user \(userId)")
             }
         }
         
-        print("💕 Swipe filter state: \(likedUserIds.count) liked, \(passedUserIds.count) passed")
-        return SwipeFilterState(likedUserIds: likedUserIds, passedUserIds: passedUserIds)
+        print("💕 Swipe filter: \(likedUserIds.count) liked, \(passedUserIds.count) hidden (\(permanentlyPassedUserIds.count) permanent, \(reviewablePassedUserIds.count) in cooldown)")
+        return SwipeFilterState(
+            likedUserIds: likedUserIds,
+            passedUserIds: passedUserIds,
+            permanentlyPassedUserIds: permanentlyPassedUserIds,
+            reviewablePassedUserIds: reviewablePassedUserIds
+        )
     }
     
     // MARK: - Fetch Liked Users
@@ -819,6 +880,39 @@ class FirebaseAuthService: ObservableObject {
     
     func fetchPassedUserIds(preferServer: Bool = false) async throws -> Set<String> {
         try await fetchSwipeFilterState(preferServer: preferServer).passedUserIds
+    }
+    
+    /// User IDs the current user passed today (unique), for the second-thoughts review.
+    func fetchTodaysPassedUserIds() async throws -> [String] {
+        guard let currentUserId = auth.currentUser?.uid else {
+            throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let startOfDay = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
+        let snapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("swipes")
+            .whereField("action", isEqualTo: SwipeType.pass.rawValue)
+            .getDocuments(source: .server)
+        
+        var latestPassTodayByUser: [String: TimeInterval] = [:]
+        for document in snapshot.documents {
+            let data = document.data()
+            guard let toUserId = data["toUserId"] as? String,
+                  let createdAt = data["createdAt"] as? TimeInterval,
+                  createdAt >= startOfDay else {
+                continue
+            }
+            if let existing = latestPassTodayByUser[toUserId], existing >= createdAt {
+                continue
+            }
+            latestPassTodayByUser[toUserId] = createdAt
+        }
+        
+        // Stable order: most recently passed first
+        return latestPassTodayByUser
+            .sorted { $0.value > $1.value }
+            .map(\.key)
     }
     
     private func isPositiveSwipe(_ action: SwipeType?) -> Bool {
@@ -1464,7 +1558,7 @@ class FirebaseAuthService: ObservableObject {
                             }
                         } catch {
                             print("❌ Error fetching sender profile for new message: \(error)")
-                            // Lighter fallback — name-only lookup often still works.
+                            // Lighter fallback - name-only lookup often still works.
                             let fallbackName = (try? await self.fetchSenderName(for: senderId)) ?? "Unknown User"
                             let fallbackPhoto = try? await self.fetchUserProfilePhotoURL(for: senderId)
                             await MainActor.run {
@@ -2011,7 +2105,7 @@ class FirebaseAuthService: ObservableObject {
         return messages.sorted { $0.createdAt < $1.createdAt }
     }
     
-    // Fetch all messages between current user and another user (legacy — prefer paginated API)
+    // Fetch all messages between current user and another user (legacy - prefer paginated API)
     func fetchConversationMessages(with otherUserId: String) async throws -> [MessageDisplay] {
         let page = try await fetchConversationMessagesPage(with: otherUserId, limit: 10)
         return page.messages
@@ -2572,13 +2666,14 @@ class FirebaseAuthService: ObservableObject {
         print("✅ Deleted \(snapshot.documents.count) swipes")
     }
 
-    /// Resets all pass swipes so those profiles become new again (removes pass records).
+    /// Resets first-pass (cooldown) swipes so those profiles can show again.
+    /// Permanent 2nd+ passes are kept and never reappear.
     func resetPassSwipesToNew() async throws {
         guard let currentUserId = auth.currentUser?.uid else {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
 
-        print("🔄 Resetting pass swipes to new for user: \(currentUserId)")
+        print("🔄 Resetting first-pass swipes to new for user: \(currentUserId)")
 
         let swipesRef = db.collection("users").document(currentUserId).collection("swipes")
         let snapshot = try await swipesRef.whereField("action", isEqualTo: SwipeType.pass.rawValue).getDocuments(source: .server)
@@ -2588,18 +2683,38 @@ class FirebaseAuthService: ObservableObject {
             return
         }
 
+        var passDocsByUser: [String: [QueryDocumentSnapshot]] = [:]
+        for document in snapshot.documents {
+            guard let toUserId = document.data()["toUserId"] as? String else { continue }
+            passDocsByUser[toUserId, default: []].append(document)
+        }
+
+        var documentsToDelete: [QueryDocumentSnapshot] = []
+        for (_, docs) in passDocsByUser {
+            let passCount = effectivePassCount(from: docs.map { $0.data() })
+            // Only clear first-pass history; keep permanent (2+) bans.
+            if passCount < 2 {
+                documentsToDelete.append(contentsOf: docs)
+            }
+        }
+
+        guard !documentsToDelete.isEmpty else {
+            print("✅ No first-pass swipes to reset (permanent passes kept)")
+            return
+        }
+
         let batchSize = 450
-        for batchStart in stride(from: 0, to: snapshot.documents.count, by: batchSize) {
-            let batchEnd = min(batchStart + batchSize, snapshot.documents.count)
+        for batchStart in stride(from: 0, to: documentsToDelete.count, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, documentsToDelete.count)
             let batch = db.batch()
-            for document in snapshot.documents[batchStart..<batchEnd] {
+            for document in documentsToDelete[batchStart..<batchEnd] {
                 batch.deleteDocument(document.reference)
             }
             try await batch.commit()
         }
 
         let remainingSnapshot = try await swipesRef.whereField("action", isEqualTo: SwipeType.pass.rawValue).getDocuments(source: .server)
-        print("✅ Reset \(snapshot.documents.count) pass swipes to new. Remaining pass swipes: \(remainingSnapshot.documents.count)")
+        print("✅ Reset \(documentsToDelete.count) first-pass swipes. Remaining pass swipes: \(remainingSnapshot.documents.count)")
     }
     
     /// Delete only pass swipes for the current user.

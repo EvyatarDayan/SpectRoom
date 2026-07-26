@@ -3,6 +3,7 @@
 //  SpectRoom
 //
 //  Dual-thumb age range slider styled like EnergyLevelSlider.
+//  Only the thumbs are interactive — the track does not steal scroll gestures.
 //
 
 import SwiftUI
@@ -17,14 +18,9 @@ struct PreferredAgeRangeSlider: View {
     var onChangeMax: (Double) -> Void
     
     private let thumbSize: CGFloat = 28
+    private let thumbHitSlop: CGFloat = 12
     private let trackHeight: CGFloat = 10
-    
-    @State private var activeThumb: Thumb?
-    
-    private enum Thumb {
-        case min
-        case max
-    }
+    private let coordinateSpaceName = "preferredAgeRangeSlider"
     
     var body: some View {
         GeometryReader { geometry in
@@ -41,6 +37,7 @@ struct PreferredAgeRangeSlider: View {
                     .fill(Color.primary.opacity(0.08))
                     .frame(width: usableWidth, height: trackHeight)
                     .position(x: geometry.size.width / 2, y: midY)
+                    .allowsHitTesting(false)
                 
                 // Active fill between thumbs
                 Capsule()
@@ -53,38 +50,38 @@ struct PreferredAgeRangeSlider: View {
                     )
                     .frame(width: fillWidth, height: trackHeight)
                     .position(x: minX + fillWidth / 2, y: midY)
+                    .allowsHitTesting(false)
                 
-                thumbView(at: minX, midY: midY)
-                thumbView(at: maxX, midY: midY)
+                thumbView(
+                    at: minX,
+                    midY: midY,
+                    inset: inset,
+                    usableWidth: usableWidth,
+                    onDrag: onChangeMin
+                )
+                .zIndex(1)
+                
+                thumbView(
+                    at: maxX,
+                    midY: midY,
+                    inset: inset,
+                    usableWidth: usableWidth,
+                    onDrag: onChangeMax
+                )
+                .zIndex(2)
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
-            .contentShape(Rectangle())
-            .highPriorityGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        let age = age(for: value.location.x, inset: inset, usableWidth: usableWidth)
-                        if activeThumb == nil {
-                            let distMin = abs(value.startLocation.x - minX)
-                            let distMax = abs(value.startLocation.x - maxX)
-                            activeThumb = distMin <= distMax ? .min : .max
-                        }
-                        switch activeThumb {
-                        case .min:
-                            onChangeMin(age)
-                        case .max:
-                            onChangeMax(age)
-                        case .none:
-                            break
-                        }
-                    }
-                    .onEnded { _ in
-                        activeThumb = nil
-                    }
-            )
+            .coordinateSpace(name: coordinateSpaceName)
         }
     }
     
-    private func thumbView(at x: CGFloat, midY: CGFloat) -> some View {
+    private func thumbView(
+        at x: CGFloat,
+        midY: CGFloat,
+        inset: CGFloat,
+        usableWidth: CGFloat,
+        onDrag: @escaping (Double) -> Void
+    ) -> some View {
         Circle()
             .fill(Color(.systemBackground))
             .frame(width: thumbSize, height: thumbSize)
@@ -95,7 +92,21 @@ struct PreferredAgeRangeSlider: View {
                     .frame(width: 11, height: 11)
             )
             .shadow(color: Color.black.opacity(0.18), radius: 5, x: 0, y: 2)
+            .frame(
+                width: thumbSize + thumbHitSlop * 2,
+                height: thumbSize + thumbHitSlop * 2
+            )
+            .contentShape(Circle())
             .position(x: x, y: midY)
+            .gesture(
+                DragGesture(
+                    minimumDistance: 0,
+                    coordinateSpace: .named(coordinateSpaceName)
+                )
+                .onChanged { value in
+                    onDrag(age(for: value.location.x, inset: inset, usableWidth: usableWidth))
+                }
+            )
     }
     
     private func xPosition(for age: Double, inset: CGFloat, usableWidth: CGFloat) -> CGFloat {

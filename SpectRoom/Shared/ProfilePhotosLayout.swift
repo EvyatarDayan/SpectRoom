@@ -16,6 +16,21 @@ enum ProfilePhotoStyle {
     static let cardShadow = Color.black.opacity(0.12)
 }
 
+/// Local gallery pick with a stable identity so deletes target the correct cell.
+struct LocalGalleryImage: Identifiable, Equatable {
+    let id: UUID
+    let image: UIImage
+    
+    init(id: UUID = UUID(), image: UIImage) {
+        self.id = id
+        self.image = image
+    }
+    
+    static func == (lhs: LocalGalleryImage, rhs: LocalGalleryImage) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
 /// Large primary profile photo - full-bleed rounded card.
 struct ProfileMainPhotoCard: View {
     let imageURL: String?
@@ -106,19 +121,21 @@ struct ProfileMainPhotoCard: View {
 /// Gallery strip / grid inside a clean card (no frosted blur background).
 struct ProfileGalleryPhotosCard: View {
     let photoURLs: [String]
-    var localImages: [UIImage] = []
+    var localImages: [LocalGalleryImage] = []
     /// Pass `nil` to hide the section title (e.g. other-user profiles).
     var title: String? = "profile.my.photos".localized
     var allowsPaging: Bool = true
     var emptyMessage: String = "profile.no.photos".localized
     var onSelectRemote: ((Int) -> Void)?
     var onDeleteRemote: ((String) -> Void)?
-    var onDeleteLocal: ((Int) -> Void)?
+    var onDeleteLocal: ((UUID) -> Void)?
     var onAdd: (() -> Void)?
     var maxRemoteVisible: Int = 5
     var showValidation: Bool? = nil
     /// White section card used on edit profile; leave off for read-only profiles.
     var usesWhiteBackground: Bool = false
+    /// Optional caption under the grid (e.g. min/max photo hint).
+    var footerText: String? = nil
     
     @State private var pageIndex = 0
     
@@ -126,13 +143,17 @@ struct ProfileGalleryPhotosCard: View {
         Array(photoURLs.prefix(maxRemoteVisible))
     }
     
-    private var localToShow: [UIImage] {
+    private var localToShow: [LocalGalleryImage] {
         let remaining = max(0, maxRemoteVisible - remoteToShow.count)
         return Array(localImages.prefix(remaining))
     }
     
     private var totalCount: Int {
         photoURLs.count + localImages.count
+    }
+    
+    private var canAddMore: Bool {
+        totalCount < maxRemoteVisible
     }
     
     var body: some View {
@@ -166,6 +187,12 @@ struct ProfileGalleryPhotosCard: View {
             } else {
                 photoGrid
             }
+            
+            if let footerText {
+                Text(footerText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -185,15 +212,18 @@ struct ProfileGalleryPhotosCard: View {
             ],
             spacing: 10
         ) {
-            ForEach(Array(remoteToShow.enumerated()), id: \.offset) { index, url in
-                galleryThumb(url: url, remoteIndex: index)
+            ForEach(remoteToShow, id: \.self) { url in
+                galleryThumb(
+                    url: url,
+                    remoteIndex: photoURLs.firstIndex(of: url) ?? 0
+                )
             }
             
-            ForEach(Array(localToShow.enumerated()), id: \.offset) { index, image in
-                localThumb(image: image, index: index)
+            ForEach(localToShow) { localPhoto in
+                localThumb(localPhoto: localPhoto)
             }
             
-            if let onAdd, totalCount < maxRemoteVisible {
+            if let onAdd {
                 Button(action: onAdd) {
                     VStack(spacing: 8) {
                         Image(systemName: "plus")
@@ -215,6 +245,8 @@ struct ProfileGalleryPhotosCard: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .disabled(!canAddMore)
+                .opacity(canAddMore ? 1.0 : 0.45)
             }
         }
     }
@@ -293,24 +325,29 @@ struct ProfileGalleryPhotosCard: View {
                 .padding(6)
             }
         }
+        .frame(maxWidth: .infinity)
+        .id(url) // Force CachedAsyncImage to rebuild when this URL identity moves/changes
         .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
     }
     
-    private func localThumb(image: UIImage, index: Int) -> some View {
+    private func localThumb(localPhoto: LocalGalleryImage) -> some View {
         ZStack(alignment: .topTrailing) {
+            // Clear frame first so scaledToFill can't expand LazyVGrid cells
+            // (that was collapsing spacing on the second row).
             Color.clear
                 .frame(maxWidth: .infinity)
                 .frame(height: ProfilePhotoStyle.galleryPhotoSize)
                 .overlay {
-                    Image(uiImage: image)
+                    Image(uiImage: localPhoto.image)
                         .resizable()
                         .scaledToFill()
                 }
                 .clipped()
                 .clipShape(RoundedRectangle(cornerRadius: ProfilePhotoStyle.photoCorner, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: ProfilePhotoStyle.photoCorner, style: .continuous))
             
             if let onDeleteLocal {
-                Button(action: { onDeleteLocal(index) }) {
+                Button(action: { onDeleteLocal(localPhoto.id) }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 22))
                         .symbolRenderingMode(.palette)
@@ -320,6 +357,7 @@ struct ProfileGalleryPhotosCard: View {
                 .padding(6)
             }
         }
+        .frame(maxWidth: .infinity)
         .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
     }
 }

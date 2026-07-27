@@ -114,7 +114,23 @@
 "settings.blocked.users.unblock.confirm.message" = "Do you want to unblock %@?";
 
 "settings.authentication.section.title" = "Authentication";
-"settings.authentication.signout.subtitle" = "Tap to sign out";
+"settings.account.section.title" = "Account";
+"settings.authentication.signout.subtitle" = "Sign out your account";
+"settings.delete.account.section.title" = "Delete account";
+"settings.delete.account.button" = "Delete Account";
+"settings.delete.account.subtitle" = "Permanently delete your account";
+"settings.delete.account.confirm.title" = "Delete account";
+"settings.delete.account.confirm.message" = "Are you sure? Your account will be deleted!";
+"settings.delete.account.confirm.yes" = "Yes";
+"settings.delete.account.type.message" = "In order to delete your account, enter your password";
+"settings.delete.account.type.placeholder" = "Password";
+"settings.delete.account.confirm.ok" = "OK";
+"settings.delete.account.error" = "Could not delete your account. Please try again.";
+"settings.delete.account.wrong.password" = "Incorrect password, try again.";
+"settings.delete.account.success.message" = "Your account is not deleted, we hope to see you again soon.";
+
+"auth.error.account.pending.deletion" = "This account is scheduled for deletion. Contact support if you need help recovering it.";
+"auth.error.email.pending.deletion" = "This email was deleted in the past, using the same email will be possible only after 14 days from the account deletion date.";
 
 "address.search.map.placeholder" = "Search to preview the location";
 "address.search.use.address" = "Use this address";
@@ -143,6 +159,7 @@
 "profile.about.me" = "About Me";
 "profile.no.bio" = "No bio available";
 "profile.my.interests" = "My Interests";
+"profile.interests" = "Interests";
 "profile.no.interests" = "No interests added yet";
 "profile.gender.preferences" = "Gender & Preferences";
 "profile.preferences" = "Preferences";
@@ -153,9 +170,11 @@
 "profile.my.preferred.age" = "My Preferred Age: %@ To %@";
 "profile.my.preferences" = "My Preferences";
 "profile.my.energy.level" = "My Energy Level Today";
-"profile.energy.level" = "Energy level today";
+"profile.energy.level" = "Energy Level Today";
 "profile.no.preferences" = "No preferences set";
 "profile.my.photos" = "My Photos";
+"profile.photos" = "Photos";
+"profile.profile.photo" = "Profile Photo";
 "profile.no.photos" = "No photos added yet";
 "profile.gender" = "Gender";
 "profile.no.one" = "no one";
@@ -297,6 +316,7 @@
 "profile.edit.complete.title" = "Complete Your Profile";
 "profile.edit.name" = "My Name";
 "profile.edit.name.placeholder" = "Enter your name";
+"profile.edit.email" = "My Email";
 "profile.edit.date.of.birth" = "My Date of Birth";
 "profile.edit.my.age" = "My Age: %@";
 "profile.edit.loading" = "Loading profile...";
@@ -317,9 +337,13 @@
 "profile.edit.interested.in" = "I'm Interested In";
 "profile.edit.interested.anyone" = "Anyone";
 "profile.edit.looking.for" = "I'm Looking For";
+"profile.edit.looking.romantic.relationship" = "Romantic Relationship";
+"profile.edit.looking.in.person.friendship" = "In-Person Friendship";
+"profile.edit.looking.online.friendship" = "Online Friendship";
+"profile.edit.looking.hobby.buddy" = "Hobby Buddy";
+"profile.edit.looking.not.sure" = "Not Sure Yet";
 "profile.edit.looking.friendship" = "Friendship";
 "profile.edit.looking.relationship" = "Relationship";
-"profile.edit.looking.not.sure" = "Not Sure Yet";
 "profile.edit.preferred.age" = "My Preferred Age";
 "profile.edit.energy.level" = "My Energy Level Today";
 "profile.edit.energy.quiet.calm" = "Quiet and Calm";
@@ -338,7 +362,7 @@
 "profile.edit.validation.age" = "You must be 18 years or older";
 "profile.edit.validation.location" = "Select a location in Sweden";
 "profile.edit.validation.bio" = "\"About me\" must be at least 30 characters";
-"profile.edit.validation.photos" = "Add at least 3 photos";
+"profile.edit.validation.photos" = "Add at least 2 photos";
 "profile.edit.validation.interests" = "Select at least 3 interests";
 "profile.edit.validation.gender" = "Select your gender";
 "profile.edit.validation.interested.in" = "Select who you're interested in";
@@ -407,7 +431,7 @@
 "profile.sensory.visually.calm.subtitle" = "Enjoys minimalist, clean, and uncluttered environments";
 "profile.sensory.clear.touch.title" = "Deep-pressure / clear touch";
 "profile.sensory.clear.touch.subtitle" = "Prefers firm physical contact or clear verbal consent over unexpected light touches";
-"profile.body.type" = "Body type";
+"profile.body.type" = "Body Type";
 "profile.my.body.type" = "My Body Type";
 "profile.edit.body.type.prefer.not" = "Prefer not to share";
 "profile.edit.body.type.slim" = "Slim";

@@ -114,7 +114,24 @@
 "settings.blocked.users.unblock.confirm.message" = "¿Quieres desbloquear a %@?";
 
 "settings.authentication.section.title" = "Autenticación";
-"settings.authentication.signout.subtitle" = "Toca para cerrar sesión";
+"settings.account.section.title" = "Cuenta";
+"settings.authentication.signout.subtitle" = "Cierra sesión de tu cuenta";
+
+"settings.delete.account.section.title" = "Eliminar cuenta";
+"settings.delete.account.button" = "Eliminar Cuenta";
+"settings.delete.account.subtitle" = "Elimina permanentemente tu cuenta";
+"settings.delete.account.confirm.title" = "Eliminar cuenta";
+"settings.delete.account.confirm.message" = "¿Estás seguro? ¡Tu cuenta será eliminada!";
+"settings.delete.account.confirm.yes" = "Sí";
+"settings.delete.account.type.message" = "Para eliminar tu cuenta, introduce tu contraseña";
+"settings.delete.account.type.placeholder" = "Contraseña";
+"settings.delete.account.confirm.ok" = "OK";
+"settings.delete.account.error" = "No se pudo eliminar tu cuenta. Inténtalo de nuevo.";
+"settings.delete.account.wrong.password" = "Contraseña incorrecta, inténtalo de nuevo.";
+"settings.delete.account.success.message" = "Tu cuenta ha sido eliminada, esperamos verte de nuevo pronto.";
+
+"auth.error.account.pending.deletion" = "Esta cuenta está programada para eliminación. Contacta con soporte si necesitas ayuda para recuperarla.";
+"auth.error.email.pending.deletion" = "Este correo se eliminó en el pasado; solo podrás usar el mismo correo 14 días después de la fecha de eliminación de la cuenta.";
 
 "address.search.map.placeholder" = "Busca para previsualizar la ubicación";
 "address.search.use.address" = "Usar esta dirección";
@@ -143,6 +160,7 @@
 "profile.about.me" = "Acerca de Mí";
 "profile.no.bio" = "No hay biografía disponible";
 "profile.my.interests" = "Mis Intereses";
+"profile.interests" = "Intereses";
 "profile.no.interests" = "Aún no hay intereses agregados";
 "profile.gender.preferences" = "Género y Preferencias";
 "profile.preferences" = "Preferencias";
@@ -160,6 +178,8 @@
 "profile.energy.level" = "Nivel de energía hoy";
 "profile.no.preferences" = "No hay preferencias establecidas";
 "profile.my.photos" = "Mis Fotos";
+"profile.photos" = "Fotos";
+"profile.profile.photo" = "Foto De Perfil";
 "profile.no.photos" = "Aún no hay fotos agregadas";
 "profile.gender" = "Género";
 "profile.no.one" = "nadie";
@@ -301,6 +321,7 @@
 "profile.edit.complete.title" = "Completa tu Perfil";
 "profile.edit.name" = "Mi Nombre";
 "profile.edit.name.placeholder" = "Ingresa tu nombre";
+"profile.edit.email" = "Mi Correo";
 "profile.edit.date.of.birth" = "Mi Fecha de Nacimiento";
 "profile.edit.my.age" = "Mi Edad: %@";
 "profile.edit.loading" = "Cargando perfil...";
@@ -321,9 +342,13 @@
 "profile.edit.interested.in" = "Me Interesa";
 "profile.edit.interested.anyone" = "Cualquiera";
 "profile.edit.looking.for" = "Estoy Buscando";
+"profile.edit.looking.romantic.relationship" = "Relación Romántica";
+"profile.edit.looking.in.person.friendship" = "Amistad En Persona";
+"profile.edit.looking.online.friendship" = "Amistad Online";
+"profile.edit.looking.hobby.buddy" = "Compañero De Hobby";
+"profile.edit.looking.not.sure" = "No Estoy Seguro/A";
 "profile.edit.looking.friendship" = "Amistad";
 "profile.edit.looking.relationship" = "Relación";
-"profile.edit.looking.not.sure" = "No Estoy Seguro/A";
 "profile.edit.preferred.age" = "Mi Edad Preferida";
 "profile.edit.energy.level" = "Mi Nivel de Energía Hoy";
 "profile.edit.energy.quiet.calm" = "Tranquilo y Calmado";
@@ -342,7 +367,7 @@
 "profile.edit.validation.age" = "Debes tener 18 años o más";
 "profile.edit.validation.location" = "Selecciona una ubicación en Suecia";
 "profile.edit.validation.bio" = "\"Acerca de mí\" debe tener al menos 30 caracteres";
-"profile.edit.validation.photos" = "Agrega al menos 3 fotos";
+"profile.edit.validation.photos" = "Agrega al menos 2 fotos";
 "profile.edit.validation.interests" = "Selecciona al menos 3 intereses";
 "profile.edit.validation.gender" = "Selecciona tu género";
 "profile.edit.validation.interested.in" = "Selecciona en quién estás interesado/a";

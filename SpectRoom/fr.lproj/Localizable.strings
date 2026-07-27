@@ -114,7 +114,24 @@
 "settings.blocked.users.unblock.confirm.message" = "Voulez-vous débloquer %@ ?";
 
 "settings.authentication.section.title" = "Authentification";
-"settings.authentication.signout.subtitle" = "Appuyez pour vous déconnecter";
+"settings.account.section.title" = "Compte";
+"settings.authentication.signout.subtitle" = "Déconnectez-vous de votre compte";
+
+"settings.delete.account.section.title" = "Supprimer le compte";
+"settings.delete.account.button" = "Supprimer le Compte";
+"settings.delete.account.subtitle" = "Supprimez définitivement votre compte";
+"settings.delete.account.confirm.title" = "Supprimer le compte";
+"settings.delete.account.confirm.message" = "Êtes-vous sûr ? Votre compte sera supprimé !";
+"settings.delete.account.confirm.yes" = "Oui";
+"settings.delete.account.type.message" = "Pour supprimer votre compte, saisissez votre mot de passe";
+"settings.delete.account.type.placeholder" = "Mot de passe";
+"settings.delete.account.confirm.ok" = "OK";
+"settings.delete.account.error" = "Impossible de supprimer votre compte. Veuillez réessayer.";
+"settings.delete.account.wrong.password" = "Mot de passe incorrect, réessayez.";
+"settings.delete.account.success.message" = "Votre compte est maintenant supprimé, nous espérons vous revoir bientôt.";
+
+"auth.error.account.pending.deletion" = "Ce compte est programmé pour suppression. Contactez le support si vous avez besoin d'aide pour le récupérer.";
+"auth.error.email.pending.deletion" = "Cet e-mail a déjà été supprimé. Réutiliser la même adresse ne sera possible que 14 jours après la date de suppression du compte.";
 
 "address.search.map.placeholder" = "Recherchez pour prévisualiser l’emplacement";
 "address.search.use.address" = "Utiliser cette adresse";
@@ -143,6 +160,7 @@
 "profile.about.me" = "À Propos de Moi";
 "profile.no.bio" = "Aucune biographie disponible";
 "profile.my.interests" = "Mes Intérêts";
+"profile.interests" = "Intérêts";
 "profile.no.interests" = "Aucun centre d'intérêt ajouté pour le moment";
 "profile.gender.preferences" = "Genre et Préférences";
 "profile.preferences" = "Préférences";
@@ -160,6 +178,8 @@
 "profile.energy.level" = "Niveau d'énergie aujourd'hui";
 "profile.no.preferences" = "Aucune préférence définie";
 "profile.my.photos" = "Mes Photos";
+"profile.photos" = "Photos";
+"profile.profile.photo" = "Photo De Profil";
 "profile.no.photos" = "Aucune photo ajoutée pour le moment";
 "profile.gender" = "Genre";
 "profile.no.one" = "personne";
@@ -301,6 +321,7 @@
 "profile.edit.complete.title" = "Complétez Votre Profil";
 "profile.edit.name" = "Mon Nom";
 "profile.edit.name.placeholder" = "Entrez votre nom";
+"profile.edit.email" = "Mon Email";
 "profile.edit.date.of.birth" = "Ma Date de Naissance";
 "profile.edit.my.age" = "Mon Âge: %@";
 "profile.edit.loading" = "Chargement du profil...";
@@ -321,9 +342,13 @@
 "profile.edit.interested.in" = "Je Suis Intéressé(E) Par";
 "profile.edit.interested.anyone" = "N'importe Qui";
 "profile.edit.looking.for" = "Je Recherche";
+"profile.edit.looking.romantic.relationship" = "Relation Romantique";
+"profile.edit.looking.in.person.friendship" = "Amitié En Personne";
+"profile.edit.looking.online.friendship" = "Amitié En Ligne";
+"profile.edit.looking.hobby.buddy" = "Partenaire De Hobby";
+"profile.edit.looking.not.sure" = "Pas Sûr(E) Encore";
 "profile.edit.looking.friendship" = "Amitié";
 "profile.edit.looking.relationship" = "Relation";
-"profile.edit.looking.not.sure" = "Pas Sûr(E) Encore";
 "profile.edit.preferred.age" = "Mon Âge Préféré";
 "profile.edit.energy.level" = "Mon Niveau d'Énergie Aujourd'hui";
 "profile.edit.energy.quiet.calm" = "Calme et Tranquille";
@@ -342,7 +367,7 @@
 "profile.edit.validation.age" = "Vous devez avoir 18 ans ou plus";
 "profile.edit.validation.location" = "Sélectionnez une localisation en Suède";
 "profile.edit.validation.bio" = "\"À propos de moi\" doit contenir au moins 30 caractères";
-"profile.edit.validation.photos" = "Ajoutez au moins 3 photos";
+"profile.edit.validation.photos" = "Ajoutez au moins 2 photos";
 "profile.edit.validation.interests" = "Sélectionnez au moins 3 centres d'intérêt";
 "profile.edit.validation.gender" = "Sélectionnez votre genre";
 "profile.edit.validation.interested.in" = "Sélectionnez qui vous intéresse";

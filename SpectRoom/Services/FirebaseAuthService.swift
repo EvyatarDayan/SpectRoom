@@ -10,6 +10,7 @@ import FirebaseAuth
 import FirebaseFirestore
 import FirebaseStorage
 import FirebaseMessaging
+import FirebaseFunctions
 
 class FirebaseAuthService: ObservableObject {
     static let shared = FirebaseAuthService()
@@ -23,6 +24,8 @@ class FirebaseAuthService: ObservableObject {
     let auth = Auth.auth()
     private let db = Firestore.firestore()
     private var matchesListener: ListenerRegistration?
+    /// Keeps the app on the login screen while we verify the account isn't soft-deleted.
+    private var isVerifyingSignIn = false
     
     private init() {
         // Firebase restores the session from the keychain synchronously when available.
@@ -31,17 +34,24 @@ class FirebaseAuthService: ObservableObject {
         // Listen for authentication state changes
         auth.addStateDidChangeListener { [weak self] _, firebaseUser in
             DispatchQueue.main.async {
-                self?.isAuthenticated = firebaseUser != nil
-                self?.hasResolvedAuthState = true
+                guard let self else { return }
+                self.hasResolvedAuthState = true
+                
+                // During sign-in verification, don't flip UI to authenticated yet.
+                if self.isVerifyingSignIn {
+                    return
+                }
+                
+                self.isAuthenticated = firebaseUser != nil
                 if let firebaseUser = firebaseUser {
                     // Load user data from Firestore when Firebase user changes
                     Task {
-                        await self?.loadUserData(for: firebaseUser.uid)
+                        await self.loadUserData(for: firebaseUser.uid)
                         // Update FCM token when user logs in
-                        await self?.updateFCMTokenIfNeeded()
+                        await self.updateFCMTokenIfNeeded()
                     }
                 } else {
-                    self?.currentUser = nil
+                    self.currentUser = nil
                 }
             }
         }
@@ -70,16 +80,100 @@ class FirebaseAuthService: ObservableObject {
     // MARK: - Authentication Methods
     
     func signUp(email: String, password: String, name: String, age: Int) async throws {
-        let result = try await auth.createUser(withEmail: email, password: password)
-        let user = result.user
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        
+        if try await isEmailPendingDeletion(normalizedEmail) {
+            throw SpectRoomAuthError.emailPendingDeletion
+        }
+        
+        do {
+            _ = try await auth.createUser(withEmail: normalizedEmail, password: password)
+        } catch {
+            // Soft-deleted Auth users still occupy the email until hard delete.
+            if isEmailAlreadyInUseError(error),
+               (try? await isEmailPendingDeletion(normalizedEmail)) == true {
+                throw SpectRoomAuthError.emailPendingDeletion
+            }
+            throw error
+        }
         
         // Don't create user document automatically - let user complete profile first
-        print("✅ User account created: \(user.uid)")
+        print("✅ User account created: \(auth.currentUser?.uid ?? "unknown")")
         print("📝 User can now complete their profile through the app")
     }
     
+    /// Returns true when this email belongs to a soft-deleted account still within the 14-day window.
+    private func isEmailPendingDeletion(_ normalizedEmail: String) async throws -> Bool {
+        let result = try await Functions.functions(region: "us-central1")
+            .httpsCallable("checkEmailPendingDeletion")
+            .call(["email": normalizedEmail])
+        
+        guard let data = result.data as? [String: Any] else {
+            print("⚠️ checkEmailPendingDeletion returned unexpected payload: \(String(describing: result.data))")
+            return false
+        }
+        
+        let pending = boolValue(from: data, key: "pendingDeletion")
+        print("🔍 Email pending deletion check for \(normalizedEmail): \(pending)")
+        return pending
+    }
+    
+    private func boolValue(from data: [String: Any], key: String) -> Bool {
+        if let value = data[key] as? Bool {
+            return value
+        }
+        if let number = data[key] as? NSNumber {
+            return number.boolValue
+        }
+        return false
+    }
+    
+    private func isEmailAlreadyInUseError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if let authCode = AuthErrorCode(_bridgedNSError: nsError)?.code {
+            return authCode == .emailAlreadyInUse
+        }
+        return false
+    }
+    
     func signIn(email: String, password: String) async throws {
-        _ = try await auth.signIn(withEmail: email, password: password)
+        await MainActor.run {
+            self.isVerifyingSignIn = true
+        }
+        
+        do {
+            _ = try await auth.signIn(withEmail: email, password: password)
+            
+            if let userData = try await fetchUserData(),
+               userData["isDeleted"] as? Bool == true {
+                try auth.signOut()
+                await MainActor.run {
+                    self.isVerifyingSignIn = false
+                    self.isAuthenticated = false
+                    self.currentUser = nil
+                }
+                throw SpectRoomAuthError.accountPendingDeletion
+            }
+            
+            let userId = auth.currentUser?.uid
+            await MainActor.run {
+                self.isVerifyingSignIn = false
+                self.isAuthenticated = self.auth.currentUser != nil
+            }
+            
+            if let userId {
+                await loadUserData(for: userId)
+                await updateFCMTokenIfNeeded()
+            }
+        } catch {
+            await MainActor.run {
+                self.isVerifyingSignIn = false
+                if self.auth.currentUser == nil {
+                    self.isAuthenticated = false
+                }
+            }
+            throw error
+        }
     }
     
     func signOut() throws {
@@ -88,6 +182,61 @@ class FirebaseAuthService: ObservableObject {
     
     func resetPassword(email: String) async throws {
         try await auth.sendPasswordReset(withEmail: email)
+    }
+    
+    /// Soft-deletes the account. Hard deletion runs via Cloud Function after 14 days
+    /// unless an admin clears `isDeleted` / related fields in Firestore first.
+    /// Also write `deletedEmails/{email}` so signup can block reuse until hard delete.
+    /// Admin revive: remove isDeleted/deletedAt/scheduledHardDeleteAt from users/{uid}
+    /// and delete deletedEmails/{email}.
+    func requestAccountDeletion() async throws {
+        guard let user = auth.currentUser else {
+            throw SpectRoomAuthError.notAuthenticated
+        }
+        
+        let now = Date().timeIntervalSince1970
+        let hardDeleteAt = now + (14 * 24 * 60 * 60)
+        let normalizedEmail = (user.email ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        
+        try await db.collection("users").document(user.uid).setData([
+            "isDeleted": true,
+            "deletedAt": now,
+            "scheduledHardDeleteAt": hardDeleteAt,
+            "isOnline": false,
+            "fcmToken": FieldValue.delete()
+        ], merge: true)
+        
+        if !normalizedEmail.isEmpty {
+            try await db.collection("deletedEmails").document(normalizedEmail).setData([
+                "uid": user.uid,
+                "email": normalizedEmail,
+                "deletedAt": now,
+                "scheduledHardDeleteAt": hardDeleteAt
+            ])
+        }
+        
+        print("🗑️ Account marked for deletion: \(user.uid), hard delete after \(hardDeleteAt)")
+    }
+    
+    func reauthenticate(withPassword password: String) async throws {
+        guard let user = auth.currentUser, let email = user.email else {
+            throw SpectRoomAuthError.notAuthenticated
+        }
+        
+        guard !password.isEmpty else {
+            throw SpectRoomAuthError.wrongPassword
+        }
+        
+        let credential = EmailAuthProvider.credential(withEmail: email, password: password)
+        do {
+            try await user.reauthenticate(with: credential)
+        } catch {
+            // Any failed reauth in this flow is treated as an incorrect password for UX.
+            print("⚠️ Reauthentication failed: \(error.localizedDescription)")
+            throw SpectRoomAuthError.wrongPassword
+        }
     }
     
     // MARK: - User Data Methods
@@ -102,6 +251,15 @@ class FirebaseAuthService: ObservableObject {
     private func loadUserData(for userID: String) async {
         do {
             if let userData = try await fetchUserData() {
+                if userData["isDeleted"] as? Bool == true {
+                    print("🗑️ Account \(userID) is marked deleted — signing out")
+                    try? auth.signOut()
+                    await MainActor.run {
+                        self.currentUser = nil
+                    }
+                    return
+                }
+                
                 // Load photos and profile photo from Firestore
                 let photos = userData["photos"] as? [String] ?? []
                 let profilePhotoURL = userData["profilePhotoURL"] as? String
@@ -427,6 +585,10 @@ class FirebaseAuthService: ObservableObject {
         excludingUserId: String?
     ) -> SpectRoomUser? {
         if documentID == excludingUserId {
+            return nil
+        }
+        
+        if userData["isDeleted"] as? Bool == true {
             return nil
         }
         
@@ -2875,5 +3037,25 @@ private extension FirebaseAuthService {
         }
 
         return String(format: key.localized, String(format: "%.1f", roundedDistance))
+    }
+}
+
+enum SpectRoomAuthError: LocalizedError {
+    case accountPendingDeletion
+    case emailPendingDeletion
+    case notAuthenticated
+    case wrongPassword
+    
+    var errorDescription: String? {
+        switch self {
+        case .accountPendingDeletion:
+            return "auth.error.account.pending.deletion".localized
+        case .emailPendingDeletion:
+            return "auth.error.email.pending.deletion".localized
+        case .notAuthenticated:
+            return "auth.error".localized
+        case .wrongPassword:
+            return "settings.delete.account.wrong.password".localized
+        }
     }
 }

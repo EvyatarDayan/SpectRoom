@@ -572,7 +572,7 @@ struct SearchView: View {
             return false
         }
 
-        let currentUserLookingFor = Set(currentUser.lookingFor.filter { $0 != "Not sure yet" })
+        let currentUserLookingFor = Set(currentUser.lookingFor.filter { $0 != "Not sure yet" && $0 != "Not Sure Yet" })
 
         if currentUserLookingFor.isEmpty {
             if !matchesGenderPreferences(currentUser: currentUser, otherUser: user) {
@@ -584,7 +584,7 @@ struct SearchView: View {
             return true
         }
 
-        let userLookingFor = Set(user.lookingFor.filter { $0 != "Not sure yet" })
+        let userLookingFor = Set(user.lookingFor.filter { $0 != "Not sure yet" && $0 != "Not Sure Yet" })
         if !userLookingFor.isEmpty && currentUserLookingFor.intersection(userLookingFor).isEmpty {
             return false
         }
@@ -2037,7 +2037,7 @@ struct UserProfileModal: View {
     // MARK: - Profile Header Section
     private var profileHeaderSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("profile.edit.profile.photo".localized)
+            Text("profile.profile.photo".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
             
@@ -2204,7 +2204,7 @@ struct UserProfileModal: View {
     // MARK: - My Interests Section
     private var myInterestsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("profile.my.interests".localized)
+            Text("profile.interests".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
             
@@ -2394,16 +2394,27 @@ struct UserProfileModal: View {
     }
     
     private func formatPreference(_ preference: String) -> String {
-        if preference == "Not sure yet" {
+        switch preference {
+        case "Romantic relationship", "Relationship":
+            return "profile.edit.looking.romantic.relationship".localized
+        case "In-Person Friendship", "Friendship":
+            return "profile.edit.looking.in.person.friendship".localized
+        case "Online Friendship":
+            return "profile.edit.looking.online.friendship".localized
+        case "Hobby Buddy":
+            return "profile.edit.looking.hobby.buddy".localized
+        case "Not Sure Yet", "Not sure yet":
             return "profile.edit.looking.not.sure".localized
+        default:
+            return preference
         }
-        return preference
     }
 
     // MARK: - My Photos Section
     private var myPhotosSection: some View {
         ProfileGalleryPhotosCard(
             photoURLs: displayProfile.photos,
+            title: "profile.photos".localized,
             allowsPaging: false,
             onSelectRemote: { index in
                 selectedPhotoIndex = index + 1

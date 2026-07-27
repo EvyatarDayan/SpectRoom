@@ -194,6 +194,23 @@ class AppStateManager: ObservableObject {
                     // Reset failed sign-in attempts counter on successful sign-in
                     UserDefaults.standard.set(0, forKey: "failedSignInAttempts")
                 }
+            } catch let error as SpectRoomAuthError {
+                await MainActor.run {
+                    self.isLoading = false
+                    // Soft-deleted accounts look like invalid credentials (don't reveal account status).
+                    if case .accountPendingDeletion = error {
+                        let currentAttempts = UserDefaults.standard.integer(forKey: "failedSignInAttempts")
+                        let newAttempts = currentAttempts + 1
+                        UserDefaults.standard.set(newAttempts, forKey: "failedSignInAttempts")
+                        if newAttempts % 5 == 0 {
+                            self.authErrorMessage = "auth.error.credentials.with.forgot".localized
+                        } else {
+                            self.authErrorMessage = "auth.error.credentials".localized
+                        }
+                    } else {
+                        self.authErrorMessage = error.errorDescription
+                    }
+                }
             } catch {
                 await MainActor.run {
                     self.isLoading = false
@@ -215,6 +232,11 @@ class AppStateManager: ObservableObject {
         }
     }
     
+    func deleteAccount(password: String) async throws {
+        try await firebaseAuth.reauthenticate(withPassword: password)
+        try await firebaseAuth.requestAccountDeletion()
+    }
+    
     func signUp(name: String, age: Int, email: String, password: String) {
         isLoading = true
         
@@ -230,11 +252,16 @@ class AppStateManager: ObservableObject {
                     self.saveAppState()
                     print("🆕 New user signed up - will show mandatory profile completion")
                 }
+            } catch let error as SpectRoomAuthError {
+                await MainActor.run {
+                    self.isLoading = false
+                    self.authErrorMessage = error.errorDescription
+                }
             } catch {
                 await MainActor.run {
                     self.isLoading = false
-                    // Handle error - you might want to show an alert
                     print("Sign up error: \(error.localizedDescription)")
+                    self.authErrorMessage = error.localizedDescription
                 }
             }
         }
@@ -316,12 +343,12 @@ class AppStateManager: ObservableObject {
         // Check interests (at least 3)
         let hasInterests = user.interests.count >= 3
         
-        // Check photos (at least 3)
+        // Check photos (at least 2)
         let validPhotos = user.photos.filter { photoURL in
             let trimmedURL = photoURL.trimmingCharacters(in: .whitespacesAndNewlines)
             return !trimmedURL.isEmpty && URL(string: trimmedURL) != nil
         }
-        let hasPhotos = validPhotos.count >= 3
+        let hasPhotos = validPhotos.count >= 2
         
         // Check profile photo (must exist - first photo)
         let hasProfilePhoto = !validPhotos.isEmpty

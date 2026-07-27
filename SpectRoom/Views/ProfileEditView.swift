@@ -2,6 +2,8 @@ import SwiftUI
 import PhotosUI
 import MapKit
 import Foundation
+import UniformTypeIdentifiers
+import UIKit
 
 struct ProfileEditView: View {
     @EnvironmentObject var appState: AppStateManager
@@ -31,7 +33,7 @@ struct ProfileEditView: View {
     @State private var locationLongitude: Double? = nil
     @State private var bio: String = ""
     @State private var existingPhotos: [String] = []
-    @State private var newPhotos: [UIImage] = []
+    @State private var newPhotos: [LocalGalleryImage] = []
     @State private var photosToDelete: Set<String> = []
     @State private var selectedInterests: Set<String> = []
     @State private var customInterest: String = ""
@@ -141,6 +143,45 @@ struct ProfileEditView: View {
         }
     }
     
+    private enum LookingForOption: String, CaseIterable {
+        case romanticRelationship = "Romantic relationship"
+        case inPersonFriendship = "In-Person Friendship"
+        case onlineFriendship = "Online Friendship"
+        case hobbyBuddy = "Hobby Buddy"
+        case notSureYet = "Not Sure Yet"
+        
+        var title: String {
+            switch self {
+            case .romanticRelationship:
+                return "profile.edit.looking.romantic.relationship".localized
+            case .inPersonFriendship:
+                return "profile.edit.looking.in.person.friendship".localized
+            case .onlineFriendship:
+                return "profile.edit.looking.online.friendship".localized
+            case .hobbyBuddy:
+                return "profile.edit.looking.hobby.buddy".localized
+            case .notSureYet:
+                return "profile.edit.looking.not.sure".localized
+            }
+        }
+        
+        static func migratedValue(from stored: String) -> String {
+            switch stored {
+            case "Relationship":
+                return LookingForOption.romanticRelationship.rawValue
+            case "Friendship":
+                return LookingForOption.inPersonFriendship.rawValue
+            case "Not sure yet", "Other":
+                return LookingForOption.notSureYet.rawValue
+            default:
+                if LookingForOption(rawValue: stored) != nil {
+                    return stored
+                }
+                return LookingForOption.notSureYet.rawValue
+            }
+        }
+    }
+    
     private enum IdealFirstDateOption: String, CaseIterable {
         case relaxingParkWalk
         case cozyCafeMeet
@@ -181,6 +222,9 @@ struct ProfileEditView: View {
     @State private var selectedSensoryPreferences: [String] = []
     @State private var sensoryInfoOption: SensoryPreferenceOption? = nil
     @State private var isDatePickerExpanded = false
+    
+    private let minGalleryPhotos = 2
+    private let maxGalleryPhotos = 5
     
     var body: some View {
         NavigationView {
@@ -410,6 +454,27 @@ struct ProfileEditView: View {
                 )
                 .autocorrectionDisabled(true)
                 .textInputAutocapitalization(.words)
+            
+            Text("profile.edit.email".localized)
+                .font(.headline)
+                .fontWeight(.semibold)
+                .padding(.top, 4)
+            
+            Text(displayEmail)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.blue.opacity(0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
+                )
+                .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
@@ -417,6 +482,13 @@ struct ProfileEditView: View {
         .cornerRadius(12)
         .overlay(validationFrame(isValid: isNameValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+    }
+    
+    private var displayEmail: String {
+        let email = appState.currentUser?.email
+            ?? FirebaseAuthService.shared.auth.currentUser?.email
+            ?? ""
+        return email.isEmpty ? "—" : email
     }
     
     // MARK: - Date of Birth Section
@@ -742,7 +814,6 @@ struct ProfileEditView: View {
         .padding()
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
-        .overlay(validationFrame(isValid: isSensoryPreferencesValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
     
@@ -830,13 +901,6 @@ struct ProfileEditView: View {
                     ) {
                         toggleInterestedIn("Non-binary")
                     }
-                    
-                    ProfileSelectionChip(
-                        title: "profile.edit.interested.anyone".localized,
-                        isSelected: selectedInterestedIn.contains("Anyone")
-                    ) {
-                        toggleInterestedIn("Anyone")
-                    }
                 }
                 
                 // Show selected custom preferences (only for old custom text entries)
@@ -845,7 +909,7 @@ struct ProfileEditView: View {
                         GridItem(.adaptive(minimum: 100))
                     ], spacing: 8) {
                         ForEach(Array(selectedInterestedIn), id: \.self) { preference in
-                            if preference != "Man" && preference != "Woman" && preference != "Non-binary" && preference != "Anyone" {
+                            if preference != "Man" && preference != "Woman" && preference != "Non-binary" {
                                 HStack {
                                     Text(preference)
                                         .font(.caption)
@@ -880,32 +944,14 @@ struct ProfileEditView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                 
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(), spacing: 10),
-                        GridItem(.flexible(), spacing: 10)
-                    ],
-                    spacing: 10
-                ) {
-                    ProfileSelectionChip(
-                        title: "profile.edit.looking.friendship".localized,
-                        isSelected: selectedLookingFor.contains("Friendship")
-                    ) {
-                        toggleLookingFor("Friendship")
-                    }
-                    
-                    ProfileSelectionChip(
-                        title: "profile.edit.looking.relationship".localized,
-                        isSelected: selectedLookingFor.contains("Relationship")
-                    ) {
-                        toggleLookingFor("Relationship")
-                    }
-                    
-                    ProfileSelectionChip(
-                        title: "profile.edit.looking.not.sure".localized,
-                        isSelected: selectedLookingFor.contains("Not sure yet")
-                    ) {
-                        toggleLookingFor("Not sure yet")
+                VStack(spacing: 10) {
+                    ForEach(LookingForOption.allCases, id: \.self) { option in
+                        ProfileSelectionChip(
+                            title: option.title,
+                            isSelected: selectedLookingFor.contains(option.rawValue)
+                        ) {
+                            toggleLookingFor(option.rawValue)
+                        }
                     }
                 }
             }
@@ -1002,14 +1048,16 @@ struct ProfileEditView: View {
             onDeleteRemote: { photoURL in
                 deletePhoto(photoURL)
             },
-            onDeleteLocal: { index in
-                removeNewPhoto(at: index)
-            },
+                onDeleteLocal: { photoID in
+                    removeNewPhoto(id: photoID)
+                },
             onAdd: {
+                guard remainingGallerySlots > 0 else { return }
                 showingGalleryPicker = true
             },
-            maxRemoteVisible: 5,
-            usesWhiteBackground: true
+            maxRemoteVisible: maxGalleryPhotos,
+            usesWhiteBackground: true,
+            footerText: "Min 2 photos, Max 5 photos"
         )
         .overlay(validationFrame(isValid: isPhotosValid))
     }
@@ -1041,7 +1089,12 @@ struct ProfileEditView: View {
     }
     
     private var isPhotosValid: Bool {
-        return (existingPhotos.count + newPhotos.count) >= 3
+        let galleryCount = existingPhotos.count + newPhotos.count
+        return galleryCount >= minGalleryPhotos && galleryCount <= maxGalleryPhotos
+    }
+    
+    private var remainingGallerySlots: Int {
+        max(0, maxGalleryPhotos - (existingPhotos.count + newPhotos.count))
     }
     
     private var isInterestsValid: Bool {
@@ -1062,10 +1115,6 @@ struct ProfileEditView: View {
     
     private var isIdealFirstDateValid: Bool {
         return !selectedIdealFirstDate.isEmpty
-    }
-    
-    private var isSensoryPreferencesValid: Bool {
-        return !selectedSensoryPreferences.isEmpty
     }
     
     private var isSharingBodyType: Bool {
@@ -1243,15 +1292,18 @@ struct ProfileEditView: View {
                 gender = ""
                 customGender = ""
             }
-            // Load interested in preferences (handle migration from "Other" to new options)
+            // Load interested in preferences (handle migration from "Other"/"Anyone")
             var loadedInterestedIn = Set(user.interestedIn)
             customInterestedIn = ""
             
             // Migrate old "Other" values to "Non-binary" (or remove custom text)
-            let standardOptions = ["Man", "Woman", "Non-binary", "Anyone"]
+            let standardOptions = ["Man", "Woman", "Non-binary"]
             var migratedInterestedIn = Set<String>()
+            var hadAnyone = false
             for preference in loadedInterestedIn {
-                if standardOptions.contains(preference) {
+                if preference == "Anyone" {
+                    hadAnyone = true
+                } else if standardOptions.contains(preference) {
                     migratedInterestedIn.insert(preference)
                 } else if preference == "Other" {
                     // Migrate old "Other" to "Non-binary"
@@ -1259,28 +1311,16 @@ struct ProfileEditView: View {
                 }
                 // Old custom text entries are simply removed (not migrated)
             }
+            // "Anyone" is removed from the UI — expand it to all gender options.
+            if hadAnyone {
+                migratedInterestedIn.formUnion(standardOptions)
+            }
             
             selectedInterestedIn = migratedInterestedIn
             
-            // Load looking for data (handle migration from "Other" to "Not sure yet")
-            var loadedLookingFor = Set(user.lookingFor)
+            // Load looking for data (migrate legacy values to the current options)
             customLookingFor = ""
-            
-            // Check if any of the looking for items are custom text or old "Other" option
-            let lookingForStandardOptions = ["Friendship", "Relationship", "Not sure yet"]
-            for lookingForItem in user.lookingFor {
-                if lookingForItem == "Other" {
-                    // Migrate old "Other" to "Not sure yet"
-                    loadedLookingFor.remove("Other")
-                    loadedLookingFor.insert("Not sure yet")
-                } else if !lookingForStandardOptions.contains(lookingForItem) {
-                    // This is old custom text, convert to "Not sure yet"
-                    loadedLookingFor.remove(lookingForItem)
-                    loadedLookingFor.insert("Not sure yet")
-                }
-            }
-            
-            selectedLookingFor = loadedLookingFor
+            selectedLookingFor = Set(user.lookingFor.map { LookingForOption.migratedValue(from: $0) })
             
             // Load preferred age range (18–80 absolute, max 12-year span)
             let savedMin = max(Int(absoluteAgeMin), min(user.preferredAgeMin, Int(absoluteAgeMax)))
@@ -1345,7 +1385,7 @@ struct ProfileEditView: View {
     
     // MARK: - Validation Functions
     private func isFormValid() -> Bool {
-        return isNameValid && isAgeValid && isLocationValid && isBioValid && isPhotosValid && isInterestsValid && isGenderValid && isInterestedInValid && isLookingForValid && isIdealFirstDateValid && isSensoryPreferencesValid
+        return isNameValid && isAgeValid && isLocationValid && isBioValid && isPhotosValid && isInterestsValid && isGenderValid && isInterestedInValid && isLookingForValid && isIdealFirstDateValid
     }
     
     private func getValidationErrors() -> [String] {
@@ -1391,10 +1431,6 @@ struct ProfileEditView: View {
             errors.append("profile.edit.validation.ideal.first.date".localized)
         }
         
-        if !isSensoryPreferencesValid {
-            errors.append("profile.edit.validation.sensory.preferences".localized)
-        }
-        
         return errors
     }
     
@@ -1426,8 +1462,8 @@ struct ProfileEditView: View {
         existingPhotos.removeAll { $0 == photoURL }
     }
     
-    private func removeNewPhoto(at index: Int) {
-        newPhotos.remove(at: index)
+    private func removeNewPhoto(id: UUID) {
+        newPhotos.removeAll { $0.id == id }
     }
     
     private func saveProfile() {
@@ -1470,7 +1506,10 @@ struct ProfileEditView: View {
                 // Upload new gallery photos
                 if !newPhotos.isEmpty {
                     let userID = FirebaseAuthService.shared.auth.currentUser?.uid ?? ""
-                    let uploadedGalleryPhotos = try await PhotoStorageService.shared.uploadMultipleGalleryPhotos(newPhotos, for: userID)
+                    let uploadedGalleryPhotos = try await PhotoStorageService.shared.uploadMultipleGalleryPhotos(
+                        newPhotos.map(\.image),
+                        for: userID
+                    )
                     galleryPhotoURLs.append(contentsOf: uploadedGalleryPhotos)
                 }
                 
@@ -1489,8 +1528,8 @@ struct ProfileEditView: View {
                     user.gender = gender
                     // Save interested in preferences (directly use selected values, no custom text)
                     var finalInterestedIn = Array(selectedInterestedIn)
-                    // Remove any old "Other" entries if they exist (migration cleanup)
-                    finalInterestedIn.removeAll { $0 == "Other" }
+                    // Remove legacy options no longer offered in the UI
+                    finalInterestedIn.removeAll { $0 == "Other" || $0 == "Anyone" }
                     user.interestedIn = finalInterestedIn
                     
                     // Save looking for preferences (directly use selected values, no custom text)
@@ -1522,7 +1561,7 @@ struct ProfileEditView: View {
                     user.idealFirstDate = selectedIdealFirstDate
                     user.shareIdealFirstDate = true
                     user.sensoryPreferences = selectedSensoryPreferences
-                    user.shareSensoryPreferences = true
+                    user.shareSensoryPreferences = !selectedSensoryPreferences.isEmpty
                     
                     // Update profile photo URL only if a new one was selected
                     if let newProfilePhotoURL = newProfilePhotoURL {
@@ -1545,7 +1584,7 @@ struct ProfileEditView: View {
                     // Handle interested in preferences for new user (directly use selected values, no custom text)
                     var finalInterestedIn = Array(selectedInterestedIn)
                     // Remove any old "Other" entries if they exist (migration cleanup)
-                    finalInterestedIn.removeAll { $0 == "Other" }
+                    finalInterestedIn.removeAll { $0 == "Other" || $0 == "Anyone" }
                     
                     // Handle looking for for new user (directly use selected values, no custom text)
                     var finalLookingFor = Array(selectedLookingFor)
@@ -1576,7 +1615,7 @@ struct ProfileEditView: View {
                         idealFirstDate: selectedIdealFirstDate,
                         shareIdealFirstDate: true,
                         sensoryPreferences: selectedSensoryPreferences,
-                        shareSensoryPreferences: true,
+                        shareSensoryPreferences: !selectedSensoryPreferences.isEmpty,
                         energyLevel: energyLevel
                     )
                     newUser.profilePhotoURL = newProfilePhotoURL
@@ -1597,8 +1636,8 @@ struct ProfileEditView: View {
                 
                 // Handle interested in preferences for Firebase (directly use selected values, no custom text)
                 var finalInterestedIn = Array(selectedInterestedIn)
-                // Remove any old "Other" entries if they exist (migration cleanup)
-                finalInterestedIn.removeAll { $0 == "Other" }
+                // Remove legacy options no longer offered in the UI
+                finalInterestedIn.removeAll { $0 == "Other" || $0 == "Anyone" }
                 
                 // Handle looking for for Firebase
                 var finalLookingFor = Array(selectedLookingFor)
@@ -1628,7 +1667,7 @@ struct ProfileEditView: View {
                     "idealFirstDate": selectedIdealFirstDate,
                     "shareIdealFirstDate": true,
                     "sensoryPreferences": selectedSensoryPreferences,
-                    "shareSensoryPreferences": true,
+                    "shareSensoryPreferences": !selectedSensoryPreferences.isEmpty,
                     "energyLevel": energyLevel,
                     "location": [
                         "displayString": location,
@@ -1645,6 +1684,7 @@ struct ProfileEditView: View {
                 try await FirebaseAuthService.shared.updateUserData(userData)
                 
                 appState.saveAppState()
+                applyUnlimitedRadiusIfLookingForOnlineFriendship()
                 
                 // Refresh user data from Firebase to ensure ProfileView shows latest data
                 // This will update FirebaseAuthService.currentUser, which will propagate to AppStateManager
@@ -1664,6 +1704,20 @@ struct ProfileEditView: View {
                 alertMessage = String(format: "profile.edit.error.updating".localized, error.localizedDescription)
                 showingAlert = true
             }
+    }
+    
+    /// Online friendship isn't distance-bound — expand discover radius to unlimited.
+    private func applyUnlimitedRadiusIfLookingForOnlineFriendship() {
+        guard selectedLookingFor.contains(LookingForOption.onlineFriendship.rawValue) else { return }
+        guard DiscoverDistanceLimit.currentOption != .unlimited else { return }
+        
+        DiscoverDistanceLimit.currentOption = .unlimited
+        if DiscoverDailyLimit.currentCount() >= DiscoverDailyLimit.maxSwipesPerDay {
+            DiscoverDistanceLimit.hasPendingDeckRefresh = true
+        } else {
+            DiscoverDistanceLimit.hasPendingDeckRefresh = false
+            appState.clearDiscoverProfilesCache()
+        }
     }
     
     // MARK: - Helper function to localize interest names
@@ -1718,27 +1772,30 @@ struct ImagePicker: UIViewControllerRepresentable {
 }
 
 struct GalleryImagePicker: UIViewControllerRepresentable {
-    @Binding var images: [UIImage]
+    @Binding var images: [LocalGalleryImage]
     @Environment(\.dismiss) private var dismiss
     
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var config = PHPickerConfiguration()
         config.filter = .images
-        config.selectionLimit = 10
+        // One photo per open — picker closes as soon as a photo is tapped.
+        config.selectionLimit = 1
         
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
         return picker
     }
     
-    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {
+        context.coordinator.parent = self
+    }
     
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
     
     class Coordinator: NSObject, PHPickerViewControllerDelegate {
-        let parent: GalleryImagePicker
+        var parent: GalleryImagePicker
         
         init(_ parent: GalleryImagePicker) {
             self.parent = parent
@@ -1747,15 +1804,50 @@ struct GalleryImagePicker: UIViewControllerRepresentable {
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             parent.dismiss()
             
-            for result in results {
-                result.itemProvider.loadObject(ofClass: UIImage.self) { image, error in
-                    if let image = image as? UIImage {
-                        DispatchQueue.main.async {
-                            self.parent.images.append(image)
-                        }
+            guard let result = results.first else { return }
+            let provider = result.itemProvider
+            
+            // Prefer loading raw image data — loadObject(UIImage.self) often yields blank/unusable images.
+            if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, error in
+                    guard let data, let image = UIImage(data: data) else {
+                        print("❌ GalleryImagePicker failed to load image data: \(error?.localizedDescription ?? "unknown")")
+                        return
+                    }
+                    let normalized = image.normalizedForUpload()
+                    DispatchQueue.main.async {
+                        self.parent.images.append(LocalGalleryImage(image: normalized))
                     }
                 }
+                return
             }
+            
+            provider.loadObject(ofClass: UIImage.self) { object, error in
+                guard let image = object as? UIImage else {
+                    print("❌ GalleryImagePicker failed to load UIImage: \(error?.localizedDescription ?? "unknown")")
+                    return
+                }
+                let normalized = image.normalizedForUpload()
+                DispatchQueue.main.async {
+                    self.parent.images.append(LocalGalleryImage(image: normalized))
+                }
+            }
+        }
+    }
+}
+
+private extension UIImage {
+    /// Flatten orientation and materialize bitmap so SwiftUI can render gallery picks reliably.
+    func normalizedForUpload() -> UIImage {
+        if imageOrientation == .up, cgImage != nil {
+            return self
+        }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = scale
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        return renderer.image { _ in
+            draw(in: CGRect(origin: .zero, size: size))
         }
     }
 }

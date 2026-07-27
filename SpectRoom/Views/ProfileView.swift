@@ -525,10 +525,20 @@ struct ProfileView: View {
     
     // MARK: - Helper function to format individual preference
     private func formatPreference(_ preference: String) -> String {
-        if preference == "Not sure yet" {
+        switch preference {
+        case "Romantic relationship", "Relationship":
+            return "profile.edit.looking.romantic.relationship".localized
+        case "In-Person Friendship", "Friendship":
+            return "profile.edit.looking.in.person.friendship".localized
+        case "Online Friendship":
+            return "profile.edit.looking.online.friendship".localized
+        case "Hobby Buddy":
+            return "profile.edit.looking.hobby.buddy".localized
+        case "Not Sure Yet", "Not sure yet":
             return "profile.edit.looking.not.sure".localized
+        default:
+            return preference
         }
-        return preference
     }
     
     // MARK: - Helper function to format looking for

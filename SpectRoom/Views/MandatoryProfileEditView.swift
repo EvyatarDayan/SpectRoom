@@ -16,7 +16,7 @@ struct MandatoryProfileEditView: View {
     @State private var dateOfBirth: Date = Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()
     @State private var bio: String = ""
     @State private var profilePhoto: UIImage?
-    @State private var galleryPhotos: [UIImage] = []
+    @State private var galleryPhotos: [LocalGalleryImage] = []
     @State private var existingPhotos: [String] = []
     @State private var photosToDelete: Set<String> = []
     @State private var showingImagePicker = false
@@ -55,7 +55,7 @@ struct MandatoryProfileEditView: View {
     }
 
     private var isPhotosValid: Bool {
-        totalValidPhotos >= 3
+        totalValidPhotos >= 2
     }
 
     private var isProfilePhotoValid: Bool {
@@ -398,8 +398,8 @@ struct MandatoryProfileEditView: View {
                 existingPhotoView(photoURL: photoURL)
             }
             
-            ForEach(Array(galleryPhotos.enumerated()), id: \.offset) { index, photo in
-                newPhotoView(photo: photo, index: index)
+            ForEach(galleryPhotos) { photo in
+                newPhotoView(photo: photo)
             }
             
             addMorePhotosButton
@@ -436,9 +436,9 @@ struct MandatoryProfileEditView: View {
         }
     }
     
-    private func newPhotoView(photo: UIImage, index: Int) -> some View {
+    private func newPhotoView(photo: LocalGalleryImage) -> some View {
         ZStack {
-            Image(uiImage: photo)
+            Image(uiImage: photo.image)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
                 .frame(height: 100)
@@ -446,7 +446,7 @@ struct MandatoryProfileEditView: View {
                 .cornerRadius(8)
             
             Button(action: {
-                removeGalleryPhoto(at: index)
+                removeGalleryPhoto(id: photo.id)
             }) {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundColor(.red)
@@ -540,8 +540,8 @@ struct MandatoryProfileEditView: View {
     }
 
 
-    private func removeGalleryPhoto(at index: Int) {
-        galleryPhotos.remove(at: index)
+    private func removeGalleryPhoto(id: UUID) {
+        galleryPhotos.removeAll { $0.id == id }
     }
 
     private func deleteExistingPhoto(_ photoURL: String) {
@@ -640,7 +640,10 @@ struct MandatoryProfileEditView: View {
                         print("🔄 Uploading gallery photos...")
                         let userID = FirebaseAuthService.shared.auth.currentUser?.uid ?? ""
                         let galleryPhotoURLs = try await withTimeout(seconds: 60) {
-                            try await PhotoStorageService.shared.uploadMultipleGalleryPhotos(galleryPhotos, for: userID)
+                            try await PhotoStorageService.shared.uploadMultipleGalleryPhotos(
+                                galleryPhotos.map(\.image),
+                                for: userID
+                            )
                         }
                         photoURLs.append(contentsOf: galleryPhotoURLs)
                         print("✅ Gallery photos uploaded")

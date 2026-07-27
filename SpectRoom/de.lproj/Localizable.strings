@@ -114,7 +114,24 @@
 "settings.blocked.users.unblock.confirm.message" = "Möchtest du %@ entsperren?";
 
 "settings.authentication.section.title" = "Authentifizierung";
-"settings.authentication.signout.subtitle" = "Zum Abmelden tippen";
+"settings.account.section.title" = "Konto";
+"settings.authentication.signout.subtitle" = "Von deinem Konto abmelden";
+
+"settings.delete.account.section.title" = "Konto löschen";
+"settings.delete.account.button" = "Konto Löschen";
+"settings.delete.account.subtitle" = "Lösche dein Konto dauerhaft";
+"settings.delete.account.confirm.title" = "Konto löschen";
+"settings.delete.account.confirm.message" = "Bist du sicher? Dein Konto wird gelöscht!";
+"settings.delete.account.confirm.yes" = "Ja";
+"settings.delete.account.type.message" = "Um dein Konto zu löschen, gib dein Passwort ein";
+"settings.delete.account.type.placeholder" = "Passwort";
+"settings.delete.account.confirm.ok" = "OK";
+"settings.delete.account.error" = "Dein Konto konnte nicht gelöscht werden. Bitte versuche es erneut.";
+"settings.delete.account.wrong.password" = "Falsches Passwort, versuche es erneut.";
+"settings.delete.account.success.message" = "Dein Konto wurde gelöscht, wir hoffen, dich bald wiederzusehen.";
+
+"auth.error.account.pending.deletion" = "Dieses Konto ist zur Löschung vorgemerkt. Kontaktiere den Support, wenn du Hilfe bei der Wiederherstellung brauchst.";
+"auth.error.email.pending.deletion" = "Diese E-Mail wurde in der Vergangenheit gelöscht. Dieselbe E-Mail kann erst 14 Tage nach dem Löschdatum des Kontos wieder verwendet werden.";
 
 "address.search.map.placeholder" = "Suche, um den Ort anzuzeigen";
 "address.search.use.address" = "Diese Adresse verwenden";
@@ -143,6 +160,7 @@
 "profile.about.me" = "Über Mich";
 "profile.no.bio" = "Keine Biografie verfügbar";
 "profile.my.interests" = "Meine Interessen";
+"profile.interests" = "Interessen";
 "profile.no.interests" = "Noch keine Interessen hinzugefügt";
 "profile.gender.preferences" = "Geschlecht und Präferenzen";
 "profile.preferences" = "Präferenzen";
@@ -160,6 +178,8 @@
 "profile.energy.level" = "Energieniveau heute";
 "profile.no.preferences" = "Keine Präferenzen festgelegt";
 "profile.my.photos" = "Meine Fotos";
+"profile.photos" = "Fotos";
+"profile.profile.photo" = "Profilfoto";
 "profile.no.photos" = "Noch keine Fotos hinzugefügt";
 "profile.gender" = "Geschlecht";
 "profile.no.one" = "niemand";
@@ -301,6 +321,7 @@
 "profile.edit.complete.title" = "Vervollständigen Sie Ihr Profil";
 "profile.edit.name" = "Mein Name";
 "profile.edit.name.placeholder" = "Geben Sie Ihren Namen ein";
+"profile.edit.email" = "Meine E-Mail";
 "profile.edit.date.of.birth" = "Mein Geburtsdatum";
 "profile.edit.my.age" = "Mein Alter: %@";
 "profile.edit.loading" = "Profil wird geladen...";
@@ -321,9 +342,13 @@
 "profile.edit.interested.in" = "Ich Bin Interessiert An";
 "profile.edit.interested.anyone" = "Jeder";
 "profile.edit.looking.for" = "Ich Suche";
+"profile.edit.looking.romantic.relationship" = "Romantische Beziehung";
+"profile.edit.looking.in.person.friendship" = "Freundschaft Vor Ort";
+"profile.edit.looking.online.friendship" = "Online-Freundschaft";
+"profile.edit.looking.hobby.buddy" = "Hobby-Partner";
+"profile.edit.looking.not.sure" = "Noch Nicht Sicher";
 "profile.edit.looking.friendship" = "Freundschaft";
 "profile.edit.looking.relationship" = "Beziehung";
-"profile.edit.looking.not.sure" = "Noch Nicht Sicher";
 "profile.edit.preferred.age" = "Mein Bevorzugtes Alter";
 "profile.edit.energy.level" = "Mein Energieniveau heute";
 "profile.edit.energy.quiet.calm" = "Ruhig und Gelassen";
@@ -342,7 +367,7 @@
 "profile.edit.validation.age" = "Sie müssen 18 Jahre oder älter sein";
 "profile.edit.validation.location" = "Wähle einen Standort in Schweden";
 "profile.edit.validation.bio" = "\"Über mich\" muss mindestens 30 Zeichen lang sein";
-"profile.edit.validation.photos" = "Fügen Sie mindestens 3 Fotos hinzu";
+"profile.edit.validation.photos" = "Fügen Sie mindestens 2 Fotos hinzu";
 "profile.edit.validation.interests" = "Wählen Sie mindestens 3 Interessen";
 "profile.edit.validation.gender" = "Wählen Sie Ihr Geschlecht";
 "profile.edit.validation.interested.in" = "Wählen Sie, an wem Sie interessiert sind";

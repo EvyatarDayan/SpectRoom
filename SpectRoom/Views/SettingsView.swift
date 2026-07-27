@@ -25,6 +25,11 @@ struct SettingsView: View {
     @State private var profilesInRadiusCount: Int?
     @State private var isCountingProfilesInRadius = false
     @State private var profilesInRadiusCountTask: Task<Void, Never>?
+    @State private var showingDeleteAccountConfirmation = false
+    @State private var deleteConfirmationStep: DeleteAccountConfirmationStep = .sure
+    @State private var deleteConfirmationText = ""
+    @State private var isDeletingAccount = false
+    @State private var deleteAccountErrorMessage: String?
     
     private var selectedDistanceOption: DiscoverDistanceOption {
         DiscoverDistanceOption(rawValue: distanceLimitLevel) ?? .default
@@ -296,8 +301,8 @@ struct SettingsView: View {
                     }
                 }
                 
-                // Sign Out Section
-                Section("settings.authentication.section.title".localized.uppercased()) {
+                // Account Section
+                Section("settings.account.section.title".localized.uppercased()) {
                     Button(action: {
                         // Use AppStateManager.signOut() to ensure proper state management
                         // Welcome shows again after logout unless "Don't show this again" was checked
@@ -325,6 +330,34 @@ struct SettingsView: View {
                                 .font(.caption)
                         }
                     }
+                    
+                    Button(action: {
+                        deleteConfirmationStep = .sure
+                        deleteConfirmationText = ""
+                        isDeletingAccount = false
+                        deleteAccountErrorMessage = nil
+                        showingDeleteAccountConfirmation = true
+                    }) {
+                        HStack {
+                            Image(systemName: "trash.circle.fill")
+                                .foregroundColor(.red)
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("settings.delete.account.button".localized)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                                    .foregroundColor(.red)
+                                Text("settings.delete.account.subtitle".localized)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            Spacer()
+                        }
+                    }
+                    .disabled(isDeletingAccount)
                 }
             }
             .padding(.bottom, 60)
@@ -375,6 +408,53 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingAbout) {
                 AboutView()
+            }
+            .overlay {
+                if showingDeleteAccountConfirmation {
+                    DeleteAccountConfirmationDialog(
+                        step: $deleteConfirmationStep,
+                        confirmationText: $deleteConfirmationText,
+                        isDeleting: $isDeletingAccount,
+                        errorMessage: $deleteAccountErrorMessage,
+                        onCancel: {
+                            showingDeleteAccountConfirmation = false
+                            deleteConfirmationText = ""
+                            deleteConfirmationStep = .sure
+                            deleteAccountErrorMessage = nil
+                        },
+                        onConfirmDeletion: { password in
+                            Task {
+                                await MainActor.run { isDeletingAccount = true }
+                                do {
+                                    try await appState.deleteAccount(password: password)
+                                    await MainActor.run {
+                                        isDeletingAccount = false
+                                        deleteConfirmationText = ""
+                                        deleteAccountErrorMessage = nil
+                                        deleteConfirmationStep = .success
+                                    }
+                                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                                    await MainActor.run {
+                                        showingDeleteAccountConfirmation = false
+                                        deleteConfirmationStep = .sure
+                                        appState.signOut()
+                                    }
+                                } catch let error as SpectRoomAuthError {
+                                    await MainActor.run {
+                                        isDeletingAccount = false
+                                        deleteAccountErrorMessage = error.errorDescription
+                                            ?? "settings.delete.account.error".localized
+                                    }
+                                } catch {
+                                    await MainActor.run {
+                                        isDeletingAccount = false
+                                        deleteAccountErrorMessage = "settings.delete.account.error".localized
+                                    }
+                                }
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -656,6 +736,143 @@ private struct BlockedUserRow: View {
             photoURL = try await FirebaseAuthService.shared.fetchUserProfilePhotoURL(for: blocked.id)
         } catch {
             photoURL = nil
+        }
+    }
+}
+
+private enum DeleteAccountConfirmationStep {
+    case sure
+    case enterPassword
+    case success
+}
+
+private struct DeleteAccountConfirmationDialog: View {
+    @Binding var step: DeleteAccountConfirmationStep
+    @Binding var confirmationText: String
+    @Binding var isDeleting: Bool
+    @Binding var errorMessage: String?
+    let onCancel: () -> Void
+    let onConfirmDeletion: (String) -> Void
+    
+    private var canConfirmPasswordStep: Bool {
+        !confirmationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isDeleting
+    }
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    if step != .success && !isDeleting {
+                        onCancel()
+                    }
+                }
+            
+            VStack(spacing: 0) {
+                if step == .success {
+                    Text("settings.delete.account.success.message".localized)
+                        .font(.system(size: 22, weight: .bold))
+                        .multilineTextAlignment(.center)
+                        .padding(.vertical, 28)
+                        .padding(.horizontal, 22)
+                } else {
+                    Text("settings.delete.account.confirm.title".localized)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 20)
+                        .padding(.horizontal, 20)
+                    
+                    Group {
+                        if step == .sure {
+                            Text("settings.delete.account.confirm.message".localized)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.top, 10)
+                                .padding(.horizontal, 20)
+                        } else {
+                            VStack(spacing: 12) {
+                                Text("settings.delete.account.type.message".localized)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                                
+                                SecureField("settings.delete.account.type.placeholder".localized, text: $confirmationText)
+                                    .textContentType(.password)
+                                    .padding(10)
+                                    .background(Color(.secondarySystemBackground))
+                                    .cornerRadius(8)
+                                    .disabled(isDeleting)
+                                
+                                if let errorMessage {
+                                    Text(errorMessage)
+                                        .font(.caption)
+                                        .foregroundColor(.red)
+                                        .multilineTextAlignment(.center)
+                                }
+                                
+                                if isDeleting {
+                                    ProgressView()
+                                        .padding(.top, 4)
+                                }
+                            }
+                            .padding(.top, 10)
+                            .padding(.horizontal, 20)
+                        }
+                    }
+                    
+                    Divider()
+                        .padding(.top, 18)
+                    
+                    if step == .sure {
+                        HStack(spacing: 0) {
+                            Button("settings.cancel".localized, action: onCancel)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                            
+                            Divider()
+                                .frame(height: 44)
+                            
+                            Button("settings.delete.account.confirm.yes".localized) {
+                                step = .enterPassword
+                                confirmationText = ""
+                                errorMessage = nil
+                            }
+                            .fontWeight(.semibold)
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                        }
+                    } else {
+                        HStack(spacing: 0) {
+                            Button("settings.cancel".localized) {
+                                guard !isDeleting else { return }
+                                onCancel()
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .disabled(isDeleting)
+                            
+                            Divider()
+                                .frame(height: 44)
+                            
+                            Button("settings.delete.account.confirm.ok".localized) {
+                                onConfirmDeletion(confirmationText)
+                            }
+                            .fontWeight(.semibold)
+                            .foregroundColor(canConfirmPasswordStep ? .red : .secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .disabled(!canConfirmPasswordStep)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: 300)
+            .background(Color(.systemBackground))
+            .cornerRadius(14)
+            .shadow(color: .black.opacity(0.2), radius: 20, y: 8)
+            .padding(.horizontal, 40)
         }
     }
 }

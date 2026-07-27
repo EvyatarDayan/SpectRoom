@@ -74,9 +74,9 @@ enum DiscoverRadiusCounter {
             return false
         }
         
-        let currentLookingFor = Set(currentUser.lookingFor.filter { $0 != "Not sure yet" })
+        let currentLookingFor = Set(currentUser.lookingFor.filter { $0 != "Not sure yet" && $0 != "Not Sure Yet" })
         if !currentLookingFor.isEmpty {
-            let otherLookingFor = Set(user.lookingFor.filter { $0 != "Not sure yet" })
+            let otherLookingFor = Set(user.lookingFor.filter { $0 != "Not sure yet" && $0 != "Not Sure Yet" })
             if !otherLookingFor.isEmpty && currentLookingFor.intersection(otherLookingFor).isEmpty {
                 return false
             }

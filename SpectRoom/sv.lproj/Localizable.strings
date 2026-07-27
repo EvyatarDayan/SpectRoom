@@ -114,7 +114,24 @@
 "settings.blocked.users.unblock.confirm.message" = "Vill du avblockera %@?";
 
 "settings.authentication.section.title" = "Autentisering";
-"settings.authentication.signout.subtitle" = "Tryck för att logga ut";
+"settings.account.section.title" = "Konto";
+"settings.authentication.signout.subtitle" = "Logga ut från ditt konto";
+
+"settings.delete.account.section.title" = "Radera konto";
+"settings.delete.account.button" = "Radera Konto";
+"settings.delete.account.subtitle" = "Radera ditt konto permanent";
+"settings.delete.account.confirm.title" = "Radera konto";
+"settings.delete.account.confirm.message" = "Är du säker? Ditt konto kommer att raderas!";
+"settings.delete.account.confirm.yes" = "Ja";
+"settings.delete.account.type.message" = "För att radera ditt konto, ange ditt lösenord";
+"settings.delete.account.type.placeholder" = "Lösenord";
+"settings.delete.account.confirm.ok" = "OK";
+"settings.delete.account.error" = "Kunde inte radera ditt konto. Försök igen.";
+"settings.delete.account.wrong.password" = "Felaktigt lösenord, försök igen.";
+"settings.delete.account.success.message" = "Ditt konto är nu raderat, vi hoppas få se dig igen snart.";
+
+"auth.error.account.pending.deletion" = "Det här kontot är schemalagt för radering. Kontakta support om du behöver hjälp att återställa det.";
+"auth.error.email.pending.deletion" = "Den här e-postadressen har raderats tidigare. Samma e-post kan endast användas igen 14 dagar efter raderingsdatumet.";
 
 "address.search.map.placeholder" = "Sök för att förhandsvisa platsen";
 "address.search.use.address" = "Använd denna adress";
@@ -143,6 +160,7 @@
 "profile.about.me" = "Om Mig";
 "profile.no.bio" = "Ingen biografi tillgänglig";
 "profile.my.interests" = "Mina Intressen";
+"profile.interests" = "Intressen";
 "profile.no.interests" = "Inga intressen tillagda ännu";
 "profile.gender.preferences" = "Kön och Preferenser";
 "profile.preferences" = "Preferenser";
@@ -160,6 +178,8 @@
 "profile.energy.level" = "Energinivå idag";
 "profile.no.preferences" = "Inga preferenser inställda";
 "profile.my.photos" = "Mina Foton";
+"profile.photos" = "Foton";
+"profile.profile.photo" = "Profilfoto";
 "profile.no.photos" = "Inga foton tillagda ännu";
 "profile.gender" = "Kön";
 "profile.no.one" = "ingen";
@@ -301,6 +321,7 @@
 "profile.edit.complete.title" = "Komplettera Din Profil";
 "profile.edit.name" = "Mitt Namn";
 "profile.edit.name.placeholder" = "Ange ditt namn";
+"profile.edit.email" = "Min E-post";
 "profile.edit.date.of.birth" = "Mitt Födelsedatum";
 "profile.edit.my.age" = "Min Ålder: %@";
 "profile.edit.loading" = "Laddar profil...";
@@ -321,9 +342,13 @@
 "profile.edit.interested.in" = "Jag Är Intresserad Av";
 "profile.edit.interested.anyone" = "Vem Som Helst";
 "profile.edit.looking.for" = "Jag Söker";
+"profile.edit.looking.romantic.relationship" = "Romantisk Relation";
+"profile.edit.looking.in.person.friendship" = "Vänskap I Verkligheten";
+"profile.edit.looking.online.friendship" = "Onlinevänskap";
+"profile.edit.looking.hobby.buddy" = "Hobbykompis";
+"profile.edit.looking.not.sure" = "Inte Säker Än";
 "profile.edit.looking.friendship" = "Vänskap";
 "profile.edit.looking.relationship" = "Relation";
-"profile.edit.looking.not.sure" = "Inte Säker Än";
 "profile.edit.preferred.age" = "Min Föredragna Ålder";
 "profile.edit.energy.level" = "Min Energinivå Idag";
 "profile.edit.energy.quiet.calm" = "Tyst och Lugn";
@@ -342,7 +367,7 @@
 "profile.edit.validation.age" = "Du måste vara 18 år eller äldre";
 "profile.edit.validation.location" = "Välj en plats i Sverige";
 "profile.edit.validation.bio" = "\"Om mig\" måste vara minst 30 tecken";
-"profile.edit.validation.photos" = "Lägg till minst 3 foton";
+"profile.edit.validation.photos" = "Lägg till minst 2 foton";
 "profile.edit.validation.interests" = "Välj minst 3 intressen";
 "profile.edit.validation.gender" = "Välj ditt kön";
 "profile.edit.validation.interested.in" = "Välj vem du är intresserad av";

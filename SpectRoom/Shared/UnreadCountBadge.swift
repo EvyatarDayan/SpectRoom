@@ -11,7 +11,7 @@ struct UnreadCountBadge: View {
     var body: some View {
         if count > 0 {
             Text("\(count)")
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 11, weight: .heavy))
                 .foregroundColor(.white)
                 .padding(3)
                 .frame(minWidth: 16, minHeight: 16)

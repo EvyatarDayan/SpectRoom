@@ -255,6 +255,15 @@
 "messages.blocked.alert.title" = "%@ har blockerat dig.";
 "messages.blocked.alert.detail" = "Du kan fortfarande se tidigare meddelanden, men du kan inte skicka nya.";
 "messages.blocked.alert.dont.show.again" = "Visa inte igen";
+"messages.photo.share.warning.title" = "Skydda Din Integritet.";
+"messages.photo.share.warning.subtitle" = "Att dela foton är ett bra sätt att skapa kontakt, men din säkerhet kommer först.";
+"messages.photo.share.warning.bullets.intro" = "Se till att dina foton inte visar:";
+"messages.photo.share.warning.bullet.intimate" = "Privata eller intima detaljer";
+"messages.photo.share.warning.bullet.address" = "Gatuskyltar eller husnummer";
+"messages.photo.share.warning.bullet.workplace" = "Arbetsplatser eller brickor";
+"messages.photo.share.warning.footer" = "Dela bara när du känner dig helt bekväm.";
+"messages.photo.share.warning.dont.show.again" = "Jag förstår";
+"messages.photo.share.warning.continue" = "Fortsätt";
 "messages.conversation.blocked" = "Blockerad";
 "messages.error.no.message" = "Fel: Inget meddelande valt";
 "messages.image.saved" = "Bild Sparad";

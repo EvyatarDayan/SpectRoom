@@ -250,6 +250,15 @@
 "messages.blocked.alert.title" = "%@ has blocked you.";
 "messages.blocked.alert.detail" = "You can still view previous messages, but you cannot send new ones.";
 "messages.blocked.alert.dont.show.again" = "Don't show this again";
+"messages.photo.share.warning.title" = "Protect Your Privacy.";
+"messages.photo.share.warning.subtitle" = "Sharing photos is a great way to connect, but your safety comes first.";
+"messages.photo.share.warning.bullets.intro" = "Make sure your photos don't show:";
+"messages.photo.share.warning.bullet.intimate" = "Private or intimate details";
+"messages.photo.share.warning.bullet.address" = "Street signs or house numbers";
+"messages.photo.share.warning.bullet.workplace" = "Workplaces or badges";
+"messages.photo.share.warning.footer" = "Only share when you feel completely comfortable.";
+"messages.photo.share.warning.dont.show.again" = "I understand";
+"messages.photo.share.warning.continue" = "Continue";
 "messages.conversation.blocked" = "Blocked";
 "messages.error.no.message" = "Error: No message selected";
 "messages.image.saved" = "Image Saved";

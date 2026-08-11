@@ -485,9 +485,12 @@ struct ProfileEditView: View {
     }
     
     private var displayEmail: String {
-        let email = appState.currentUser?.email
-            ?? FirebaseAuthService.shared.auth.currentUser?.email
-            ?? ""
+        let profileEmail = (appState.currentUser?.email ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let authEmail = (FirebaseAuthService.shared.auth.currentUser?.email ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Firestore profile often has an empty email string; Auth still has the real one.
+        let email = profileEmail.isEmpty ? authEmail : profileEmail
         return email.isEmpty ? "—" : email
     }
     

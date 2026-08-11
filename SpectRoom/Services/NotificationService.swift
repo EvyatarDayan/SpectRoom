@@ -13,14 +13,27 @@ class NotificationService: NSObject, ObservableObject {
     static let shared = NotificationService()
     
     static func shouldSuppressForegroundMessageNotification(userInfo: [AnyHashable: Any]) -> Bool {
-        guard (userInfo["type"] as? String) == "message" else { return false }
-        let senderId = userInfo["senderId"] as? String ?? ""
+        guard notificationString(userInfo, key: "type") == "message" else { return false }
+        let senderId = notificationString(userInfo, key: "senderId") ?? ""
         return AppStateManager.shared.shouldSuppressMessageNotification(for: senderId)
+    }
+    
+    /// FCM data values usually arrive as strings in notification userInfo.
+    static func notificationString(_ userInfo: [AnyHashable: Any], key: String) -> String? {
+        if let value = userInfo[key] as? String {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        if let value = userInfo[key] as? NSNumber {
+            return value.stringValue
+        }
+        return nil
     }
     
     private override init() {
         super.init()
-        UNUserNotificationCenter.current().delegate = self
+        // Do not set UNUserNotificationCenter.delegate here — AppDelegate owns taps
+        // so notification opens can navigate into the conversation.
     }
     
     /// Check if notification permission is granted
@@ -150,48 +163,5 @@ class NotificationService: NSObject, ObservableObject {
         }
     }
 }
-
-// MARK: - UNUserNotificationCenterDelegate
-extension NotificationService: UNUserNotificationCenterDelegate {
-    // Handle notification when app is in foreground
-    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        let userInfo = notification.request.content.userInfo
-        
-        if NotificationService.shouldSuppressForegroundMessageNotification(userInfo: userInfo) {
-            completionHandler([])
-            return
-        }
-        
-        // Show notification even when app is in foreground
-        completionHandler([.banner, .sound, .badge])
-    }
-    
-    // Handle notification tap
-    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        let userInfo = response.notification.request.content.userInfo
-        
-        if let type = userInfo["type"] as? String {
-            switch type {
-            case "match":
-                // Handle match notification tap
-                if let matchId = userInfo["matchId"] as? String {
-                    // Navigate to matches view
-                    print("📱 User tapped match notification: \(matchId)")
-                }
-            case "message":
-                // Handle message notification tap
-                if let senderId = userInfo["senderId"] as? String {
-                    // Navigate to message conversation
-                    print("📱 User tapped message notification from: \(senderId)")
-                }
-            default:
-                break
-            }
-        }
-        
-        completionHandler()
-    }
-}
-
 
 

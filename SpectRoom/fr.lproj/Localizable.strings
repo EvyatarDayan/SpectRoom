@@ -255,6 +255,15 @@
 "messages.blocked.alert.title" = "%@ vous a bloqué.";
 "messages.blocked.alert.detail" = "Vous pouvez toujours voir les messages précédents, mais vous ne pouvez pas en envoyer de nouveaux.";
 "messages.blocked.alert.dont.show.again" = "Ne plus afficher";
+"messages.photo.share.warning.title" = "Protégez Votre Vie Privée.";
+"messages.photo.share.warning.subtitle" = "Partager des photos est un bon moyen de se connecter, mais votre sécurité passe d’abord.";
+"messages.photo.share.warning.bullets.intro" = "Assurez-vous que vos photos ne montrent pas :";
+"messages.photo.share.warning.bullet.intimate" = "Des détails privés ou intimes";
+"messages.photo.share.warning.bullet.address" = "Des panneaux de rue ou des numéros de maison";
+"messages.photo.share.warning.bullet.workplace" = "Des lieux de travail ou des badges";
+"messages.photo.share.warning.footer" = "Ne partagez que lorsque vous vous sentez complètement à l’aise.";
+"messages.photo.share.warning.dont.show.again" = "Je comprends";
+"messages.photo.share.warning.continue" = "Continuer";
 "messages.conversation.blocked" = "Bloqué";
 "messages.error.no.message" = "Erreur: Aucun message sélectionné";
 "messages.image.saved" = "Image Enregistrée";

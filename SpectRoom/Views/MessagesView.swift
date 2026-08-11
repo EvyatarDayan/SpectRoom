@@ -255,7 +255,8 @@ struct MessagesView: View {
         do {
             let state: [String: Any] = [
                 "openConversationUserId": isOpen ? userId : NSNull(),
-                "updatedAt": Date().timeIntervalSince1970
+                "appIsActive": true,
+                "appStateUpdatedAt": Date().timeIntervalSince1970
             ]
             try await FirebaseAuthService.shared.updateUserData(state)
             print("💬 Updated conversation open state in Firestore: \(isOpen ? "open with \(userId)" : "closed")")
@@ -613,6 +614,7 @@ struct MessagesView: View {
                     print("💬 ✅ Modal should now be visible")
                     // Clear the conversationToOpenSenderId after opening
                     self.appState.conversationToOpenSenderId = nil
+                    self.appState.shouldOpenConversation = false
                     self.appState.conversationToOpenProfile = nil
                     // Clear the sender info from AppStateManager
                     self.appState.newMessageSenderName = ""
@@ -947,7 +949,8 @@ struct MessageConversationModal: View {
         do {
             let state: [String: Any] = [
                 "openConversationUserId": isOpen ? userId : NSNull(),
-                "updatedAt": Date().timeIntervalSince1970
+                "appIsActive": true,
+                "appStateUpdatedAt": Date().timeIntervalSince1970
             ]
             try await FirebaseAuthService.shared.updateUserData(state)
             print("💬 MessageConversationModal: Updated conversation open state in Firestore: \(isOpen ? "open with \(userId)" : "closed")")
@@ -964,7 +967,9 @@ struct MessageConversationModal: View {
     @State private var otherUserProfilePhotoURL: String?
     @State private var hasMarkedAsRead = false
     @State private var showingImagePicker = false
+    @State private var showingPhotoShareWarning = false
     @State private var selectedImage: UIImage?
+    @State private var showingImageReadyPreview = false
     @State private var isUploadingImage = false
     /// Local previews keyed by message content (`pending://…` or final image URL).
     @State private var localImagePreviews: [String: UIImage] = [:]
@@ -1185,6 +1190,17 @@ struct MessageConversationModal: View {
                         showingBlockedAlert = false
                     }
                 )
+            } else if showingPhotoShareWarning {
+                PhotoShareWarningOverlay(
+                    onContinue: { dontShowAgain in
+                        PhotoShareWarningOverlay.setDontShowAgain(dontShowAgain)
+                        showingPhotoShareWarning = false
+                        showingImagePicker = true
+                    },
+                    onCancel: {
+                        showingPhotoShareWarning = false
+                    }
+                )
             }
         }
         .onAppear {
@@ -1232,8 +1248,26 @@ struct MessageConversationModal: View {
             MessageImagePicker(selectedImage: $selectedImage)
         }
         .onChange(of: selectedImage) { newImage in
-            if let image = newImage {
-                sendImageMessage(image: image)
+            showingImageReadyPreview = newImage != nil
+        }
+        .sheet(isPresented: $showingImageReadyPreview) {
+            if let image = selectedImage {
+                ImagePreviewReadySheet(
+                    image: image,
+                    isSending: isUploadingImage,
+                    onSend: {
+                        showingImageReadyPreview = false
+                        sendImageMessage(image: image)
+                    },
+                    onDiscard: {
+                        selectedImage = nil
+                        showingImageReadyPreview = false
+                    }
+                )
+                .presentationDetents([.height(230)])
+                .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled(isUploadingImage)
+                .presentationBackground(.regularMaterial)
             }
         }
         .sheet(isPresented: $showingConversationPhotoViewer) {
@@ -1334,7 +1368,7 @@ struct MessageConversationModal: View {
                         isSending: isSendingReply,
                         isRecording: isRecording,
                         onSend: { sendReply() },
-                        onCamera: { showingImagePicker = true },
+                        onCamera: { requestPhotoShare() },
                         onRecordingPressChanged: { pressing in
                             if pressing, !isRecording {
                                 startRecording()
@@ -1345,7 +1379,7 @@ struct MessageConversationModal: View {
                         }
                     )
                     .background {
-                        Color(.systemGray5)
+                        Color(.systemGray2)
                             .ignoresSafeArea(edges: .bottom)
                     }
                 }
@@ -1429,13 +1463,16 @@ struct MessageConversationModal: View {
                                 }
                             }
                             
+                            // Spacer is the scroll target so the last bubble keeps
+                            // breathing room above the composer (VStack bottom padding
+                            // would sit below the anchor and get clipped).
                             Color.clear
-                                .frame(height: 1)
+                                .frame(height: 12)
                                 .id(conversationBottomAnchorID)
                         }
                         .padding(.horizontal, 16)
                         .padding(.top, 12)
-                        .padding(.bottom, 12)
+                        .padding(.bottom, 0)
                     }
                     .scrollContentBackground(.hidden)
                     .scrollIndicators(.hidden)
@@ -1594,12 +1631,13 @@ struct MessageConversationModal: View {
         guard force || shouldScrollToBottom else { return }
         guard !conversationMessages.isEmpty else { return }
         
-        // Prefer the dedicated bottom anchor so LazyVStack always has a scroll target.
+        // Materialize the last bubble in LazyVStack first, then pin the bottom
+        // spacer so designed padding sits above the text field.
         let scrollAction = {
-            proxy.scrollTo(conversationBottomAnchorID, anchor: .bottom)
             if let lastID = conversationMessages.last?.id {
                 proxy.scrollTo(lastID, anchor: .bottom)
             }
+            proxy.scrollTo(conversationBottomAnchorID, anchor: .bottom)
         }
         
         if animated {
@@ -1747,7 +1785,8 @@ struct MessageConversationModal: View {
             let startIndex = max(0, oldestIndex - conversationPageSize)
             let olderMessages = Array(cachedMessagesPool[startIndex..<oldestIndex])
             
-            conversationMessages = olderMessages + conversationMessages
+            conversationMessages = (olderMessages + conversationMessages)
+                .deduplicatedConversationMessages()
             hasMoreOlderMessages = startIndex > 0
             isLoadingOlderMessages = false
             persistConversationCache()
@@ -1769,11 +1808,11 @@ struct MessageConversationModal: View {
                     } else {
                         let existingKeys = Set(conversationMessages.map(\.deduplicationKey))
                         let uniqueOlder = page.messages.filter { !existingKeys.contains($0.deduplicationKey) }
-                        conversationMessages = uniqueOlder + conversationMessages
+                        conversationMessages = (uniqueOlder + conversationMessages)
+                            .deduplicatedConversationMessages()
                         
-                        var mergedPool = uniqueOlder + cachedMessagesPool
-                        mergedPool = mergedPool.deduplicatedConversationMessages()
-                        cachedMessagesPool = mergedPool
+                        cachedMessagesPool = (uniqueOlder + cachedMessagesPool)
+                            .deduplicatedConversationMessages()
                         hasMoreOlderMessages = page.hasMoreOlder
                         persistConversationCache()
                     }
@@ -1823,7 +1862,10 @@ struct MessageConversationModal: View {
             return
         }
         
-        conversationMessages.append(newMessage)
+        // Always re-sort: while backgrounded, Firestore can deliver several
+        // adds in non-chronological order.
+        conversationMessages = (conversationMessages + [newMessage])
+            .deduplicatedConversationMessages()
         cachedMessagesPool = (cachedMessagesPool + [newMessage]).deduplicatedConversationMessages()
         shouldScrollToBottom = true
         previousMessageCount = conversationMessages.count
@@ -1854,13 +1896,13 @@ struct MessageConversationModal: View {
                 guard !newerMessages.isEmpty else { return }
                 
                 await MainActor.run {
-                    let oldCount = conversationMessages.count
                     let existingKeys = Set(conversationMessages.map(\.deduplicationKey))
                     let uniqueNew = newerMessages.filter { !existingKeys.contains($0.deduplicationKey) }
                     
                     guard !uniqueNew.isEmpty else { return }
                     
-                    conversationMessages.append(contentsOf: uniqueNew)
+                    conversationMessages = (conversationMessages + uniqueNew)
+                        .deduplicatedConversationMessages()
                     cachedMessagesPool = (cachedMessagesPool + uniqueNew).deduplicatedConversationMessages()
                     shouldScrollToBottom = true
                     persistConversationCache()
@@ -1873,7 +1915,7 @@ struct MessageConversationModal: View {
                         }
                     }
                     
-                    previousMessageCount = oldCount + uniqueNew.count
+                    previousMessageCount = conversationMessages.count
                     // Tip: newer messages often arrive right after open - keep scrolling to the end.
                     keyboardScrollToken += 1
                 }
@@ -1963,7 +2005,7 @@ struct MessageConversationModal: View {
             }
         }
         
-        conversationMessages = updatedMessages
+        conversationMessages = updatedMessages.deduplicatedConversationMessages()
         print("💬 MessageConversationModal: Updated \(updatedMessages.count) messages, preserved existing profile photos")
     }
     
@@ -1971,6 +2013,17 @@ struct MessageConversationModal: View {
         print("🔄 MessageConversationModal: Stopping auto-refresh timer")
         refreshTimer?.invalidate()
         refreshTimer = nil
+    }
+    
+    private func requestPhotoShare() {
+        guard !isBlockedByRecipient else { return }
+        isTextFieldFocused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        if PhotoShareWarningOverlay.shouldShowWarning {
+            showingPhotoShareWarning = true
+        } else {
+            showingImagePicker = true
+        }
     }
     
     private func sendReply() {
@@ -1985,6 +2038,10 @@ struct MessageConversationModal: View {
         isSendingReply = true
         updateConversationListAfterOutgoingMessage(content: trimmedContent, type: .text, voiceDuration: nil)
         shouldScrollToBottom = true
+        // Composer shrinks when text clears; re-pin after that layout settles.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            keyboardScrollToken += 1
+        }
         
         Task {
             do {
@@ -2272,7 +2329,8 @@ struct MessageConversationModal: View {
             senderProfilePhotoURL: currentUserProfilePhotoURL,
             recipientProfilePhotoURL: otherUserProfilePhotoURL
         )
-        conversationMessages.append(messageDisplay)
+        conversationMessages = (conversationMessages + [messageDisplay])
+            .deduplicatedConversationMessages()
         cachedMessagesPool = (cachedMessagesPool + [messageDisplay]).deduplicatedConversationMessages()
         persistConversationCache()
         appState.updateConversationInCache(messageDisplay)
@@ -2429,6 +2487,60 @@ struct RecordingPreviewSheet: View {
                 .buttonStyle(.bordered)
                 .disabled(isSending)
                 
+                Button(action: onSend) {
+                    HStack(spacing: 8) {
+                        if isSending {
+                            SendingSpinner()
+                            Text("messages.sending".localized)
+                        } else {
+                            Text("messages.send".localized)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                .disabled(isSending)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+}
+
+struct ImagePreviewReadySheet: View {
+    let image: UIImage
+    let isSending: Bool
+    let onSend: () -> Void
+    let onDiscard: () -> Void
+
+    var body: some View {
+        VStack(spacing: 20) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("messages.voice.ready".localized)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 100)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 12) {
+                Button(action: onDiscard) {
+                    Text("settings.cancel".localized)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(isSending)
+
                 Button(action: onSend) {
                     HStack(spacing: 8) {
                         if isSending {

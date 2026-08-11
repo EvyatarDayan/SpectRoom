@@ -40,7 +40,7 @@ struct KeyboardStickyComposerVisualTest: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     composer
                         .background {
-                            Color(.systemGray5)
+                            Color(.systemGray2)
                                 .ignoresSafeArea(edges: .bottom)
                         }
                 }

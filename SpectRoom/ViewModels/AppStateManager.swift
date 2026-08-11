@@ -1148,6 +1148,18 @@ class AppStateManager: ObservableObject {
         print("💬 New message notification dismissed")
     }
     
+    /// Open Messages and the sender's conversation after a push notification tap.
+    @MainActor
+    func openConversationFromNotification(senderId: String) {
+        let trimmed = senderId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        
+        conversationToOpenSenderId = trimmed
+        shouldOpenConversation = true
+        newMessageSenderId = trimmed
+        print("📱 Queued conversation open from notification for sender: \(trimmed)")
+    }
+    
     
     // MARK: - Message Conversations Cache
     
@@ -1542,6 +1554,40 @@ class AppStateManager: ObservableObject {
     
     // MARK: - App State Management for Push Notifications
     
+    private var presenceHeartbeatTask: Task<Void, Never>?
+    
+    /// Keep Firestore presence fresh while foregrounded so Cloud Functions can
+    /// distinguish a live session from a force-quit with stale flags.
+    func startPresenceHeartbeat() {
+        stopPresenceHeartbeat()
+        presenceHeartbeatTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+                guard !Task.isCancelled else { break }
+                await self?.touchPresenceHeartbeat()
+            }
+        }
+    }
+    
+    func stopPresenceHeartbeat() {
+        presenceHeartbeatTask?.cancel()
+        presenceHeartbeatTask = nil
+    }
+    
+    private func touchPresenceHeartbeat() async {
+        guard firebaseAuth.auth.currentUser != nil else { return }
+        guard UIApplication.shared.applicationState == .active else { return }
+        
+        do {
+            try await firebaseAuth.updateUserData([
+                "appIsActive": true,
+                "appStateUpdatedAt": Date().timeIntervalSince1970
+            ])
+        } catch {
+            print("❌ Failed to refresh presence heartbeat: \(error)")
+        }
+    }
+    
     /// Update app state in Firestore so Cloud Functions can check if app is active
     func updateAppStateInFirestore(isActive: Bool) async {
         guard firebaseAuth.auth.currentUser != nil else {
@@ -1563,6 +1609,11 @@ class AppStateManager: ObservableObject {
                 state["messagesTabActive"] = false
                 await MainActor.run {
                     self.isMessagesTabActive = false
+                }
+                stopPresenceHeartbeat()
+            } else {
+                await MainActor.run {
+                    self.startPresenceHeartbeat()
                 }
             }
             

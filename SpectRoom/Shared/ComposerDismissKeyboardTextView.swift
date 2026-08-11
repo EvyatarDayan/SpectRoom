@@ -4,10 +4,28 @@
 //
 //  Multiline chat field whose keyboard Return key is native "Done".
 //  Tapping Done hides the keyboard (does not insert a newline).
+//  Height grows with content up to 3 lines (WhatsApp-style).
 //
 
 import SwiftUI
 import UIKit
+
+enum ComposerTextMetrics {
+    private static var bodyLineHeight: CGFloat {
+        UIFont.preferredFont(forTextStyle: .body).lineHeight
+    }
+    
+    /// Tighter than a full body+padding slot so the idle field stays compact.
+    private static let verticalInsets: CGFloat = 10 // top 5 + bottom 5
+    
+    static var singleLineHeight: CGFloat {
+        ceil(bodyLineHeight + verticalInsets)
+    }
+    
+    static var threeLineHeight: CGFloat {
+        ceil(bodyLineHeight * 3 + verticalInsets)
+    }
+}
 
 struct ComposerDismissKeyboardTextView: UIViewRepresentable {
     @Binding var text: String
@@ -15,8 +33,9 @@ struct ComposerDismissKeyboardTextView: UIViewRepresentable {
     
     var placeholder: String
     var isDisabled: Bool = false
-    var minHeight: CGFloat = 42
-    var maxHeight: CGFloat = 42
+    var minHeight: CGFloat = ComposerTextMetrics.singleLineHeight
+    var maxHeight: CGFloat = ComposerTextMetrics.threeLineHeight
+    var onMeasuredHeightChange: ((CGFloat) -> Void)? = nil
     
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -28,12 +47,13 @@ struct ComposerDismissKeyboardTextView: UIViewRepresentable {
         textView.backgroundColor = .clear
         textView.font = UIFont.preferredFont(forTextStyle: .body)
         textView.adjustsFontForContentSizeCategory = true
-        textView.textContainerInset = UIEdgeInsets(top: 8, left: 6, bottom: 8, right: 6)
+        textView.textContainerInset = UIEdgeInsets(top: 5, left: 6, bottom: 5, right: 6)
         textView.textContainer.lineFragmentPadding = 0
         textView.returnKeyType = .done
         textView.enablesReturnKeyAutomatically = false
         textView.isScrollEnabled = false
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textView.setContentHuggingPriority(.required, for: .vertical)
         textView.accessibilityLabel = placeholder
         
         let placeholderLabel = UILabel()
@@ -48,7 +68,7 @@ struct ComposerDismissKeyboardTextView: UIViewRepresentable {
         NSLayoutConstraint.activate([
             placeholderLabel.leadingAnchor.constraint(equalTo: textView.leadingAnchor, constant: 6),
             placeholderLabel.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: -6),
-            placeholderLabel.topAnchor.constraint(equalTo: textView.topAnchor, constant: 8)
+            placeholderLabel.topAnchor.constraint(equalTo: textView.topAnchor, constant: 5)
         ])
         
         context.coordinator.placeholderLabel = placeholderLabel
@@ -62,11 +82,12 @@ struct ComposerDismissKeyboardTextView: UIViewRepresentable {
         if textView.text != text {
             textView.text = text
             context.coordinator.updatePlaceholderVisibility(for: textView)
-            context.coordinator.recalculateHeight(for: textView)
         }
         
         textView.isEditable = !isDisabled
         textView.isUserInteractionEnabled = !isDisabled
+        
+        context.coordinator.reportMeasuredHeight(for: textView)
         
         DispatchQueue.main.async {
             if isFocused, !textView.isFirstResponder {
@@ -87,12 +108,7 @@ struct ComposerDismissKeyboardTextView: UIViewRepresentable {
             return CGSize(width: proposal.width ?? 0, height: context.coordinator.measuredHeight)
         }
         
-        let fitting = uiView.sizeThatFits(
-            CGSize(width: width, height: .greatestFiniteMagnitude)
-        )
-        let height = min(max(fitting.height, minHeight), maxHeight)
-        context.coordinator.measuredHeight = height
-        uiView.isScrollEnabled = fitting.height > maxHeight
+        let height = context.coordinator.clampedHeight(for: uiView, width: width)
         return CGSize(width: width, height: height)
     }
     
@@ -121,7 +137,7 @@ struct ComposerDismissKeyboardTextView: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
             updatePlaceholderVisibility(for: textView)
-            recalculateHeight(for: textView)
+            reportMeasuredHeight(for: textView)
         }
         
         func textView(
@@ -142,10 +158,29 @@ struct ComposerDismissKeyboardTextView: UIViewRepresentable {
             placeholderLabel?.isHidden = !textView.text.isEmpty
         }
         
-        func recalculateHeight(for textView: UITextView) {
-            textView.invalidateIntrinsicContentSize()
-            textView.setNeedsLayout()
-            textView.layoutIfNeeded()
+        func clampedHeight(for textView: UITextView, width: CGFloat) -> CGFloat {
+            let fittingWidth = width > 0 ? width : textView.bounds.width
+            guard fittingWidth > 0 else {
+                return parent.minHeight
+            }
+            
+            let fitting = textView.sizeThatFits(
+                CGSize(width: fittingWidth, height: .greatestFiniteMagnitude)
+            )
+            let height = min(max(fitting.height, parent.minHeight), parent.maxHeight)
+            textView.isScrollEnabled = fitting.height > parent.maxHeight + 0.5
+            measuredHeight = height
+            return height
+        }
+        
+        func reportMeasuredHeight(for textView: UITextView) {
+            let width = textView.bounds.width > 0
+                ? textView.bounds.width
+                : textView.frame.width
+            let height = clampedHeight(for: textView, width: width)
+            DispatchQueue.main.async {
+                self.parent.onMeasuredHeightChange?(height)
+            }
         }
     }
 }

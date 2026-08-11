@@ -290,32 +290,23 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         syncBadgeCount(from: userInfo)
         print("📱 Notification tapped, userInfo: \(userInfo)")
         
-        if let type = userInfo["type"] as? String {
-            switch type {
-            case "match":
-                if let matchId = userInfo["matchId"] as? String {
-                    print("📱 User tapped match notification: \(matchId)")
-                    // Set flag to open matches view
-                    DispatchQueue.main.async {
-                        // TODO: Navigate to matches view when match notification is tapped
-                        // For now, we can set a flag that the MessagesView can check
-                        print("📱 Match notification tapped, matchId: \(matchId)")
-                    }
-                }
-            case "message":
-                if let senderId = userInfo["senderId"] as? String {
-                    print("📱 User tapped message notification from: \(senderId)")
-                    // Set flag to open conversation when app opens
-                    DispatchQueue.main.async {
-                        AppStateManager.shared.conversationToOpenSenderId = senderId
-                        AppStateManager.shared.shouldOpenConversation = true
-                        print("📱 Set conversationToOpenSenderId to: \(senderId)")
-                        print("📱 Set shouldOpenConversation to: true")
-                    }
-                }
-            default:
-                break
+        let type = NotificationService.notificationString(userInfo, key: "type")
+        switch type {
+        case "match":
+            if let matchId = NotificationService.notificationString(userInfo, key: "matchId") {
+                print("📱 User tapped match notification: \(matchId)")
             }
+        case "message":
+            if let senderId = NotificationService.notificationString(userInfo, key: "senderId") {
+                print("📱 User tapped message notification from: \(senderId)")
+                DispatchQueue.main.async {
+                    AppStateManager.shared.openConversationFromNotification(senderId: senderId)
+                }
+            } else {
+                print("⚠️ Message notification tap missing senderId")
+            }
+        default:
+            print("⚠️ Unknown or missing notification type on tap: \(type ?? "nil")")
         }
         
         completionHandler()

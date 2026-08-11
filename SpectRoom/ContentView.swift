@@ -61,6 +61,17 @@ struct ContentView: View {
         }
         .onAppear {
             appState.setMessagesTabActive(selectedTab == 0)
+            openMessagesTabIfNeededFromNotification()
+        }
+        .onChange(of: appState.shouldOpenConversation) { shouldOpen in
+            if shouldOpen {
+                openMessagesTabIfNeededFromNotification()
+            }
+        }
+        .onChange(of: appState.conversationToOpenSenderId) { senderId in
+            if let senderId, !senderId.isEmpty {
+                openMessagesTabIfNeededFromNotification()
+            }
         }
         .animation(.easeInOut(duration: 0.25), value: isMatchPopupVisible)
         .sheet(isPresented: Binding(
@@ -128,6 +139,16 @@ struct ContentView: View {
             }
         }
     }
+    
+    private func openMessagesTabIfNeededFromNotification() {
+        let shouldOpen = appState.shouldOpenConversation
+            || !(appState.conversationToOpenSenderId ?? "").isEmpty
+        guard shouldOpen else { return }
+        if selectedTab != 0 {
+            selectedTab = 0
+            print("💬 Switched to Messages tab from notification tap")
+        }
+    }
 }
 
 struct CustomFooterMenu: View {
@@ -184,13 +205,7 @@ struct CustomFooterMenu: View {
                             
                             // Badge for total matches - positioned on the icon
                             if displayMatchCount > 0 {
-                                Text("\(displayMatchCount)")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(3)
-                                    .frame(minWidth: 16, minHeight: 16)
-                                    .background(Color.red)
-                                    .clipShape(Circle())
+                                UnreadCountBadge(count: displayMatchCount)
                                     .offset(x: 6, y: -6)
                             }
                         }

@@ -77,6 +77,11 @@ class FirebaseAuthService: ObservableObject {
         }
     }
     
+    /// Re-register the current device token after the user enables notifications.
+    func refreshFCMToken() async {
+        await updateFCMTokenIfNeeded()
+    }
+    
     // MARK: - Authentication Methods
     
     func signUp(email: String, password: String, name: String, age: Int) async throws {
@@ -325,10 +330,16 @@ class FirebaseAuthService: ObservableObject {
                 print("🔍 Firebase - Loaded sensoryPreferences: \(sensoryPreferences), shareSensoryPreferences: \(shareSensoryPreferences)")
                 print("🔍 Firebase - Loaded energyLevel: \(energyLevel)")
                 
+                let firestoreEmail = (userData["email"] as? String ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let authEmail = (auth.currentUser?.email ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let resolvedEmail = firestoreEmail.isEmpty ? authEmail : firestoreEmail
+                
                 let spectRoomUser = SpectRoomUser(
                     name: userData["name"] as? String ?? "",
                     age: userData["age"] as? Int ?? 0,
-                    email: userData["email"] as? String ?? "",
+                    email: resolvedEmail,
                     bio: userData["bio"] as? String ?? "",
                     interests: interests,
                     location: location,

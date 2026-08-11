@@ -19,6 +19,7 @@ struct MessageComposerBar: View {
     var onShortMicTap: () -> Void = {}
     
     @State private var didArmLongPressRecording = false
+    @State private var fieldHeight: CGFloat = ComposerTextMetrics.singleLineHeight
     
     /// Hold this long before recording starts (short taps show a tip instead).
     private let micLongPressDuration: Double = 1.0
@@ -28,15 +29,23 @@ struct MessageComposerBar: View {
     }
     
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: isSingleLineHeight ? .center : .bottom, spacing: 8) {
             ComposerDismissKeyboardTextView(
                 text: $text,
                 isFocused: $isFocused,
                 placeholder: placeholder,
-                isDisabled: isDisabled
+                isDisabled: isDisabled,
+                minHeight: ComposerTextMetrics.singleLineHeight,
+                maxHeight: ComposerTextMetrics.threeLineHeight,
+                onMeasuredHeightChange: { newHeight in
+                    guard abs(fieldHeight - newHeight) > 0.5 else { return }
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        fieldHeight = newHeight
+                    }
+                }
             )
             .padding(.horizontal, 6)
-            .frame(minHeight: 42, maxHeight: 42)
+            .frame(height: fieldHeight)
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
             .background(Color(.systemBackground))
@@ -62,15 +71,15 @@ struct MessageComposerBar: View {
                 .disabled(isSending || isDisabled)
             } else {
                 Button(action: onCamera) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 20, weight: .medium))
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 20, weight: .light))
                         .foregroundColor(.primary)
                         .frame(width: 34, height: 34)
                 }
                 .disabled(isDisabled)
                 
                 Image(systemName: isRecording ? "mic.fill" : "mic")
-                    .font(.system(size: 20, weight: .medium))
+                    .font(.system(size: 20, weight: isRecording ? .regular : .light))
                     .foregroundColor(isRecording ? .red : .primary)
                     .frame(width: 34, height: 34)
                     .contentShape(Rectangle())
@@ -105,5 +114,16 @@ struct MessageComposerBar: View {
         .padding(.bottom, 10)
         .frame(maxWidth: .infinity)
         .opacity(isDisabled ? 0.5 : 1)
+        .onChange(of: text) { _, newValue in
+            if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    fieldHeight = ComposerTextMetrics.singleLineHeight
+                }
+            }
+        }
+    }
+    
+    private var isSingleLineHeight: Bool {
+        fieldHeight <= ComposerTextMetrics.singleLineHeight + 1
     }
 }

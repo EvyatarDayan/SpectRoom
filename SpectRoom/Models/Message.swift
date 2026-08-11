@@ -207,7 +207,13 @@ struct MessageDisplay: Identifiable {
 extension Array where Element == MessageDisplay {
     func deduplicatedConversationMessages() -> [MessageDisplay] {
         var seen = Set<String>()
-        return sorted { $0.createdAt < $1.createdAt }.filter { message in
+        return sorted { lhs, rhs in
+            if lhs.createdAt != rhs.createdAt {
+                return lhs.createdAt < rhs.createdAt
+            }
+            // Same-second messages: keep a stable order.
+            return lhs.deduplicationKey < rhs.deduplicationKey
+        }.filter { message in
             seen.insert(message.deduplicationKey).inserted
         }
     }

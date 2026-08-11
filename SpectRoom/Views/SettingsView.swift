@@ -67,7 +67,9 @@ struct SettingsView: View {
                                 if enabled {
                                     Task {
                                         let granted = await NotificationService.shared.requestNotificationPermission()
-                                        if !granted {
+                                        if granted {
+                                            await FirebaseAuthService.shared.refreshFCMToken()
+                                        } else {
                                             await MainActor.run {
                                                 notificationsEnabled = false
                                                 showingPermissionAlert = true

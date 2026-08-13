@@ -531,7 +531,12 @@ struct MandatoryProfileEditView: View {
                 name = appState.signUpName
                 print("📝 Using sign up name: \(appState.signUpName)")
             } else {
-                name = ""
+                let authName = (FirebaseAuthService.shared.auth.currentUser?.displayName ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                name = authName
+                if !authName.isEmpty {
+                    print("📝 Using Auth display name: \(authName)")
+                }
             }
             dateOfBirth = Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()
             bio = ""

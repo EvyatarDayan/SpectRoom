@@ -1,45 +1,6 @@
 import SwiftUI
 import Foundation
 
-// MARK: - Energy Level Option Enum (shared with ProfileEditView)
-private enum EnergyLevelOption: Int, CaseIterable {
-    case quietAndCalm = 0
-    case softAndSteady = 1
-    case balancedEnergy = 2
-    case readyToChat = 3
-    case fullySocialMode = 4
-    
-    var title: String {
-        switch self {
-        case .quietAndCalm:
-            return "profile.edit.energy.quiet.calm".localized
-        case .softAndSteady:
-            return "profile.edit.energy.soft.steady".localized
-        case .balancedEnergy:
-            return "profile.edit.energy.balanced".localized
-        case .readyToChat:
-            return "profile.edit.energy.ready.chat".localized
-        case .fullySocialMode:
-            return "profile.edit.energy.fully.social".localized
-        }
-    }
-    
-    var color: Color {
-        switch self {
-        case .quietAndCalm:
-            return Color(hex: "#950404")
-        case .softAndSteady:
-            return Color(hex: "#da0808")
-        case .balancedEnergy:
-            return Color(hex: "#ff9323")
-        case .readyToChat:
-            return Color(hex: "#C9A000")
-        case .fullySocialMode:
-            return Color(hex: "#69c440")
-        }
-    }
-}
-
 struct ProfileView: View {
     @EnvironmentObject var appState: AppStateManager
     @Environment(\.colorScheme) var colorScheme
@@ -62,9 +23,6 @@ struct ProfileView: View {
                     
                     // Location Section
                     locationSection
-                    
-                    // Energy Level Section
-                    energyLevelSection
                     
                     // Gender & Preferences Section
                     genderPreferencesSection
@@ -207,51 +165,6 @@ struct ProfileView: View {
             Text("profile.location.privacy.notice".localized)
                 .font(.caption)
                 .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.secondarySystemGroupedBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
-    }
-    
-    // MARK: - Energy Level Section
-    private var energyLevelSection: some View {
-        let energyOption = EnergyLevelOption(rawValue: appState.currentUser?.energyLevel ?? 4) ?? .fullySocialMode
-        let levelColor = energyOption.color
-        let levelBinding = Binding<Int>(
-            get: { appState.currentUser?.energyLevel ?? 4 },
-            set: { _ in }
-        )
-        
-        return VStack(alignment: .leading, spacing: 14) {
-            Text("profile.my.energy.level".localized)
-                .font(.headline)
-                .fontWeight(.semibold)
-                .foregroundColor(.blue)
-            
-            Text(energyOption.title)
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                .foregroundColor(levelColor)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.blue.opacity(0.08))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
-                )
-                .multilineTextAlignment(.center)
-            
-            EnergyLevelSlider(
-                energyLevel: levelBinding,
-                levelColor: levelColor,
-                isEnabled: false
-            )
-            .frame(height: 40)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()

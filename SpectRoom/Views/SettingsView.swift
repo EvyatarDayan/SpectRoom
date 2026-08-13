@@ -21,19 +21,11 @@ struct SettingsView: View {
     @State private var showingPrivacySafety = false
     @State private var showingHelpSupport = false
     @State private var showingAbout = false
-    @State private var distanceLimitLevel = DiscoverDistanceLimit.currentOption.rawValue
-    @State private var profilesInRadiusCount: Int?
-    @State private var isCountingProfilesInRadius = false
-    @State private var profilesInRadiusCountTask: Task<Void, Never>?
     @State private var showingDeleteAccountConfirmation = false
     @State private var deleteConfirmationStep: DeleteAccountConfirmationStep = .sure
     @State private var deleteConfirmationText = ""
     @State private var isDeletingAccount = false
     @State private var deleteAccountErrorMessage: String?
-    
-    private var selectedDistanceOption: DiscoverDistanceOption {
-        DiscoverDistanceOption(rawValue: distanceLimitLevel) ?? .default
-    }
     
     var body: some View {
         NavigationView {
@@ -134,10 +126,6 @@ struct SettingsView: View {
                     .onTapGesture {
                         showingLanguageModal = true
                     }
-                }
-                
-                Section("settings.distance.limit".localized) {
-                    distanceLimitSettingsRow
                 }
                 
                 // Support Section
@@ -387,8 +375,6 @@ struct SettingsView: View {
             }
             .onAppear {
                 checkNotificationPermission()
-                distanceLimitLevel = DiscoverDistanceLimit.currentOption.rawValue
-                scheduleProfilesInRadiusCount()
             }
             .alert("settings.notification.permission".localized, isPresented: $showingPermissionAlert) {
                 Button("settings.settings.button".localized) {
@@ -467,101 +453,6 @@ struct SettingsView: View {
     
     private var currentLanguageName: String {
         Language.allLanguages.first(where: { $0.code == selectedLanguageCode })?.name ?? "English"
-    }
-    
-    private var distanceLimitSettingsRow: some View {
-        let option = selectedDistanceOption
-        let levelColor = option.accentColor
-        
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Text(option.title)
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
-                    .foregroundColor(levelColor)
-                
-                if isCountingProfilesInRadius && profilesInRadiusCount == nil {
-                    ProgressView()
-                        .scaleEffect(0.75)
-                } else if let profilesInRadiusCount {
-                    Text("·")
-                        .font(.system(size: 17, weight: .semibold, design: .rounded))
-                        .foregroundColor(levelColor.opacity(0.7))
-                    Text("\(profilesInRadiusCount)")
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
-                        .foregroundColor(levelColor)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.blue.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
-            )
-            .multilineTextAlignment(.center)
-            
-            EnergyLevelSlider(
-                energyLevel: $distanceLimitLevel,
-                levelColor: levelColor
-            )
-            .frame(height: 40)
-            .onChange(of: distanceLimitLevel) { newLevel in
-                let clamped = max(0, min(DiscoverDistanceOption.allCases.count - 1, newLevel))
-                if clamped != newLevel {
-                    distanceLimitLevel = clamped
-                    return
-                }
-                let option = DiscoverDistanceOption(rawValue: clamped) ?? .default
-                DiscoverDistanceLimit.currentOption = option
-                // While the daily swipe limit is active, keep the frozen blurry deck.
-                // Apply the new radius only after the limit lifts.
-                if DiscoverDailyLimit.currentCount() >= DiscoverDailyLimit.maxSwipesPerDay {
-                    DiscoverDistanceLimit.hasPendingDeckRefresh = true
-                } else {
-                    DiscoverDistanceLimit.hasPendingDeckRefresh = false
-                    appState.clearDiscoverProfilesCache()
-                }
-                scheduleProfilesInRadiusCount()
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
-        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-    }
-    
-    private func scheduleProfilesInRadiusCount() {
-        profilesInRadiusCountTask?.cancel()
-        let option = selectedDistanceOption
-        let blockedUserIds = Set(appState.blockedUsers.map(\.id))
-        guard let currentUser = appState.currentUser else {
-            profilesInRadiusCount = nil
-            isCountingProfilesInRadius = false
-            return
-        }
-        
-        isCountingProfilesInRadius = true
-        profilesInRadiusCount = nil
-        
-        profilesInRadiusCountTask = Task {
-            try? await Task.sleep(nanoseconds: 280_000_000)
-            guard !Task.isCancelled else { return }
-            
-            let count = await DiscoverRadiusCounter.countEligibleProfiles(
-                currentUser: currentUser,
-                option: option,
-                blockedUserIds: blockedUserIds
-            )
-            
-            await MainActor.run {
-                guard !Task.isCancelled else { return }
-                profilesInRadiusCount = count
-                isCountingProfilesInRadius = false
-            }
-        }
     }
     
     private func checkNotificationPermission() {

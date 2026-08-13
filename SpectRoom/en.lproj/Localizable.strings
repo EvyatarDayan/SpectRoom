@@ -86,6 +86,7 @@
 "settings.distance.20km" = "20 km";
 "settings.distance.50km" = "50 km";
 "settings.distance.unlimited" = "Unlimited";
+"search.radius.subtitle" = "Choose how far to look for new people.";
 "settings.language" = "Language";
 "settings.language.description" = "Select app language";
 "settings.support" = "Support";
@@ -156,6 +157,7 @@
 "profile.my.location" = "My Location";
 "profile.location.not.specified" = "Not specified";
 "profile.location.privacy.notice" = "Your address is never shared";
+"profile.email.privacy.notice" = "Your email address is never shared";
 "profile.about.me" = "About Me";
 "profile.no.bio" = "No bio available";
 "profile.my.interests" = "My Interests";
@@ -166,10 +168,12 @@
 "profile.im.a" = "I'm a";
 "profile.interested.in" = "interested in";
 "profile.looking.for" = "Looking for";
+"profile.looking.for.details.title" = "Looking for:";
 "profile.preferred.age" = "Preferred age: %@ to %@";
 "profile.my.preferred.age" = "My Preferred Age: %@ To %@";
 "profile.my.preferences" = "My Preferences";
 "profile.my.energy.level" = "My Energy Level Today";
+"profile.energy.level.subtitle" = "Helps matches understand your social capacity and response speed today.";
 "profile.energy.level" = "Energy Level Today";
 "profile.no.preferences" = "No preferences set";
 "profile.my.photos" = "My Photos";
@@ -205,6 +209,7 @@
 "matches.view.profile" = "View Profile";
 "matches.matched" = "Matched %@";
 "matches.message.button" = "Message";
+"matches.energy.today" = "%@ today";
 "matches.message.label" = "Message";
 "matches.distance.km" = "%@ km away";
 "matches.distance.m" = "%@ m away";
@@ -292,11 +297,16 @@
 // MARK: - New Message Notification
 "message.notification.title" = "New Message";
 "message.notification.from" = "New message from %@";
+"message.notification.push.title" = "SpectRoom message!";
+"message.notification.push.body" = "%@: %@";
 "message.notification.open.message" = "Open Message";
 "message.notification.later" = "Later";
 
 // MARK: - Search/Discover
 "search.empty.no.more.profiles" = "Looks like you've reached everyone nearby. Try expanding your search radius.";
+"search.empty.complete.profile.title" = "You're One Step Away";
+"search.empty.complete.profile.message" = "Adding your basic preferences ensures we show you matches that actually fit what you're looking for.";
+"search.empty.complete.profile.button" = "Finish My Profile";
 "search.online.now" = "Online";
 "search.offline" = "Offline";
 "search.title" = "Discover";
@@ -319,10 +329,31 @@
 "search.match.percent.part" = "%d%%";
 "search.match.label" = " match";
 "search.match.suffix" = " with %@";
+"search.match.details.title" = "Match with %@";
+"search.match.details.percent" = "%d%% match";
+"search.match.details.interests" = "Shared interests";
+"search.match.details.interests.none" = "No shared interests yet";
+"search.match.details.sensory" = "Shared sensory preferences";
+"search.match.details.sensory.none" = "No shared sensory preferences yet";
+"search.match.details.lifestyle" = "Shared lifestyle";
+"search.match.details.lifestyle.none" = "No shared lifestyle yet";
+"search.match.details.ideal.first.date" = "Shared ideal first date";
+"search.match.details.looking.for" = "Shared looking for";
+"search.match.details.age" = "Age";
+"search.match.details.age.same" = "You are the same age as %@";
+"search.match.details.age.younger" = "You are %d years younger than %@";
+"search.match.details.age.older" = "You are %d years older than %@";
+"search.match.details.age.apart" = "%d years apart";
+"search.match.details.gender" = "Who you're interested in";
+"search.match.details.gender.match" = "Matches your preference";
+"search.match.details.gender.mismatch" = "Outside your preference";
 
 // MARK: - Profile Edit
 "profile.edit.title" = "Edit Profile";
 "profile.edit.complete.title" = "Complete Your Profile";
+"profile.complete.welcome.title" = "Welcome to SpectRoom!";
+"profile.complete.welcome.message" = "Complete your profile to help others understand how you like to connect.";
+"profile.complete.welcome.continue" = "Let's Get Started";
 "profile.edit.name" = "My Name";
 "profile.edit.name.placeholder" = "Enter your name";
 "profile.edit.email" = "My Email";
@@ -355,11 +386,12 @@
 "profile.edit.looking.relationship" = "Relationship";
 "profile.edit.preferred.age" = "My Preferred Age";
 "profile.edit.energy.level" = "My Energy Level Today";
-"profile.edit.energy.quiet.calm" = "Quiet and Calm";
-"profile.edit.energy.soft.steady" = "Soft and Steady";
-"profile.edit.energy.balanced" = "Balanced Energy";
-"profile.edit.energy.ready.chat" = "Ready to Chat";
+"profile.energy.low.battery" = "Low Battery";
+"profile.energy.low.battery.detail" = "Taking time to recharge. Slow to reply today.";
+"profile.energy.moderate.social" = "Moderate Social";
+"profile.energy.moderate.social.detail" = "Open to casual text chats at a steady pace.";
 "profile.edit.energy.fully.social" = "Fully Social Mode";
+"profile.energy.fully.social.detail" = "High energy! Ready for fast chats, calls, or making plans.";
 "profile.edit.save" = "Save";
 "profile.edit.cancel" = "Cancel";
 "profile.edit.add.photo" = "Add Photo";
@@ -367,11 +399,13 @@
 "profile.edit.remove.photo" = "Remove Photo";
 "profile.edit.profile.photo" = "My Profile Photo";
 "profile.edit.profile.incomplete" = "Profile Incomplete";
+"profile.edit.completion" = "Profile %d%% complete";
 "profile.edit.validation.full.name" = "Enter your full name";
 "profile.edit.validation.age" = "You must be 18 years or older";
 "profile.edit.validation.location" = "Select a location in Sweden";
 "profile.edit.validation.bio" = "\"About me\" must be at least 30 characters";
 "profile.edit.validation.photos" = "Add at least 2 photos";
+"profile.edit.validation.profile.photo" = "Add a profile photo";
 "profile.edit.validation.interests" = "Select at least 3 interests";
 "profile.edit.validation.gender" = "Select your gender";
 "profile.edit.validation.interested.in" = "Select who you're interested in";

@@ -45,6 +45,17 @@ enum DiscoverDistanceOption: Int, CaseIterable, Identifiable {
         }
     }
     
+    /// Compact label for the Home corner button (e.g. "20km").
+    var shortButtonTitle: String {
+        switch self {
+        case .fiveKm: return "5km"
+        case .tenKm: return "10km"
+        case .twentyKm: return "20km"
+        case .fiftyKm: return "50km"
+        case .unlimited: return "∞"
+        }
+    }
+    
     var accentColor: Color {
         Color(red: 0x69 / 255.0, green: 0xc4 / 255.0, blue: 0x40 / 255.0) // same green as Fully Social
     }

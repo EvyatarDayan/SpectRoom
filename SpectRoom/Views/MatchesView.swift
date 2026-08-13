@@ -447,32 +447,8 @@ struct MatchGridCard: View {
             }
             .buttonStyle(.plain)
 
-            ZStack(alignment: .bottom) {
-                Button(action: onTap) {
-                    VStack(spacing: 6) {
-                        Text("\(firstName(from: profile.name)), \(profile.age)")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundColor(nameColor)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.8)
-
-                        if let displayDistance {
-                            Text(displayDistance)
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundColor(distanceColor)
-                                .multilineTextAlignment(.center)
-                                .lineLimit(2)
-                                .minimumScaleFactor(0.8)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .buttonStyle(.plain)
-
-                messageButton
-            }
-            .frame(width: infoWidth, height: photoSide)
+            infoColumn
+                .frame(width: infoWidth, height: photoSide)
         }
         .padding(cardPadding)
         .frame(width: cardWidth, alignment: .leading)
@@ -488,10 +464,97 @@ struct MatchGridCard: View {
         }
     }
 
+    /// Three equal-height bands separated by two identical dividers;
+    /// each band centers its content vertically.
+    private var infoColumn: some View {
+        let dividerHeight: CGFloat = 1
+        return GeometryReader { geo in
+            let slotHeight = (geo.size.height - dividerHeight * 2) / 3
+
+            VStack(spacing: 0) {
+                Button(action: onTap) {
+                    nameDistanceLabel
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .frame(width: geo.size.width, height: slotHeight)
+
+                thinDivider(height: dividerHeight)
+
+                Button(action: onTap) {
+                    energyLevelLabel
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .frame(width: geo.size.width, height: slotHeight)
+
+                thinDivider(height: dividerHeight)
+
+                messageButton
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .frame(width: geo.size.width, height: slotHeight)
+            }
+        }
+    }
+
     private var isBlockedMatch: Bool {
         appState.isMessagingBlocked(with: profile.userId)
     }
 
+    private func thinDivider(height: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color(white: colorScheme == .dark ? 0.55 : 0.72))
+            .frame(height: height)
+            .frame(maxWidth: .infinity)
+    }
+
+    private var nameDistanceLabel: some View {
+        VStack(spacing: 4) {
+            Text("\(firstName(from: profile.name)), \(profile.age)")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(nameColor)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+
+            if let displayDistance {
+                Text(displayDistance)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(distanceColor)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+            }
+        }
+    }
+    
+    private var energyLevelLabel: some View {
+        let option = EnergyLevelOption.resolved(from: profile.energyLevel)
+        let title = String(format: "matches.energy.today".localized, option.title)
+        // Hidden trailing emoji balances the leading one so only the text is
+        // optically centered; visible emoji sits slightly left of the text.
+        return HStack(alignment: .center, spacing: 6) {
+            Text(option.emoji)
+                .font(.system(size: 15))
+                .offset(x: 12)
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(option.color)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(maxWidth: max(0, infoWidth - 40))
+            Text(option.emoji)
+                .font(.system(size: 15))
+                .hidden()
+                .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+    }
+    
     private var messageButton: some View {
         Button(action: onMessage) {
             HStack(spacing: 6) {

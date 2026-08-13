@@ -11,9 +11,21 @@ import FirebaseAuth
 import Combine
 import UIKit
 
+struct DiscoverDeckFilterSignature: Codable, Equatable {
+    let preferredAgeMin: Int
+    let preferredAgeMax: Int
+    let gender: String
+    let interestedIn: [String]
+    let lookingFor: [String]
+    let locationLatitude: Double?
+    let locationLongitude: Double?
+    let distanceLimitRawValue: Int
+}
+
 class AppStateManager: ObservableObject {
     @Published var isAuthenticated = false
     @Published var hasResolvedAuthState = false
+    @Published var hasResolvedUserProfile = false
     @Published var hasCompletedOnboarding = false
     @Published var hasCompletedInitialProfile = false
     @Published var isNewSignup = false
@@ -25,7 +37,9 @@ class AppStateManager: ObservableObject {
     @Published var cachedMessageConversations: [MessageDisplay] = [] // Cache for message conversations list
     @Published var cachedDiscoverProfiles: [ProfileCard] = []
     @Published var cachedDiscoverCardIndex: Int = 0
+    @Published private(set) var discoverDeckRefreshID = UUID()
     private var isDiscoverProfilesCacheValid = false
+    private var cachedDiscoverFilterSignature: DiscoverDeckFilterSignature?
     @Published var blockedUsers: [BlockedUser] = []
     @Published var blockedByUsers: [BlockedUser] = []
     @Published private(set) var suppressedBlockedAlertUserIds: Set<String> = []
@@ -79,6 +93,7 @@ class AppStateManager: ObservableObject {
         // Mirror Firebase auth immediately so launch routing does not wait on the Combine subscription.
         isAuthenticated = firebaseAuth.isAuthenticated
         hasResolvedAuthState = firebaseAuth.hasResolvedAuthState
+        hasResolvedUserProfile = firebaseAuth.hasResolvedUserProfile
         
         firebaseAuth.$hasResolvedAuthState
             .receive(on: DispatchQueue.main)
@@ -87,16 +102,29 @@ class AppStateManager: ObservableObject {
             }
             .store(in: &cancellables)
         
+        firebaseAuth.$hasResolvedUserProfile
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] resolved in
+                self?.hasResolvedUserProfile = resolved
+            }
+            .store(in: &cancellables)
+        
         firebaseAuth.$isAuthenticated
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isAuth in
+                let wasAuthenticated = self?.isAuthenticated ?? false
                 self?.isAuthenticated = isAuth
                 if isAuth {
+                    if !wasAuthenticated, self?.firebaseAuth.currentUser == nil {
+                        // New login: keep home on the spinner until this account's profile loads.
+                        self?.hasResolvedUserProfile = false
+                    }
                     // Returning session: never show the welcome wizard again.
                     if self?.hasCompletedOnboarding != true {
                         self?.hasCompletedOnboarding = true
                         self?.saveAppState()
                     }
+                    self?.restoreSignupNameFromAuthIfNeeded()
                     // User is authenticated - set online status and preload photos
                     Task {
                         await self?.updateOnlineStatus(isOnline: true)
@@ -143,6 +171,7 @@ class AppStateManager: ObservableObject {
                     self?.blockedUsers = user.blockedUsers
                     self?.blockedByUsers = user.blockedByUsers
                     self?.loadSuppressedBlockedAlerts()
+                    self?.syncInitialProfileCompletionIfNeeded()
                 } else {
                     self?.blockedUsers = []
                     self?.blockedByUsers = []
@@ -274,6 +303,7 @@ class AppStateManager: ObservableObject {
                 await MainActor.run {
                     currentUser = nil
                     isNewSignup = false
+                    signUpName = ""
                     hasCompletedInitialProfile = false
                     matches = []
                     cachedMatches = []
@@ -330,45 +360,80 @@ class AppStateManager: ObservableObject {
     func isProfileComplete() -> Bool {
         guard let user = currentUser else { return false }
         
-        // Check full name (first and last at least)
         let nameComponents = user.name.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: " ")
         let hasFullName = nameComponents.count >= 2 && nameComponents.allSatisfy { !$0.isEmpty }
         
-        // Check age
-        let hasValidAge = user.age >= 18 && user.age <= 100
+        let hasValidAge = user.age >= 18
         
-        // Check about me (at least 20 characters)
-        let hasAboutMe = user.bio.trimmingCharacters(in: .whitespacesAndNewlines).count >= 20
+        let trimmedLocation = user.location.displayString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasLocation: Bool
+        if trimmedLocation.isEmpty {
+            hasLocation = false
+        } else if let latitude = user.location.latitude, let longitude = user.location.longitude {
+            hasLocation = SwedenLocation.contains(latitude: latitude, longitude: longitude)
+        } else {
+            hasLocation = true
+        }
         
-        // Check interests (at least 3)
-        let hasInterests = user.interests.count >= 3
+        let hasBio = user.bio.trimmingCharacters(in: .whitespacesAndNewlines).count >= 30
         
-        // Check photos (at least 2)
+        let hasProfilePhoto: Bool = {
+            if let profilePhotoURL = user.profilePhotoURL?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               !profilePhotoURL.isEmpty,
+               URL(string: profilePhotoURL) != nil {
+                return true
+            }
+            return false
+        }()
+        
         let validPhotos = user.photos.filter { photoURL in
             let trimmedURL = photoURL.trimmingCharacters(in: .whitespacesAndNewlines)
             return !trimmedURL.isEmpty && URL(string: trimmedURL) != nil
         }
-        let hasPhotos = validPhotos.count >= 2
+        let hasPhotos = validPhotos.count >= 2 && validPhotos.count <= 5
         
-        // Check profile photo (must exist - first photo)
-        let hasProfilePhoto = !validPhotos.isEmpty
+        let hasInterests = user.interests.count >= 3
+        let hasGender = !user.gender.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasInterestedIn = !user.interestedIn.isEmpty
+        let hasLookingFor = !user.lookingFor.isEmpty
+        let hasIdealFirstDate = !user.idealFirstDate.isEmpty
         
-        let isComplete = hasFullName && hasValidAge && hasAboutMe && hasInterests && hasPhotos && hasProfilePhoto
-        
-        print("📋 Profile completion check:")
-        print("  - Full name: \(hasFullName) (\(nameComponents.count) components)")
-        print("  - Valid age: \(hasValidAge) (\(user.age))")
-        print("  - About me: \(hasAboutMe) (\(user.bio.count) chars)")
-        print("  - Interests: \(hasInterests) (\(user.interests.count) items)")
-        print("  - Photos: \(hasPhotos) (\(validPhotos.count) photos)")
-        print("  - Profile photo: \(hasProfilePhoto)")
-        print("  - Overall: \(isComplete)")
-        
-        return isComplete
+        return hasFullName
+            && hasValidAge
+            && hasLocation
+            && hasBio
+            && hasProfilePhoto
+            && hasPhotos
+            && hasInterests
+            && hasGender
+            && hasInterestedIn
+            && hasLookingFor
+            && hasIdealFirstDate
+    }
+    
+    func syncInitialProfileCompletionIfNeeded() {
+        guard !hasCompletedInitialProfile else { return }
+        guard isProfileComplete() else { return }
+        hasCompletedInitialProfile = true
+        isNewSignup = false
+        saveAppState()
+        print("✅ Synced initial profile completion from saved user data")
     }
     
     
     // MARK: - Onboarding
+    func restoreSignupNameFromAuthIfNeeded() {
+        let existing = signUpName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard existing.isEmpty else { return }
+        let authName = (firebaseAuth.auth.currentUser?.displayName ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !authName.isEmpty else { return }
+        signUpName = authName
+        saveAppState()
+        print("📝 Restored signup name from Auth account: \(authName)")
+    }
+    
     func completeOnboarding(dontShowAgain: Bool = false) {
         hasCompletedOnboarding = true
         UserDefaults.standard.set(dontShowAgain, forKey: "dontShowWelcomeAgain")
@@ -388,6 +453,14 @@ class AppStateManager: ObservableObject {
         signUpName = "" // Clear the sign up name
         saveAppState()
         print("✅ Initial profile completed - user can now access main app")
+    }
+    
+    /// Lets a new user browse the app before finishing mandatory profile setup.
+    func deferInitialProfileCompletion() {
+        guard isNewSignup else { return }
+        isNewSignup = false
+        saveAppState()
+        print("📝 Deferred mandatory profile completion — user can finish profile later")
     }
     
     // MARK: - Matches
@@ -439,8 +512,25 @@ class AppStateManager: ObservableObject {
     }
 
     // MARK: - Discover Profiles Cache
+    func currentDiscoverFilterSignature() -> DiscoverDeckFilterSignature? {
+        guard let user = currentUser else { return nil }
+        return DiscoverDeckFilterSignature(
+            preferredAgeMin: user.preferredAgeMin,
+            preferredAgeMax: user.preferredAgeMax,
+            gender: user.gender,
+            interestedIn: user.interestedIn.sorted(),
+            lookingFor: user.lookingFor.sorted(),
+            locationLatitude: user.location.latitude,
+            locationLongitude: user.location.longitude,
+            distanceLimitRawValue: DiscoverDistanceLimit.currentOption.rawValue
+        )
+    }
+    
     var hasValidDiscoverProfilesCache: Bool {
-        isDiscoverProfilesCacheValid
+        guard isDiscoverProfilesCacheValid, !cachedDiscoverProfiles.isEmpty else { return false }
+        guard let cached = cachedDiscoverFilterSignature,
+              let current = currentDiscoverFilterSignature() else { return false }
+        return cached == current
     }
 
     func updateDiscoverProfilesCache(profiles: [ProfileCard], cardIndex: Int) {
@@ -451,6 +541,7 @@ class AppStateManager: ObservableObject {
         cachedDiscoverProfiles = profiles
         // Allow index == count for the empty end-of-deck state.
         cachedDiscoverCardIndex = max(0, min(cardIndex, profiles.count))
+        cachedDiscoverFilterSignature = currentDiscoverFilterSignature()
         isDiscoverProfilesCacheValid = true
         persistDiscoverProfilesCache()
     }
@@ -458,8 +549,22 @@ class AppStateManager: ObservableObject {
     func clearDiscoverProfilesCache() {
         cachedDiscoverProfiles = []
         cachedDiscoverCardIndex = 0
+        cachedDiscoverFilterSignature = nil
         isDiscoverProfilesCacheValid = false
         clearPersistedDiscoverProfilesCache()
+    }
+    
+    func invalidateDiscoverDeckAfterProfileUpdate() {
+        if DiscoverDailyLimit.currentCount() >= DiscoverDailyLimit.maxSwipesPerDay {
+            DiscoverDistanceLimit.hasPendingDeckRefresh = true
+            print("🔍 Deferred discover deck refresh until daily swipe limit resets")
+            return
+        }
+        
+        DiscoverDistanceLimit.hasPendingDeckRefresh = false
+        clearDiscoverProfilesCache()
+        discoverDeckRefreshID = UUID()
+        print("🔍 Invalidated discover deck after profile update")
     }
     
     private var discoverCacheAccountKey: String? {
@@ -483,6 +588,10 @@ class AppStateManager: ObservableObject {
         "discoverCardIndexCache_\(accountKey)"
     }
     
+    private func discoverFilterSignatureStorageKey(for accountKey: String) -> String {
+        "discoverFilterSignatureCache_\(accountKey)"
+    }
+    
     private func persistDiscoverProfilesCache() {
         guard let accountKey = discoverCacheAccountKey else { return }
         let encoder = JSONEncoder()
@@ -490,12 +599,17 @@ class AppStateManager: ObservableObject {
             UserDefaults.standard.set(data, forKey: discoverProfilesStorageKey(for: accountKey))
             UserDefaults.standard.set(cachedDiscoverCardIndex, forKey: discoverCardIndexStorageKey(for: accountKey))
         }
+        if let signature = cachedDiscoverFilterSignature,
+           let signatureData = try? encoder.encode(signature) {
+            UserDefaults.standard.set(signatureData, forKey: discoverFilterSignatureStorageKey(for: accountKey))
+        }
     }
     
     private func clearPersistedDiscoverProfilesCache() {
         guard let accountKey = discoverCacheAccountKey else { return }
         UserDefaults.standard.removeObject(forKey: discoverProfilesStorageKey(for: accountKey))
         UserDefaults.standard.removeObject(forKey: discoverCardIndexStorageKey(for: accountKey))
+        UserDefaults.standard.removeObject(forKey: discoverFilterSignatureStorageKey(for: accountKey))
     }
     
     func loadPersistedDiscoverProfilesCacheIfNeeded() {
@@ -506,6 +620,11 @@ class AppStateManager: ObservableObject {
     private func loadPersistedDiscoverProfilesCache() {
         guard let accountKey = discoverCacheAccountKey else { return }
         let decoder = JSONDecoder()
+        guard let signatureData = UserDefaults.standard.data(forKey: discoverFilterSignatureStorageKey(for: accountKey)),
+              let signature = try? decoder.decode(DiscoverDeckFilterSignature.self, from: signatureData),
+              signature == currentDiscoverFilterSignature() else {
+            return
+        }
         guard let data = UserDefaults.standard.data(forKey: discoverProfilesStorageKey(for: accountKey)),
               let profiles = try? decoder.decode([ProfileCard].self, from: data),
               !profiles.isEmpty else {
@@ -514,6 +633,7 @@ class AppStateManager: ObservableObject {
         let storedIndex = UserDefaults.standard.integer(forKey: discoverCardIndexStorageKey(for: accountKey))
         cachedDiscoverProfiles = profiles
         cachedDiscoverCardIndex = max(0, min(storedIndex, profiles.count))
+        cachedDiscoverFilterSignature = signature
         isDiscoverProfilesCacheValid = true
         print("📱 Restored \(profiles.count) discover profiles from disk at index \(cachedDiscoverCardIndex)")
     }
@@ -543,6 +663,7 @@ class AppStateManager: ObservableObject {
         UserDefaults.standard.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding")
         UserDefaults.standard.set(hasCompletedInitialProfile, forKey: "hasCompletedInitialProfile")
         UserDefaults.standard.set(isNewSignup, forKey: "isNewSignup")
+        UserDefaults.standard.set(signUpName, forKey: "signUpName")
         
         if let matchesData = try? encoder.encode(matches) {
             UserDefaults.standard.set(matchesData, forKey: "matches")
@@ -569,6 +690,8 @@ class AppStateManager: ObservableObject {
         hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
         hasCompletedInitialProfile = UserDefaults.standard.bool(forKey: "hasCompletedInitialProfile")
         isNewSignup = UserDefaults.standard.bool(forKey: "isNewSignup")
+        signUpName = UserDefaults.standard.string(forKey: "signUpName") ?? ""
+        restoreSignupNameFromAuthIfNeeded()
         
         if let matchesData = UserDefaults.standard.data(forKey: "matches"),
            let matches = try? decoder.decode([Match].self, from: matchesData) {
@@ -579,6 +702,8 @@ class AppStateManager: ObservableObject {
            let conversations = try? decoder.decode([Conversation].self, from: conversationsData) {
             self.conversations = conversations
         }
+        
+        syncInitialProfileCompletionIfNeeded()
     }
     
     private func clearStaleAuthData() {
@@ -1631,6 +1756,25 @@ class AppStateManager: ObservableObject {
             print("📱 Updated app state in Firestore: \(isActive ? "active" : "inactive"), isOnline: \(isActive)")
         } catch {
             print("❌ Failed to update app state in Firestore: \(error)")
+        }
+    }
+    
+    func updateEnergyLevel(_ level: Int) {
+        let clamped = min(max(level, 0), 4)
+        if var user = currentUser {
+            user.energyLevel = clamped
+            currentUser = user
+            firebaseAuth.currentUser = user
+            saveAppState()
+        }
+        
+        Task {
+            do {
+                try await firebaseAuth.updateUserData(["energyLevel": clamped])
+                print("✅ Updated energy level: \(clamped)")
+            } catch {
+                print("❌ Failed to update energy level: \(error)")
+            }
         }
     }
     

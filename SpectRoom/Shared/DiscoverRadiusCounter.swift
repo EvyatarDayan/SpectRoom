@@ -2,7 +2,7 @@
 //  DiscoverRadiusCounter.swift
 //  SpectRoom
 //
-//  Counts discover-eligible profiles within a search radius (for Settings preview).
+//  Counts discover-eligible profiles within a search radius (for Profile radius preview).
 //
 
 import Foundation

@@ -5,6 +5,18 @@ import Foundation
 import UniformTypeIdentifiers
 import UIKit
 
+private enum ProfileValidationSection: String, Hashable {
+    case profilePhoto
+    case photos
+    case name
+    case age
+    case location
+    case genderPreferences
+    case aboutMe
+    case idealFirstDate
+    case interests
+}
+
 struct ProfileEditView: View {
     @EnvironmentObject var appState: AppStateManager
     @Environment(\.dismiss) private var dismiss
@@ -23,6 +35,9 @@ struct ProfileEditView: View {
         self.isMandatoryCompletion = isMandatoryCompletion
         self.embedsInTabBar = embedsInTabBar
         self._selectedTab = selectedTab
+        _showingCompleteProfileWelcome = State(
+            initialValue: isMandatoryCompletion && CompleteProfileWelcomeOverlay.shouldShowWelcome
+        )
     }
     
     // MARK: - State Variables
@@ -61,44 +76,6 @@ struct ProfileEditView: View {
         GridItem(.flexible(), spacing: 12),
         GridItem(.flexible(), spacing: 12)
     ]
-    
-    private enum EnergyLevelOption: Int, CaseIterable {
-        case quietAndCalm = 0
-        case softAndSteady = 1
-        case balancedEnergy = 2
-        case readyToChat = 3
-        case fullySocialMode = 4
-        
-        var title: String {
-            switch self {
-            case .quietAndCalm:
-                return "profile.edit.energy.quiet.calm".localized
-            case .softAndSteady:
-                return "profile.edit.energy.soft.steady".localized
-            case .balancedEnergy:
-                return "profile.edit.energy.balanced".localized
-            case .readyToChat:
-                return "profile.edit.energy.ready.chat".localized
-            case .fullySocialMode:
-                return "profile.edit.energy.fully.social".localized
-            }
-        }
-        
-        var color: Color {
-            switch self {
-            case .quietAndCalm:
-                return Color(hex: "#950404")
-            case .softAndSteady:
-                return Color(hex: "#da0808")
-            case .balancedEnergy:
-                return Color(hex: "#ff9323")
-            case .readyToChat:
-                return Color(hex: "#C9A000")
-            case .fullySocialMode:
-                return Color(hex: "#69c440")
-            }
-        }
-    }
     
     private enum LifestyleOption: String, CaseIterable {
         case preferNot
@@ -211,9 +188,10 @@ struct ProfileEditView: View {
     @State private var isEditingProfilePhoto = false
     @State private var profilePhoto: UIImage? = nil
     @State private var isLoading = false
-    @State private var showingAlert = false
-    @State private var alertMessage = ""
+    @State private var showingSaveErrorAlert = false
+    @State private var saveErrorMessage = ""
     @State private var hasAttemptedSave = false
+    @State private var scrollToValidationSection: ProfileValidationSection?
     @State private var showingAddressSearch = false
     @State private var selectedLifestyle = LifestyleOption.preferNot.rawValue
     @State private var isDataLoaded = false // Track when profile data is loaded
@@ -222,99 +200,123 @@ struct ProfileEditView: View {
     @State private var selectedSensoryPreferences: [String] = []
     @State private var sensoryInfoOption: SensoryPreferenceOption? = nil
     @State private var isDatePickerExpanded = false
+    @State private var showingCompleteProfileWelcome: Bool
+    @State private var isCompletionBarVisible = true
+    /// After a 100% save (or opening an already-complete profile), hide the bar until
+    /// the user drops below 100% and taps Save again.
+    @State private var suppressCompletionBarUntilIncompleteSave = false
     
     private let minGalleryPhotos = 2
     private let maxGalleryPhotos = 5
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                ScrollView {
-                    VStack(spacing: 16) {
-                        // Profile Photo Section
-                        profilePhotoSection
-                        
-                        // My Photos Section
-                        myPhotosSection
-                        
-                        // Name Section
-                        nameSection
-                        
-                        // Date of Birth Section
-                        dateOfBirthSection
-                        
-                        // Location Section
-                        locationSection
-                        
-                        // Energy Level Section
-                        energyLevelSection
-                        
-                        // Gender & Preferences Section
-                        genderPreferencesSection
-                        
-                        // About Me Section
-                        aboutMeSection
-                        
-                        // Lifestyle Section
-                        lifestyleSection
-                        
-                        // Body Type Section
-                        bodyTypeSection
-                        
-                        // Ideal First Date Section
-                        idealFirstDateSection
-                        
-                        // Sensory Preferences Section
-                        sensoryPreferencesSection
-                        
-                        // My Interests Section
-                        myInterestsSection
+        NavigationStack {
+            ScrollViewReader { proxy in
+                ZStack {
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            profilePhotoSection
+                                .id(ProfileValidationSection.profilePhoto)
+                            
+                            myPhotosSection
+                                .id(ProfileValidationSection.photos)
+                            
+                            nameSection
+                                .id(ProfileValidationSection.name)
+                            
+                            dateOfBirthSection
+                                .id(ProfileValidationSection.age)
+                            
+                            locationSection
+                                .id(ProfileValidationSection.location)
+                            
+                            genderPreferencesSection
+                                .id(ProfileValidationSection.genderPreferences)
+                            
+                            aboutMeSection
+                                .id(ProfileValidationSection.aboutMe)
+                            
+                            lifestyleSection
+                            
+                            bodyTypeSection
+                            
+                            idealFirstDateSection
+                                .id(ProfileValidationSection.idealFirstDate)
+                            
+                            sensoryPreferencesSection
+                            
+                            myInterestsSection
+                                .id(ProfileValidationSection.interests)
+                        }
+                        .padding(.horizontal)
+                        .padding(.top, 8)
+                        .padding(.bottom, embedsInTabBar ? 130 : 40)
                     }
-                    .padding(.horizontal)
-                    .padding(.bottom, embedsInTabBar ? 100 : 30)
+                    .safeAreaInset(edge: .top, spacing: isCompletionBarVisible ? 24 : 0) {
+                        if isCompletionBarVisible {
+                            profileCompletionBar
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.25), value: isCompletionBarVisible)
+                    .profileEditScrollEdgeChrome()
+                    .background(
+                        Image(colorScheme == .dark ? "ColorsDark" : "Colors")
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .ignoresSafeArea(edges: .bottom)
+                    )
+                    .opacity(isDataLoaded ? 1.0 : 0.3)
+                    .disabled(!isDataLoaded)
+                    
+                    if !isDataLoaded {
+                        VStack(spacing: 16) {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                                .tint(.blue)
+                            Text("profile.edit.loading".localized)
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(.systemGroupedBackground).opacity(0.8))
+                    }
                 }
-                .background(
-                    Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .ignoresSafeArea()
-                )
-                .opacity(isDataLoaded ? 1.0 : 0.3) // Gray out when loading
-                .disabled(!isDataLoaded) // Disable interaction when loading
-                
-                // Loading overlay
-                if !isDataLoaded {
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                            .tint(.blue)
-                        Text("profile.edit.loading".localized)
-                            .font(.headline)
-                            .foregroundColor(.primary)
+                .onChange(of: scrollToValidationSection) { _, section in
+                    guard let section else { return }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            proxy.scrollTo(section, anchor: .top)
+                        }
+                        scrollToValidationSection = nil
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(.systemGroupedBackground).opacity(0.8))
+                }
+                .onChange(of: profileCompletionPercentage) { oldValue, newValue in
+                    guard isDataLoaded, oldValue != newValue else { return }
+                    guard !suppressCompletionBarUntilIncompleteSave else { return }
+                    revealCompletionBar()
                 }
             }
             .navigationTitle(isMandatoryCompletion ? "profile.edit.complete.title".localized : "profile.edit.title".localized)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color(.systemBackground), for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(colorScheme, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    if !isMandatoryCompletion {
-                        Button("profile.edit.cancel".localized) {
-                            closeEdit()
-                        }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(isMandatoryCompletion ? "common.close".localized : "profile.edit.cancel".localized) {
+                        closeEdit()
                     }
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("profile.edit.save".localized) {
                         if isFormValid() {
                             saveProfile()
                         } else {
+                            suppressCompletionBarUntilIncompleteSave = false
+                            revealCompletionBar()
                             hasAttemptedSave = true
-                            // Show validation errors with bullet points
-                            alertMessage = getFormattedValidationErrors()
-                            showingAlert = true
+                            scrollToValidationSection = firstMissingValidationSection()
                         }
                     }
                     .disabled(isLoading || !isDataLoaded)
@@ -326,7 +328,9 @@ struct ProfileEditView: View {
             let hadCachedUser = appState.currentUser != nil
             if hadCachedUser {
                 loadCurrentProfile()
+                syncProfileNameFromAccount()
                 isDataLoaded = true
+                syncCompletionBarVisibilityAfterLoad()
             } else {
                 isDataLoaded = false
             }
@@ -341,7 +345,11 @@ struct ProfileEditView: View {
                     // overwriting any edits the user may have started.
                     if !hadCachedUser {
                         loadCurrentProfile()
+                        syncProfileNameFromAccount()
                         isDataLoaded = true
+                        syncCompletionBarVisibilityAfterLoad()
+                    } else {
+                        syncProfileNameFromAccount()
                     }
                 }
                 
@@ -372,10 +380,10 @@ struct ProfileEditView: View {
                 selectedLongitude: $locationLongitude
             )
         }
-        .alert("profile.edit.profile.incomplete".localized, isPresented: $showingAlert) {
+        .alert("common.error".localized, isPresented: $showingSaveErrorAlert) {
             Button("common.ok".localized) { }
         } message: {
-            Text(alertMessage)
+            Text(saveErrorMessage)
         }
         .alert(
             sensoryInfoOption?.title ?? "",
@@ -404,6 +412,14 @@ struct ProfileEditView: View {
                 .background(Color(.systemGroupedBackground).opacity(0.8))
             }
         }
+        .overlay {
+            if showingCompleteProfileWelcome {
+                CompleteProfileWelcomeOverlay {
+                    CompleteProfileWelcomeOverlay.markWelcomeSeen()
+                    showingCompleteProfileWelcome = false
+                }
+            }
+        }
     }
     
     // MARK: - Profile Photo Section
@@ -430,6 +446,64 @@ struct ProfileEditView: View {
             RoundedRectangle(cornerRadius: ProfilePhotoStyle.cardCorner, style: .continuous)
                 .fill(Color(.systemBackground))
         )
+        .overlay(validationFrame(isValid: isProfilePhotoValid))
+    }
+    
+    private var displayName: String {
+        let resolved = resolvedProfileName(from: appState.currentUser)
+        return resolved.isEmpty ? "—" : resolved
+    }
+    
+    private func resolvedProfileName(from user: SpectRoomUser?) -> String {
+        let profileName = (user?.name ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !profileName.isEmpty {
+            return profileName
+        }
+        
+        let signupName = appState.signUpName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !signupName.isEmpty {
+            return signupName
+        }
+        
+        let authName = (FirebaseAuthService.shared.auth.currentUser?.displayName ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !authName.isEmpty {
+            return authName
+        }
+        
+        return name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    private func syncProfileNameFromAccount() {
+        let resolved = resolvedProfileName(from: appState.currentUser)
+        if !resolved.isEmpty {
+            name = resolved
+        }
+    }
+    
+    private func syncCompletionBarVisibilityAfterLoad() {
+        if profileCompletionPercentage == 100 {
+            suppressCompletionBarUntilIncompleteSave = true
+            isCompletionBarVisible = false
+        } else {
+            suppressCompletionBarUntilIncompleteSave = false
+            isCompletionBarVisible = true
+        }
+    }
+    
+    private func revealCompletionBar() {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            isCompletionBarVisible = true
+        }
+    }
+    
+    private func hideCompletionBarAfterCompleteSave() {
+        suppressCompletionBarUntilIncompleteSave = true
+        withAnimation(.easeInOut(duration: 0.25)) {
+            isCompletionBarVisible = false
+        }
     }
     
     // MARK: - Name Section
@@ -439,8 +513,9 @@ struct ProfileEditView: View {
                 .font(.headline)
                 .fontWeight(.semibold)
             
-            TextField("profile.edit.name.placeholder".localized, text: $name)
+            Text(displayName)
                 .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.secondary)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 14)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -452,8 +527,7 @@ struct ProfileEditView: View {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
                 )
-                .autocorrectionDisabled(true)
-                .textInputAutocapitalization(.words)
+                .textSelection(.enabled)
             
             Text("profile.edit.email".localized)
                 .font(.headline)
@@ -475,6 +549,10 @@ struct ProfileEditView: View {
                         .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
                 )
                 .textSelection(.enabled)
+            
+            Text("profile.email.privacy.notice".localized)
+                .font(.caption)
+                .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
@@ -618,45 +696,6 @@ struct ProfileEditView: View {
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(12)
         .overlay(validationFrame(isValid: isLocationValid))
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
-    }
-    
-    // MARK: - Energy Level Section
-    private var energyLevelSection: some View {
-        let currentOption = EnergyLevelOption(rawValue: energyLevel) ?? .fullySocialMode
-        let levelColor = currentOption.color
-        
-        return VStack(alignment: .leading, spacing: 14) {
-            Text("profile.edit.energy.level".localized)
-                .font(.headline)
-                .fontWeight(.semibold)
-            
-            Text(currentOption.title)
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                .foregroundColor(levelColor)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.blue.opacity(0.08))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
-                )
-                .multilineTextAlignment(.center)
-            
-            EnergyLevelSlider(
-                energyLevel: $energyLevel,
-                levelColor: levelColor
-            )
-            .frame(height: 40)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.secondarySystemGroupedBackground))
-        .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
     
@@ -1067,6 +1106,21 @@ struct ProfileEditView: View {
     
     
     // MARK: - Validation Computed Properties
+    private var isProfilePhotoValid: Bool {
+        if profilePhoto != nil {
+            return true
+        }
+        
+        if let profilePhotoURL = appState.currentUser?.profilePhotoURL?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !profilePhotoURL.isEmpty,
+           URL(string: profilePhotoURL) != nil {
+            return true
+        }
+        
+        return false
+    }
+    
     private var isNameValid: Bool {
         let nameComponents = name.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: " ")
         return nameComponents.count >= 2 && nameComponents.allSatisfy { !$0.isEmpty }
@@ -1120,6 +1174,93 @@ struct ProfileEditView: View {
         return !selectedIdealFirstDate.isEmpty
     }
     
+    private var profileCompletionPercentage: Int {
+        let checks = [
+            isProfilePhotoValid,
+            isNameValid,
+            isAgeValid,
+            isLocationValid,
+            isBioValid,
+            isPhotosValid,
+            isInterestsValid,
+            isGenderValid,
+            isInterestedInValid,
+            isLookingForValid,
+            isIdealFirstDateValid
+        ]
+        let completed = checks.filter { $0 }.count
+        return Int((Double(completed) / Double(checks.count)) * 100)
+    }
+    
+    private var profileCompletionBar: some View {
+        let progressColor: Color = profileCompletionPercentage == 100 ? .green : .blue
+        let barBackground = colorScheme == .dark
+            ? Color(.secondarySystemGroupedBackground)
+            : Color(.systemGray6)
+        
+        return VStack(spacing: 0) {
+            Divider()
+            
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: profileCompletionPercentage == 100 ? "checkmark.circle.fill" : "chart.bar.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(progressColor)
+                    
+                    Text(String(format: "profile.edit.completion".localized, profileCompletionPercentage))
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    Spacer(minLength: 8)
+                    
+                    Text("\(profileCompletionPercentage)%")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundColor(progressColor)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(progressColor.opacity(colorScheme == .dark ? 0.22 : 0.14))
+                        )
+                }
+                
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.primary.opacity(colorScheme == .dark ? 0.18 : 0.1))
+                        
+                        Capsule()
+                            .fill(progressColor)
+                            .frame(width: geometry.size.width * CGFloat(profileCompletionPercentage) / 100)
+                    }
+                }
+                .frame(height: 10)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(barBackground)
+            
+            Divider()
+        }
+        .background(barBackground)
+    }
+    
+    private func firstMissingValidationSection() -> ProfileValidationSection? {
+        if !isProfilePhotoValid { return .profilePhoto }
+        if !isPhotosValid { return .photos }
+        if !isNameValid { return .name }
+        if !isAgeValid { return .age }
+        if !isLocationValid { return .location }
+        if !isGenderValid || !isInterestedInValid || !isLookingForValid { return .genderPreferences }
+        if !isBioValid { return .aboutMe }
+        if !isIdealFirstDateValid { return .idealFirstDate }
+        if !isInterestsValid { return .interests }
+        return nil
+    }
+    
     private var isSharingBodyType: Bool {
         selectedBodyType != BodyTypeOption.preferNot.rawValue && !selectedBodyType.isEmpty
     }
@@ -1163,7 +1304,9 @@ struct ProfileEditView: View {
     
     // MARK: - Helper Methods
     private func closeEdit() {
-        if embedsInTabBar {
+        if isMandatoryCompletion {
+            appState.deferInitialProfileCompletion()
+        } else if embedsInTabBar {
             selectedTab = 2 // Home / Discover
         } else {
             dismiss()
@@ -1244,7 +1387,7 @@ struct ProfileEditView: View {
         photosToDelete = []
         
         if let user = appState.currentUser {
-            name = user.name
+            name = resolvedProfileName(from: user)
             // Load actual date of birth from database if available, otherwise calculate from age
             if let savedDateOfBirth = user.dateOfBirth {
                 dateOfBirth = savedDateOfBirth
@@ -1359,12 +1502,9 @@ struct ProfileEditView: View {
             print("🔍 ProfileEditView - Loaded interestedIn: \(user.interestedIn), UI selectedInterestedIn: \(selectedInterestedIn), customInterestedIn: '\(customInterestedIn)'")
             print("📸 Loaded \(existingPhotos.count) photos from app state")
         } else {
-            // Reset all fields if no user data or use sign up name for mandatory completion
-            if isMandatoryCompletion && !appState.signUpName.isEmpty {
-                name = appState.signUpName
-                print("📝 Using sign up name for mandatory completion: \(appState.signUpName)")
-            } else {
-                name = ""
+            name = resolvedProfileName(from: nil)
+            if !name.isEmpty {
+                print("📝 Using sign up name: \(name)")
             }
             dateOfBirth = Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()
             location = ""
@@ -1388,11 +1528,15 @@ struct ProfileEditView: View {
     
     // MARK: - Validation Functions
     private func isFormValid() -> Bool {
-        return isNameValid && isAgeValid && isLocationValid && isBioValid && isPhotosValid && isInterestsValid && isGenderValid && isInterestedInValid && isLookingForValid && isIdealFirstDateValid
+        return isProfilePhotoValid && isNameValid && isAgeValid && isLocationValid && isBioValid && isPhotosValid && isInterestsValid && isGenderValid && isInterestedInValid && isLookingForValid && isIdealFirstDateValid
     }
     
     private func getValidationErrors() -> [String] {
         var errors: [String] = []
+        
+        if !isProfilePhotoValid {
+            errors.append("profile.edit.validation.profile.photo".localized)
+        }
         
         if !isNameValid {
             errors.append("profile.edit.validation.full.name".localized)
@@ -1482,6 +1626,8 @@ struct ProfileEditView: View {
     @MainActor
     private func performSave(ageInt: Int) async {
         do {
+                syncProfileNameFromAccount()
+                
                 // Handle photo uploads
                 var galleryPhotoURLs: [String] = []
                 var newProfilePhotoURL: String? = nil
@@ -1545,8 +1691,8 @@ struct ProfileEditView: View {
                     user.preferredAgeMin = Int(preferredAgeMin)
                     user.preferredAgeMax = Int(preferredAgeMax)
                     
-                    // Update energy level
-                    user.energyLevel = energyLevel
+                    // Keep the latest energy level from Home if it was changed there
+                    user.energyLevel = appState.currentUser?.energyLevel ?? energyLevel
                     
                     // Update location with coordinates
                     user.location = Location(
@@ -1619,7 +1765,7 @@ struct ProfileEditView: View {
                         shareIdealFirstDate: true,
                         sensoryPreferences: selectedSensoryPreferences,
                         shareSensoryPreferences: !selectedSensoryPreferences.isEmpty,
-                        energyLevel: energyLevel
+                        energyLevel: appState.currentUser?.energyLevel ?? energyLevel
                     )
                     newUser.profilePhotoURL = newProfilePhotoURL
                     newUser.photos = galleryPhotoURLs
@@ -1671,7 +1817,7 @@ struct ProfileEditView: View {
                     "shareIdealFirstDate": true,
                     "sensoryPreferences": selectedSensoryPreferences,
                     "shareSensoryPreferences": !selectedSensoryPreferences.isEmpty,
-                    "energyLevel": energyLevel,
+                    "energyLevel": appState.currentUser?.energyLevel ?? energyLevel,
                     "location": [
                         "displayString": location,
                         "city": appState.currentUser?.location.city ?? "",
@@ -1695,17 +1841,18 @@ struct ProfileEditView: View {
                 
                 isLoading = false
                 
-                if isMandatoryCompletion {
-                    // Complete the initial profile setup
-                    appState.completeInitialProfile()
-                } else {
+                appState.completeInitialProfile()
+                appState.invalidateDiscoverDeckAfterProfileUpdate()
+                hideCompletionBarAfterCompleteSave()
+                
+                if !isMandatoryCompletion {
                     closeEdit()
                 }
                 
             } catch {
                 isLoading = false
-                alertMessage = String(format: "profile.edit.error.updating".localized, error.localizedDescription)
-                showingAlert = true
+                saveErrorMessage = String(format: "profile.edit.error.updating".localized, error.localizedDescription)
+                showingSaveErrorAlert = true
             }
     }
     
@@ -1715,12 +1862,7 @@ struct ProfileEditView: View {
         guard DiscoverDistanceLimit.currentOption != .unlimited else { return }
         
         DiscoverDistanceLimit.currentOption = .unlimited
-        if DiscoverDailyLimit.currentCount() >= DiscoverDailyLimit.maxSwipesPerDay {
-            DiscoverDistanceLimit.hasPendingDeckRefresh = true
-        } else {
-            DiscoverDistanceLimit.hasPendingDeckRefresh = false
-            appState.clearDiscoverProfilesCache()
-        }
+        appState.invalidateDiscoverDeckAfterProfileUpdate()
     }
     
     // MARK: - Helper function to localize interest names
@@ -1729,6 +1871,19 @@ struct ProfileEditView: View {
         let localized = key.localized
         // If localization key doesn't exist, return original
         return localized == key ? interest : localized
+    }
+}
+
+private extension View {
+    /// iOS 26 applies a dimming/blur scroll-edge effect under the nav bar.
+    /// Hide it so the title area stays a solid color while scrolling.
+    @ViewBuilder
+    func profileEditScrollEdgeChrome() -> some View {
+        if #available(iOS 26.0, *) {
+            self.scrollEdgeEffectHidden(true, for: .top)
+        } else {
+            self
+        }
     }
 }
 

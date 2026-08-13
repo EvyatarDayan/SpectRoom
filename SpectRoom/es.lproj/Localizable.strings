@@ -86,6 +86,7 @@
 "settings.distance.20km" = "20 km";
 "settings.distance.50km" = "50 km";
 "settings.distance.unlimited" = "Ilimitado";
+"search.radius.subtitle" = "Elige hasta dónde buscar gente nueva.";
 "settings.language" = "Idioma";
 "settings.language.description" = "Seleccionar idioma de la app";
 "settings.support" = "Soporte";
@@ -157,6 +158,7 @@
 "profile.my.location" = "Mi Ubicación";
 "profile.location.not.specified" = "No especificada";
 "profile.location.privacy.notice" = "Tu dirección nunca se comparte";
+"profile.email.privacy.notice" = "Tu correo electrónico nunca se comparte";
 "profile.about.me" = "Acerca de Mí";
 "profile.no.bio" = "No hay biografía disponible";
 "profile.my.interests" = "Mis Intereses";
@@ -167,12 +169,14 @@
 "profile.im.a" = "Soy";
 "profile.interested.in" = "interesado/a en";
 "profile.looking.for" = "Buscando";
+"profile.looking.for.details.title" = "Buscando:";
 "profile.preferred.age" = "Edad preferida: %@ a %@";
 "profile.my.sensory.preferences" = "Mis Preferencias Sensoriales";
 "profile.my.ideal.first.date" = "Mi Primera Cita Ideal";
 "profile.my.body.type" = "Mi Tipo de Cuerpo";
 "profile.my.lifestyle.title" = "Mi Estilo de Vida";
 "profile.my.energy.level" = "Mi Nivel de Energía Hoy";
+"profile.energy.level.subtitle" = "Ayuda a tus matches a entender tu capacidad social y velocidad de respuesta hoy.";
 "profile.my.preferred.age" = "Mi Edad Preferida: %@ A %@";
 "profile.my.preferences" = "Mis Preferencias";
 "profile.energy.level" = "Nivel de energía hoy";
@@ -210,6 +214,7 @@
 "matches.view.profile" = "Ver Perfil";
 "matches.matched" = "Coincidencia %@";
 "matches.message.button" = "Mensaje";
+"matches.energy.today" = "%@ hoy";
 "matches.message.label" = "Mensaje";
 "matches.distance.km" = "%@ km de distancia";
 "matches.distance.m" = "%@ m de distancia";
@@ -297,11 +302,16 @@
 // MARK: - New Message Notification
 "message.notification.title" = "Nuevo Mensaje";
 "message.notification.from" = "Nuevo mensaje de %@";
+"message.notification.push.title" = "¡Mensaje de SpectRoom!";
+"message.notification.push.body" = "%@: %@";
 "message.notification.open.message" = "Abrir Mensaje";
 "message.notification.later" = "Más Tarde";
 
 // MARK: - Search/Discover
 "search.empty.no.more.profiles" = "Parece que ya has visto a todos los cercanos. Prueba a ampliar tu radio de búsqueda.";
+"search.empty.complete.profile.title" = "Estás a un paso";
+"search.empty.complete.profile.message" = "Añadir tus preferencias básicas nos permite mostrarte coincidencias que realmente encajan con lo que buscas.";
+"search.empty.complete.profile.button" = "Completar mi perfil";
 "search.online.now" = "En línea";
 "search.offline" = "Desconectado";
 "search.title" = "Descubrir";
@@ -324,10 +334,31 @@
 "search.match.percent.part" = "%d%%";
 "search.match.label" = " de coincidencia";
 "search.match.suffix" = " con %@";
+"search.match.details.title" = "Compatibilidad con %@";
+"search.match.details.percent" = "%d%% de compatibilidad";
+"search.match.details.interests" = "Intereses en común";
+"search.match.details.interests.none" = "Aún no hay intereses en común";
+"search.match.details.sensory" = "Preferencias sensoriales en común";
+"search.match.details.sensory.none" = "Aún no hay preferencias sensoriales en común";
+"search.match.details.lifestyle" = "Estilo de vida en común";
+"search.match.details.lifestyle.none" = "Aún no hay estilo de vida en común";
+"search.match.details.ideal.first.date" = "Primera cita ideal en común";
+"search.match.details.looking.for" = "Búsqueda en común";
+"search.match.details.age" = "Edad";
+"search.match.details.age.same" = "Tienes la misma edad que %@";
+"search.match.details.age.younger" = "Eres %d años más joven que %@";
+"search.match.details.age.older" = "Eres %d años mayor que %@";
+"search.match.details.age.apart" = "%d años de diferencia";
+"search.match.details.gender" = "Quién te interesa";
+"search.match.details.gender.match" = "Coincide con tu preferencia";
+"search.match.details.gender.mismatch" = "Fuera de tu preferencia";
 
 // MARK: - Profile Edit
 "profile.edit.title" = "Editar Perfil";
 "profile.edit.complete.title" = "Completa tu Perfil";
+"profile.complete.welcome.title" = "¡Bienvenido a SpectRoom!";
+"profile.complete.welcome.message" = "Completa tu perfil para ayudar a otros a entender cómo te gusta conectar.";
+"profile.complete.welcome.continue" = "Empecemos";
 "profile.edit.name" = "Mi Nombre";
 "profile.edit.name.placeholder" = "Ingresa tu nombre";
 "profile.edit.email" = "Mi Correo";
@@ -360,11 +391,12 @@
 "profile.edit.looking.relationship" = "Relación";
 "profile.edit.preferred.age" = "Mi Edad Preferida";
 "profile.edit.energy.level" = "Mi Nivel de Energía Hoy";
-"profile.edit.energy.quiet.calm" = "Tranquilo y Calmado";
-"profile.edit.energy.soft.steady" = "Suave y Constante";
-"profile.edit.energy.balanced" = "Energía Equilibrada";
-"profile.edit.energy.ready.chat" = "Listo para Chatear";
+"profile.energy.low.battery" = "Batería baja";
+"profile.energy.low.battery.detail" = "Tomándome tiempo para recargar. Responderé despacio hoy.";
+"profile.energy.moderate.social" = "Social moderado";
+"profile.energy.moderate.social.detail" = "Abierto a chats de texto con calma y a un ritmo constante.";
 "profile.edit.energy.fully.social" = "Modo Social Completo";
+"profile.energy.fully.social.detail" = "¡Alta energía! Listo para chats rápidos, llamadas o planes.";
 "profile.edit.save" = "Guardar";
 "profile.edit.cancel" = "Cancelar";
 "profile.edit.add.photo" = "Agregar Foto";
@@ -372,11 +404,13 @@
 "profile.edit.remove.photo" = "Eliminar Foto";
 "profile.edit.profile.photo" = "Mi Foto de Perfil";
 "profile.edit.profile.incomplete" = "Perfil Incompleto";
+"profile.edit.completion" = "Perfil %d%% completo";
 "profile.edit.validation.full.name" = "Ingresa tu nombre completo";
 "profile.edit.validation.age" = "Debes tener 18 años o más";
 "profile.edit.validation.location" = "Selecciona una ubicación en Suecia";
 "profile.edit.validation.bio" = "\"Acerca de mí\" debe tener al menos 30 caracteres";
 "profile.edit.validation.photos" = "Agrega al menos 2 fotos";
+"profile.edit.validation.profile.photo" = "Agrega una foto de perfil";
 "profile.edit.validation.interests" = "Selecciona al menos 3 intereses";
 "profile.edit.validation.gender" = "Selecciona tu género";
 "profile.edit.validation.interested.in" = "Selecciona en quién estás interesado/a";

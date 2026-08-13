@@ -86,6 +86,7 @@
 "settings.distance.20km" = "20 km";
 "settings.distance.50km" = "50 km";
 "settings.distance.unlimited" = "Obegränsat";
+"search.radius.subtitle" = "Välj hur långt bort du vill söka efter nya personer.";
 "settings.language" = "Språk";
 "settings.language.description" = "Välj appens språk";
 "settings.support" = "Support";
@@ -157,6 +158,7 @@
 "profile.my.location" = "Min Plats";
 "profile.location.not.specified" = "Ej angiven";
 "profile.location.privacy.notice" = "Din adress delas aldrig";
+"profile.email.privacy.notice" = "Din e-postadress delas aldrig";
 "profile.about.me" = "Om Mig";
 "profile.no.bio" = "Ingen biografi tillgänglig";
 "profile.my.interests" = "Mina Intressen";
@@ -167,12 +169,14 @@
 "profile.im.a" = "Jag är";
 "profile.interested.in" = "intresserad av";
 "profile.looking.for" = "Söker";
+"profile.looking.for.details.title" = "Söker:";
 "profile.preferred.age" = "Föredragen ålder: %@ till %@";
 "profile.my.sensory.preferences" = "Mina Sensoriska Preferenser";
 "profile.my.ideal.first.date" = "Min Ideala Första Dejt";
 "profile.my.body.type" = "Min Kroppstyp";
 "profile.my.lifestyle.title" = "Min Livsstil";
 "profile.my.energy.level" = "Min Energinivå Idag";
+"profile.energy.level.subtitle" = "Hjälper matcher att förstå din sociala kapacitet och svarshastighet idag.";
 "profile.my.preferred.age" = "Min Föredragna Ålder: %@ Till %@";
 "profile.my.preferences" = "Mina Preferenser";
 "profile.energy.level" = "Energinivå idag";
@@ -210,6 +214,7 @@
 "matches.view.profile" = "Visa Profil";
 "matches.matched" = "Matchade %@";
 "matches.message.button" = "Meddelande";
+"matches.energy.today" = "%@ idag";
 "matches.message.label" = "Meddelande";
 "matches.distance.km" = "%@ km bort";
 "matches.distance.m" = "%@ m bort";
@@ -297,11 +302,16 @@
 // MARK: - New Message Notification
 "message.notification.title" = "Nytt Meddelande";
 "message.notification.from" = "Nytt meddelande från %@";
+"message.notification.push.title" = "SpectRoom-meddelande!";
+"message.notification.push.body" = "%@: %@";
 "message.notification.open.message" = "Öppna Meddelande";
 "message.notification.later" = "Senare";
 
 // MARK: - Search/Discover
 "search.empty.no.more.profiles" = "Det verkar som att du har nått alla i närheten. Prova att utöka din sökradie.";
+"search.empty.complete.profile.title" = "Du är ett steg bort";
+"search.empty.complete.profile.message" = "Genom att lägga till dina grundläggande preferenser kan vi visa matchningar som verkligen passar det du letar efter.";
+"search.empty.complete.profile.button" = "Slutför min profil";
 "search.online.now" = "Online";
 "search.offline" = "Offline";
 "search.title" = "Upptäck";
@@ -324,10 +334,31 @@
 "search.match.percent.part" = "%d%%";
 "search.match.label" = " match";
 "search.match.suffix" = " med %@";
+"search.match.details.title" = "Matchning med %@";
+"search.match.details.percent" = "%d%% matchning";
+"search.match.details.interests" = "Gemensamma intressen";
+"search.match.details.interests.none" = "Inga gemensamma intressen än";
+"search.match.details.sensory" = "Gemensamma sinnespreferenser";
+"search.match.details.sensory.none" = "Inga gemensamma sinnespreferenser än";
+"search.match.details.lifestyle" = "Gemensam livsstil";
+"search.match.details.lifestyle.none" = "Ingen gemensam livsstil än";
+"search.match.details.ideal.first.date" = "Gemensam ideal första dejt";
+"search.match.details.looking.for" = "Gemensamt vad ni söker";
+"search.match.details.age" = "Ålder";
+"search.match.details.age.same" = "Du är samma ålder som %@";
+"search.match.details.age.younger" = "Du är %d år yngre än %@";
+"search.match.details.age.older" = "Du är %d år äldre än %@";
+"search.match.details.age.apart" = "%d år ifrån varandra";
+"search.match.details.gender" = "Vem du är intresserad av";
+"search.match.details.gender.match" = "Matchar din preferens";
+"search.match.details.gender.mismatch" = "Utanför din preferens";
 
 // MARK: - Profile Edit
 "profile.edit.title" = "Redigera Profil";
 "profile.edit.complete.title" = "Komplettera Din Profil";
+"profile.complete.welcome.title" = "Välkommen till SpectRoom!";
+"profile.complete.welcome.message" = "Komplettera din profil så att andra förstår hur du vill knyta kontakt.";
+"profile.complete.welcome.continue" = "Nu kör vi";
 "profile.edit.name" = "Mitt Namn";
 "profile.edit.name.placeholder" = "Ange ditt namn";
 "profile.edit.email" = "Min E-post";
@@ -360,11 +391,12 @@
 "profile.edit.looking.relationship" = "Relation";
 "profile.edit.preferred.age" = "Min Föredragna Ålder";
 "profile.edit.energy.level" = "Min Energinivå Idag";
-"profile.edit.energy.quiet.calm" = "Tyst och Lugn";
-"profile.edit.energy.soft.steady" = "Mjuk och Stabil";
-"profile.edit.energy.balanced" = "Balanserad Energi";
-"profile.edit.energy.ready.chat" = "Redo att Chatta";
+"profile.energy.low.battery" = "Låg batterinivå";
+"profile.energy.low.battery.detail" = "Tar tid att ladda om. Svarar långsamt idag.";
+"profile.energy.moderate.social" = "Måttligt social";
+"profile.energy.moderate.social.detail" = "Öppen för lugna textchattar i ett stadigt tempo.";
 "profile.edit.energy.fully.social" = "Fullt Socialt Läge";
+"profile.energy.fully.social.detail" = "Hög energi! Redo för snabba chattar, samtal eller att göra upp planer.";
 "profile.edit.save" = "Spara";
 "profile.edit.cancel" = "Avbryt";
 "profile.edit.add.photo" = "Lägg Till Foto";
@@ -372,11 +404,13 @@
 "profile.edit.remove.photo" = "Ta Bort Foto";
 "profile.edit.profile.photo" = "Mitt Profilfoto";
 "profile.edit.profile.incomplete" = "Profil Ofullständig";
+"profile.edit.completion" = "Profil %d%% komplett";
 "profile.edit.validation.full.name" = "Ange ditt fullständiga namn";
 "profile.edit.validation.age" = "Du måste vara 18 år eller äldre";
 "profile.edit.validation.location" = "Välj en plats i Sverige";
 "profile.edit.validation.bio" = "\"Om mig\" måste vara minst 30 tecken";
 "profile.edit.validation.photos" = "Lägg till minst 2 foton";
+"profile.edit.validation.profile.photo" = "Lägg till ett profilfoto";
 "profile.edit.validation.interests" = "Välj minst 3 intressen";
 "profile.edit.validation.gender" = "Välj ditt kön";
 "profile.edit.validation.interested.in" = "Välj vem du är intresserad av";

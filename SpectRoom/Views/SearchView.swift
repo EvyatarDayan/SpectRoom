@@ -157,6 +157,9 @@ struct SearchView: View {
     @State private var savedProfilesBeforeSecondThoughts: [ProfileCard] = []
     @State private var savedCardIndexBeforeSecondThoughts = 0
     @State private var secondThoughtsErrorMessage: String?
+    @State private var showingEnergyLevelPicker = false
+    @State private var showingDistancePicker = false
+    @State private var selectedDistanceOption = DiscoverDistanceLimit.currentOption
     
     private var hasReachedDailyLimit: Bool {
         dailySwipeCount >= DiscoverDailyLimit.maxSwipesPerDay
@@ -165,6 +168,32 @@ struct SearchView: View {
     /// Locked overlay on the top card (not while reviewing today's passes).
     private var showsDailyLimitOverlay: Bool {
         hasReachedDailyLimit && !isReviewingTodaysPasses
+    }
+    
+    private var needsProfileCompletion: Bool {
+        !appState.isProfileComplete()
+    }
+    
+    private var hasResolvedDiscoverProfileState: Bool {
+        appState.hasResolvedAuthState && appState.hasResolvedUserProfile
+    }
+    
+    private var shouldShowProfileIncompleteCard: Bool {
+        hasResolvedDiscoverProfileState && needsProfileCompletion
+    }
+    
+    private var shouldShowDiscoverLoadingSpinner: Bool {
+        guard appState.isAuthenticated else { return false }
+        
+        if !hasResolvedDiscoverProfileState {
+            return true
+        }
+        
+        if shouldShowProfileIncompleteCard {
+            return false
+        }
+        
+        return isLoading && profiles.isEmpty
     }
     
     private enum DiscoverConstants {
@@ -185,8 +214,7 @@ struct SearchView: View {
                 VStack(spacing: 0) {
                     // Card stack area
                     ZStack(alignment: .top) {
-                        if isLoading && profiles.isEmpty {
-                            // Loading indicator
+                        if shouldShowDiscoverLoadingSpinner {
                             VStack(spacing: 20) {
                                 ProgressView()
                                     .scaleEffect(1.5)
@@ -195,6 +223,11 @@ struct SearchView: View {
                                     .font(.headline)
                                     .foregroundColor(.secondary)
                             }
+                        } else if shouldShowProfileIncompleteCard {
+                            EmptyStateCard(
+                                isProfileIncomplete: true,
+                                onProfileTap: { selectedTab = 3 }
+                            )
                         } else if currentCardIndex < profiles.count {
                             // Show only 3 cards in the pile (top card + 2 behind it)
                             ForEach(Array(profiles.enumerated().reversed()), id: \.offset) { index, profile in
@@ -267,7 +300,7 @@ struct SearchView: View {
                 }
                 
                 // Floating action buttons positioned below cards (on top of everything)
-                if currentCardIndex < profiles.count {
+                if currentCardIndex < profiles.count, !shouldShowProfileIncompleteCard {
                     VStack {
                         Spacer()
                         
@@ -324,37 +357,124 @@ struct SearchView: View {
                     }
                     .allowsHitTesting(!showsDailyLimitOverlay)
                 }
+                
+                ZStack {
+                    if showingEnergyLevelPicker {
+                        Color.clear
+                            .ignoresSafeArea()
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                                    showingEnergyLevelPicker = false
+                                }
+                            }
+                        
+                        ZStack(alignment: .top) {
+                            EnergyLevelPickerOverlay(
+                                selectedLevel: appState.currentUser?.energyLevel ?? 4,
+                                onSelect: { level in
+                                    appState.updateEnergyLevel(level)
+                                    withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                                        showingEnergyLevelPicker = false
+                                    }
+                                }
+                            )
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.top, -120)
+                        .padding(.bottom, 10)
+                        .transition(
+                            .opacity.combined(
+                                with: .scale(scale: 0.82, anchor: .topTrailing)
+                            )
+                        )
+                    }
+                }
+                .zIndex(200)
+                
+                ZStack {
+                    if showingDistancePicker {
+                        Color.clear
+                            .ignoresSafeArea()
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                                    showingDistancePicker = false
+                                }
+                            }
+                        
+                        ZStack(alignment: .top) {
+                            SearchRadiusPickerOverlay(
+                                selectedOption: selectedDistanceOption,
+                                onSelect: { option in
+                                    applySearchRadiusChange(option)
+                                    withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                                        showingDistancePicker = false
+                                    }
+                                }
+                            )
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.top, -120)
+                        .padding(.bottom, 10)
+                        .transition(
+                            .opacity.combined(
+                                with: .scale(scale: 0.82, anchor: .topLeading)
+                            )
+                        )
+                    }
+                }
+                .zIndex(201)
             }
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarHidden(true)
-            
-            // Title at the top
-//            VStack {
-//                Text("Matches for you!")
-//                    .font(.system(size: 24, weight: .bold))
-//                    .foregroundColor(.green)
-//                    .multilineTextAlignment(.center)
-//                    .padding(.top, 60)
-////                Spacer()
-//            }
-//            .frame(maxWidth: .infinity)
-//            .allowsHitTesting(false) // Allow taps to pass through to cards
+        }
+        .overlay(alignment: .topLeading) {
+            searchRadiusCornerButton
+                .padding(.top, 8)
+                .padding(.leading, 16)
+        }
+        .overlay(alignment: .topTrailing) {
+            energyLevelCornerButton
+                .padding(.top, 8)
+                .padding(.trailing, 16)
         }
         .onAppear {
             dailySwipeCount = DiscoverDailyLimit.currentCount()
             hasUsedSecondThoughtsToday = DiscoverDailyLimit.hasUsedSecondThoughtsToday()
+            selectedDistanceOption = DiscoverDistanceLimit.currentOption
             restoreDiscoverSessionIfAvailable()
+        }
+        .onChange(of: appState.hasResolvedUserProfile) { _, resolved in
+            guard resolved else { return }
+            restoreDiscoverSessionIfAvailable()
+        }
+        .onChange(of: needsProfileCompletion) { _, needsCompletion in
+            guard hasResolvedDiscoverProfileState else { return }
+            if needsCompletion {
+                restoreDiscoverSessionIfAvailable()
+            } else {
+                reloadDiscoverDeck()
+            }
+        }
+        .onChange(of: appState.hasCompletedInitialProfile) { _, isComplete in
+            guard isComplete else { return }
+            reloadDiscoverDeck()
+        }
+        .onChange(of: appState.discoverDeckRefreshID) { _, _ in
+            reloadDiscoverDeck()
         }
         .onChange(of: selectedTab) { tab in
             if tab == 2 {
                 dailySwipeCount = DiscoverDailyLimit.currentCount()
                 hasUsedSecondThoughtsToday = DiscoverDailyLimit.hasUsedSecondThoughtsToday()
-                // Distance (or other filters) may have cleared the cache from Settings.
+                selectedDistanceOption = DiscoverDistanceLimit.currentOption
+                // Profile or distance changes may have cleared the cache.
                 // While the daily limit is active, never rebuild the frozen blurry deck.
                 if !appState.hasValidDiscoverProfilesCache
                     && !isLoading
                     && DiscoverDailyLimit.currentCount() < DiscoverDailyLimit.maxSwipesPerDay {
-                    restoreDiscoverSessionIfAvailable()
+                    reloadDiscoverDeck()
                 }
             }
         }
@@ -612,6 +732,24 @@ struct SearchView: View {
     }
 
     private func restoreDiscoverSessionIfAvailable() {
+        guard appState.hasResolvedAuthState else {
+            isLoading = true
+            return
+        }
+        
+        guard appState.hasResolvedUserProfile else {
+            isLoading = true
+            return
+        }
+        
+        if needsProfileCompletion {
+            profiles = []
+            currentCardIndex = 0
+            hasCompletedDiscoverLoad = true
+            isLoading = false
+            return
+        }
+        
         applyPendingDistanceRefreshIfAllowed()
         
         if !appState.hasValidDiscoverProfilesCache {
@@ -646,18 +784,39 @@ struct SearchView: View {
         loadDiscoverProfilesWhenReady()
     }
     
+    private func reloadDiscoverDeck() {
+        guard !needsProfileCompletion else { return }
+        hasCompletedDiscoverLoad = false
+        isLoading = true
+        profiles = []
+        currentCardIndex = 0
+        lastFetchedUserDocumentId = nil
+        hasMoreUsersToLoad = true
+        hasMoreRemoteUsers = true
+        cachedSwipeFilter = nil
+        pendingDiscoverProfiles = []
+        restoreDiscoverSessionIfAvailable()
+    }
+    
     /// Distance may have changed while the daily limit froze the deck - refresh once unlocked.
     private func applyPendingDistanceRefreshIfAllowed() {
         guard DiscoverDistanceLimit.hasPendingDeckRefresh else { return }
         guard DiscoverDailyLimit.currentCount() < DiscoverDailyLimit.maxSwipesPerDay else { return }
         DiscoverDistanceLimit.hasPendingDeckRefresh = false
         appState.clearDiscoverProfilesCache()
-        print("🔍 SearchView: Applying deferred distance-limit deck refresh")
+        print("🔍 SearchView: Applying deferred discover deck refresh")
     }
 
     private func loadDiscoverProfilesWhenReady(allowWhileDailyLimitReached: Bool = false) {
         guard appState.isAuthenticated else {
             isLoading = false
+            return
+        }
+        
+        if needsProfileCompletion {
+            hasCompletedDiscoverLoad = true
+            isLoading = false
+            profiles = []
             return
         }
 
@@ -709,6 +868,13 @@ struct SearchView: View {
             interests: user.interests,
             age: user.age,
             gender: user.gender,
+            lookingFor: user.lookingFor,
+            sensoryPreferences: user.sensoryPreferences,
+            shareSensoryPreferences: user.shareSensoryPreferences,
+            lifestyle: user.lifestyle,
+            shareLifestyle: user.shareLifestyle,
+            idealFirstDate: user.idealFirstDate,
+            shareIdealFirstDate: user.shareIdealFirstDate,
             currentUser: currentUser
         )
         
@@ -1137,9 +1303,76 @@ struct SearchView: View {
             print("❌ Error checking for matches: \(error)")
         }
     }
+    
+    private var searchRadiusCornerButton: some View {
+        Button {
+            withAnimation(.spring(response: showingDistancePicker ? 0.34 : 0.42, dampingFraction: showingDistancePicker ? 0.86 : 0.78)) {
+                showingDistancePicker.toggle()
+                if showingDistancePicker {
+                    showingEnergyLevelPicker = false
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image("map")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 18, height: 18)
+                Text(selectedDistanceOption.shortButtonTitle)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundColor(.primary)
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .background(Color(.systemBackground))
+            .clipShape(Capsule())
+            .shadow(
+                color: colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.2),
+                radius: 8,
+                x: 0,
+                y: 4
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("settings.distance.limit".localized)
+        .accessibilityValue(selectedDistanceOption.title)
+    }
+    
+    private func applySearchRadiusChange(_ option: DiscoverDistanceOption) {
+        selectedDistanceOption = option
+        DiscoverDistanceLimit.currentOption = option
+        if DiscoverDailyLimit.currentCount() >= DiscoverDailyLimit.maxSwipesPerDay {
+            DiscoverDistanceLimit.hasPendingDeckRefresh = true
+        } else {
+            DiscoverDistanceLimit.hasPendingDeckRefresh = false
+            appState.invalidateDiscoverDeckAfterProfileUpdate()
+        }
+    }
+    
+    private var energyLevelCornerButton: some View {
+        let option = EnergyLevelOption.resolved(from: appState.currentUser?.energyLevel ?? 4)
+        return Button {
+            withAnimation(.spring(response: showingEnergyLevelPicker ? 0.34 : 0.42, dampingFraction: showingEnergyLevelPicker ? 0.86 : 0.78)) {
+                showingEnergyLevelPicker.toggle()
+                if showingEnergyLevelPicker {
+                    showingDistancePicker = false
+                }
+            }
+        } label: {
+            Text(option.emoji)
+                .font(.system(size: 20))
+                .floatingCircleButtonStyle(colorScheme: colorScheme, size: 44)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("profile.my.energy.level".localized)
+    }
 }
 
 struct EmptyStateCard: View {
+    var isProfileIncomplete: Bool = false
+    var onProfileTap: (() -> Void)? = nil
+    
     private let cardWidth = UIScreen.main.bounds.width - 60
     private let cardHeight: CGFloat = 500
     
@@ -1150,11 +1383,39 @@ struct EmptyStateCard: View {
                 .frame(width: cardWidth, height: cardHeight)
                 .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
             
-            Text("search.empty.no.more.profiles".localized)
-                .font(.system(size: 22, weight: .bold, design: .rounded))
-                .foregroundColor(.primary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 28)
+            VStack(spacing: 24) {
+                if isProfileIncomplete {
+                    Text("search.empty.complete.profile.title".localized)
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 28)
+                    
+                    Text("search.empty.complete.profile.message".localized)
+                        .font(.system(size: 17, weight: .medium, design: .rounded))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 28)
+                    
+                    Button(action: { onProfileTap?() }) {
+                        Text("search.empty.complete.profile.button".localized)
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(minWidth: 140)
+                            .padding(.horizontal, 28)
+                            .padding(.vertical, 12)
+                            .background(Color.blue)
+                            .cornerRadius(12)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text("search.empty.no.more.profiles".localized)
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 28)
+                }
+            }
         }
         .frame(width: cardWidth, height: cardHeight)
     }
@@ -1656,42 +1917,144 @@ struct FilterChip: View {
     }
 }
 
-// MARK: - Energy Level Option Enum (shared with ProfileEditView and ProfileView)
-private enum EnergyLevelOption: Int, CaseIterable {
-    case quietAndCalm = 0
-    case softAndSteady = 1
-    case balancedEnergy = 2
-    case readyToChat = 3
-    case fullySocialMode = 4
+private struct EnergyLevelPickerOverlay: View {
+    let selectedLevel: Int
+    let onSelect: (Int) -> Void
     
-    var title: String {
-        switch self {
-        case .quietAndCalm:
-            return "profile.edit.energy.quiet.calm".localized
-        case .softAndSteady:
-            return "profile.edit.energy.soft.steady".localized
-        case .balancedEnergy:
-            return "profile.edit.energy.balanced".localized
-        case .readyToChat:
-            return "profile.edit.energy.ready.chat".localized
-        case .fullySocialMode:
-            return "profile.edit.energy.fully.social".localized
+    private let cardWidth = UIScreen.main.bounds.width - 60
+    private let cardHeight: CGFloat = 500
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("profile.my.energy.level".localized)
+                .font(.system(size: 24, weight: .bold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
+            Text("profile.energy.level.subtitle".localized)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.white.opacity(0.8))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 8)
+            
+            VStack(spacing: 12) {
+                ForEach(EnergyLevelOption.allCases, id: \.rawValue) { option in
+                    let isSelected = EnergyLevelOption.resolved(from: selectedLevel) == option
+                    Button {
+                        onSelect(option.rawValue)
+                    } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            Text(option.emoji)
+                                .font(.system(size: 28))
+                                .frame(width: 36)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(option.title)
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .multilineTextAlignment(.leading)
+                                Text(option.subtitle)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.78))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 8)
+                            if isSelected {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(option.color)
+                                    .padding(.top, 4)
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(option.color.opacity(isSelected ? 0.28 : 0.12))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .strokeBorder(option.color.opacity(isSelected ? 0.9 : 0.35), lineWidth: isSelected ? 2 : 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .padding(24)
+        .frame(width: cardWidth, height: cardHeight, alignment: .topLeading)
+        .background(Color.black.opacity(0.88))
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
     }
+}
+
+private struct SearchRadiusPickerOverlay: View {
+    let selectedOption: DiscoverDistanceOption
+    let onSelect: (DiscoverDistanceOption) -> Void
     
-    var color: Color {
-        switch self {
-        case .quietAndCalm:
-            return Color(hex: "#950404")
-        case .softAndSteady:
-            return Color(hex: "#da0808")
-        case .balancedEnergy:
-            return Color(hex: "#ff9323")
-        case .readyToChat:
-            return Color(hex: "#C9A000")
-        case .fullySocialMode:
-            return Color(hex: "#69c440")
+    private let cardWidth = UIScreen.main.bounds.width - 60
+    private let cardHeight: CGFloat = 500
+    private let accent = DiscoverDistanceOption.default.accentColor
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("settings.distance.limit".localized)
+                .font(.system(size: 24, weight: .bold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
+            Text("search.radius.subtitle".localized)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundColor(.white.opacity(0.8))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 8)
+            
+            VStack(spacing: 12) {
+                ForEach(DiscoverDistanceOption.allCases) { option in
+                    let isSelected = option == selectedOption
+                    Button {
+                        onSelect(option)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: option == .unlimited ? "globe" : "location.fill")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(accent)
+                                .frame(width: 36)
+                            Text(option.title)
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                            Spacer(minLength: 8)
+                            if isSelected {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(accent)
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(accent.opacity(isSelected ? 0.28 : 0.12))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .strokeBorder(accent.opacity(isSelected ? 0.9 : 0.35), lineWidth: isSelected ? 2 : 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .padding(24)
+        .frame(width: cardWidth, height: cardHeight, alignment: .topLeading)
+        .background(Color.black.opacity(0.88))
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
     }
 }
 
@@ -1708,6 +2071,8 @@ struct UserProfileModal: View {
     @State private var showingUnlikeConfirmation = false
     @State private var isProfileUnliked = false
     @State private var hasLoadedUnlikeState = false
+    @State private var showingMatchDetails = false
+    @State private var showingLookingForDetails = false
     
     init(profile: ProfileCard, showsUnlikeOption: Bool = false) {
         self.profile = profile
@@ -1732,10 +2097,34 @@ struct UserProfileModal: View {
                 interests: displayProfile.interests,
                 age: displayProfile.age,
                 gender: displayProfile.gender,
+                lookingFor: displayProfile.lookingFor,
+                sensoryPreferences: displayProfile.sensoryPreferences,
+                shareSensoryPreferences: displayProfile.shareSensoryPreferences,
+                lifestyle: displayProfile.lifestyle,
+                shareLifestyle: displayProfile.shareLifestyle,
+                idealFirstDate: displayProfile.idealFirstDate,
+                shareIdealFirstDate: displayProfile.shareIdealFirstDate,
                 currentUser: currentUser
             )
         }
         return displayProfile.matchPercentage
+    }
+    
+    private var resolvedMatchBreakdown: ProfileCard.MatchBreakdown? {
+        guard let currentUser = appState.currentUser else { return nil }
+        return ProfileCard.calculateMatchBreakdown(
+            interests: displayProfile.interests,
+            age: displayProfile.age,
+            gender: displayProfile.gender,
+            lookingFor: displayProfile.lookingFor,
+            sensoryPreferences: displayProfile.sensoryPreferences,
+            shareSensoryPreferences: displayProfile.shareSensoryPreferences,
+            lifestyle: displayProfile.lifestyle,
+            shareLifestyle: displayProfile.shareLifestyle,
+            idealFirstDate: displayProfile.idealFirstDate,
+            shareIdealFirstDate: displayProfile.shareIdealFirstDate,
+            currentUser: currentUser
+        )
     }
     
     var body: some View {
@@ -1843,6 +2232,32 @@ struct UserProfileModal: View {
             }
         } message: {
             Text(String(format: "profile.block.confirm.message".localized, firstName(from: displayProfile.name)))
+        }
+        .overlay {
+            if showingMatchDetails {
+                MatchDetailsOverlay(
+                    firstName: firstName(from: displayProfile.name),
+                    breakdown: resolvedMatchBreakdown,
+                    localizedInterests: (resolvedMatchBreakdown?.commonInterests ?? []).map { localizedInterest($0) },
+                    localizedLookingFor: {
+                        let common = resolvedMatchBreakdown?.commonLookingFor ?? []
+                        guard !common.isEmpty else { return "" }
+                        return formatLookingFor(common)
+                    }(),
+                    localizedSensory: SensoryPreferenceOption.formattedTitles(resolvedMatchBreakdown?.commonSensoryPreferences ?? []),
+                    localizedLifestyle: {
+                        guard let lifestyle = resolvedMatchBreakdown?.sharedLifestyle else { return "" }
+                        return formattedLifestyle(lifestyle)
+                    }(),
+                    localizedIdealFirstDate: formattedIdealFirstDate(resolvedMatchBreakdown?.commonIdealFirstDates ?? []),
+                    onDismiss: { showingMatchDetails = false }
+                )
+            } else if showingLookingForDetails {
+                LookingForDetailsOverlay(
+                    items: lookingForPopupItems(displayProfile.lookingFor).map { formatPreference($0) },
+                    onDismiss: { showingLookingForDetails = false }
+                )
+            }
         }
         .alert("profile.unlike.confirm.title".localized, isPresented: $showingUnlikeConfirmation) {
             Button("common.cancel".localized, role: .cancel) {}
@@ -1990,6 +2405,13 @@ struct UserProfileModal: View {
                     interests: refreshed.interests,
                     age: refreshed.age,
                     gender: refreshed.gender,
+                    lookingFor: refreshed.lookingFor,
+                    sensoryPreferences: refreshed.sensoryPreferences,
+                    shareSensoryPreferences: refreshed.shareSensoryPreferences,
+                    lifestyle: refreshed.lifestyle,
+                    shareLifestyle: refreshed.shareLifestyle,
+                    idealFirstDate: refreshed.idealFirstDate,
+                    shareIdealFirstDate: refreshed.shareIdealFirstDate,
                     currentUser: currentUser
                 )
             } else {
@@ -2099,40 +2521,38 @@ struct UserProfileModal: View {
     
     // MARK: - Energy Level Section
     private var energyLevelSection: some View {
-        let energyOption = EnergyLevelOption(rawValue: displayProfile.energyLevel) ?? .fullySocialMode
+        let energyOption = EnergyLevelOption.resolved(from: displayProfile.energyLevel)
         let levelColor = energyOption.color
-        let levelBinding = Binding<Int>(
-            get: { displayProfile.energyLevel },
-            set: { _ in }
-        )
         
         return VStack(alignment: .leading, spacing: 14) {
             Text("profile.energy.level".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
             
-            Text(energyOption.title)
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                .foregroundColor(levelColor)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.blue.opacity(0.08))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color.blue.opacity(0.28), lineWidth: 1.5)
-                )
-                .multilineTextAlignment(.center)
-            
-            EnergyLevelSlider(
-                energyLevel: levelBinding,
-                levelColor: levelColor,
-                isEnabled: false
+            HStack(alignment: .top, spacing: 12) {
+                Text(energyOption.emoji)
+                    .font(.system(size: 28))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(energyOption.title)
+                        .font(.system(size: 17, weight: .semibold, design: .rounded))
+                        .foregroundColor(levelColor)
+                    Text(energyOption.subtitle)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(levelColor.opacity(0.12))
             )
-            .frame(height: 40)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(levelColor.opacity(0.45), lineWidth: 1.5)
+            )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
@@ -2243,45 +2663,47 @@ struct UserProfileModal: View {
             if hasGenderOrInterestedIn || hasLookingFor || hasCustomPreferredAge {
                 VStack(alignment: .leading, spacing: 8) {
                     if hasGenderOrInterestedIn {
-                        if !displayProfile.gender.isEmpty && !displayProfile.interestedIn.isEmpty {
-                            Text("profile.im.a".localized + " \(formatGender(displayProfile.gender)), " + "profile.interested.in".localized + " \(formatInterestedIn(displayProfile.interestedIn))")
-                                .font(.body)
-                                .foregroundColor(.primary)
-                                .italic()
-                        } else if !displayProfile.gender.isEmpty {
-                            Text("profile.im.a".localized + " \(formatGender(displayProfile.gender))")
-                                .font(.body)
-                                .foregroundColor(.primary)
-                                .italic()
-                        } else if !displayProfile.interestedIn.isEmpty {
-                            Text("profile.interested.in".localized.capitalized + " \(formatInterestedIn(displayProfile.interestedIn))")
-                                .font(.body)
-                                .foregroundColor(.primary)
-                                .italic()
+                        Group {
+                            if !displayProfile.gender.isEmpty && !displayProfile.interestedIn.isEmpty {
+                                Text("profile.im.a".localized + " \(formatGender(displayProfile.gender)), " + "profile.interested.in".localized + " \(formatInterestedIn(displayProfile.interestedIn))")
+                            } else if !displayProfile.gender.isEmpty {
+                                Text("profile.im.a".localized + " \(formatGender(displayProfile.gender))")
+                            } else {
+                                Text("profile.interested.in".localized.capitalized + " \(formatInterestedIn(displayProfile.interestedIn))")
+                            }
                         }
-                    }
-                    
-                    if hasGenderOrInterestedIn && hasLookingFor {
-                        Divider()
-                            .frame(height: 2)
-                            .background(Color.gray.opacity(0.3))
-                            .padding(.vertical, 4)
+                        .font(.body)
+                        .foregroundColor(.primary)
+                        .italic()
+                        .blueFieldStyle()
                     }
                     
                     if hasLookingFor {
-                        Text("profile.looking.for".localized + " \(formatLookingFor(displayProfile.lookingFor))")
-                            .font(.body)
-                            .foregroundColor(.primary)
-                            .italic()
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                    }
-                    
-                    if hasLookingFor && hasCustomPreferredAge {
-                        Divider()
-                            .frame(height: 2)
-                            .background(Color.gray.opacity(0.3))
-                            .padding(.vertical, 4)
+                        let lookingForText = "profile.looking.for".localized + ": \(formatLookingFor(displayProfile.lookingFor))"
+                        let hasMultipleLookingFor = displayProfile.lookingFor.count > 1
+                        
+                        HStack(alignment: .center, spacing: 8) {
+                            Text(lookingForText)
+                                .font(.body)
+                                .foregroundColor(.primary)
+                                .italic()
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            
+                            if hasMultipleLookingFor {
+                                Image(systemName: "info.circle")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                        .blueFieldStyle()
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if hasMultipleLookingFor {
+                                showingLookingForDetails = true
+                            }
+                        }
                     }
                     
                     if hasCustomPreferredAge {
@@ -2289,9 +2711,9 @@ struct UserProfileModal: View {
                             .font(.body)
                             .foregroundColor(.primary)
                             .italic()
+                            .blueFieldStyle()
                     }
                 }
-                .blueFieldStyle()
             } else {
                 Text("profile.no.preferences".localized)
                     .font(.body)
@@ -2393,6 +2815,11 @@ struct UserProfileModal: View {
         return formatted.joined(separator: ", ")
     }
     
+    private func lookingForPopupItems(_ lookingFor: [String]) -> [String] {
+        let definiteOptions = lookingFor.filter { $0 != "Not sure yet" && $0 != "Not Sure Yet" }
+        return definiteOptions.isEmpty ? lookingFor : definiteOptions
+    }
+    
     private func formatPreference(_ preference: String) -> String {
         switch preference {
         case "Romantic relationship", "Relationship":
@@ -2429,36 +2856,214 @@ struct UserProfileModal: View {
         let profileFirstName = firstName(from: displayProfile.name)
         let matchColor: Color = matchPercentage > 49 ? .green : .secondary
         
-        return VStack(alignment: .leading, spacing: 8) {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.primary.opacity(0.08))
-                        .frame(height: 6)
-                    Capsule()
-                        .fill(matchColor)
-                        .frame(
-                            width: geo.size.width * CGFloat(max(0, min(matchPercentage, 100))) / 100.0,
-                            height: 6
-                        )
+        return Button {
+            showingMatchDetails = true
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.primary.opacity(0.08))
+                            .frame(height: 6)
+                        Capsule()
+                            .fill(matchColor)
+                            .frame(
+                                width: geo.size.width * CGFloat(max(0, min(matchPercentage, 100))) / 100.0,
+                                height: 6
+                            )
+                    }
+                }
+                .frame(height: 6)
+                
+                HStack(alignment: .top, spacing: 8) {
+                    (Text("search.match.prefix".localized)
+                     + Text(String(format: "search.match.percent.part".localized, matchPercentage))
+                        .foregroundColor(matchColor)
+                     + Text("search.match.label".localized)
+                     + Text(String(format: "search.match.suffix".localized, profileFirstName)))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.primary)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.blue)
+                        .padding(.top, 1)
                 }
             }
-            .frame(height: 6)
-            
-            (Text("search.match.prefix".localized)
-             + Text(String(format: "search.match.percent.part".localized, matchPercentage))
-                .foregroundColor(matchColor)
-             + Text("search.match.label".localized)
-             + Text(String(format: "search.match.suffix".localized, profileFirstName)))
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.primary)
-                .lineLimit(2)
+            .blueFieldStyle()
+            .padding()
+            .background(Color(.secondarySystemGroupedBackground))
+            .cornerRadius(12)
+            .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
         }
-        .blueFieldStyle()
-        .padding()
-        .background(Color(.secondarySystemGroupedBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .buttonStyle(.plain)
+    }
+}
+
+private struct MatchDetailsOverlay: View {
+    let firstName: String
+    let breakdown: ProfileCard.MatchBreakdown?
+    let localizedInterests: [String]
+    let localizedLookingFor: String
+    let localizedSensory: String
+    let localizedLifestyle: String
+    let localizedIdealFirstDate: String
+    let onDismiss: () -> Void
+    
+    var body: some View {
+        let matchPercentage = breakdown?.percentage ?? 0
+        let matchColor: Color = matchPercentage > 49 ? .green : .white.opacity(0.85)
+        
+        ZStack {
+            Color.black.opacity(0.6)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onDismiss)
+            
+            VStack(alignment: .leading, spacing: 16) {
+                Text(String(format: "search.match.details.title".localized, firstName))
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                Text(String(format: "search.match.details.percent".localized, matchPercentage))
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(matchColor)
+                
+                VStack(alignment: .leading, spacing: 12) {
+                    matchDetailRow(
+                        title: "search.match.details.age".localized,
+                        value: ageDetailText
+                    )
+                    if !localizedLookingFor.isEmpty {
+                        matchDetailRow(
+                            title: "search.match.details.looking.for".localized,
+                            value: localizedLookingFor
+                        )
+                    }
+                    if !localizedInterests.isEmpty {
+                        matchDetailRow(
+                            title: "search.match.details.interests".localized,
+                            value: localizedInterests.joined(separator: ", ")
+                        )
+                    }
+                    if !localizedSensory.isEmpty {
+                        matchDetailRow(
+                            title: "search.match.details.sensory".localized,
+                            value: localizedSensory
+                        )
+                    }
+                    if !localizedLifestyle.isEmpty {
+                        matchDetailRow(
+                            title: "search.match.details.lifestyle".localized,
+                            value: localizedLifestyle
+                        )
+                    }
+                    if !localizedIdealFirstDate.isEmpty {
+                        matchDetailRow(
+                            title: "search.match.details.ideal.first.date".localized,
+                            value: localizedIdealFirstDate
+                        )
+                    }
+                }
+                
+                Button(action: onDismiss) {
+                    Text("common.got.it".localized)
+                        .font(.headline)
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.white)
+                        .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+            }
+            .padding(24)
+            .frame(maxWidth: 340)
+            .background(Color.black.opacity(0.85))
+            .cornerRadius(16)
+            .padding(.horizontal, 28)
+        }
+    }
+    
+    private var ageDetailText: String {
+        let delta = breakdown?.ageDeltaFromYou ?? 0
+        if delta == 0 {
+            return String(format: "search.match.details.age.same".localized, firstName)
+        }
+        if delta < 0 {
+            return String(format: "search.match.details.age.younger".localized, abs(delta), firstName)
+        }
+        return String(format: "search.match.details.age.older".localized, delta, firstName)
+    }
+    
+    private func matchDetailRow(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white.opacity(0.7))
+            Text(value)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.white)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct LookingForDetailsOverlay: View {
+    let items: [String]
+    let onDismiss: () -> Void
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.6)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onDismiss)
+            
+            VStack(alignment: .leading, spacing: 16) {
+                Text("profile.looking.for.details.title".localized)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(items, id: \.self) { item in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("•")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                            Text(item)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                
+                Button(action: onDismiss) {
+                    Text("common.got.it".localized)
+                        .font(.headline)
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.white)
+                        .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+            }
+            .padding(24)
+            .frame(maxWidth: 340)
+            .background(Color.black.opacity(0.85))
+            .cornerRadius(16)
+            .padding(.horizontal, 28)
+        }
     }
 }
 

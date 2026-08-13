@@ -118,8 +118,13 @@ class NotificationService: NSObject, ObservableObject {
             }
             
             let content = UNMutableNotificationContent()
-            content.title = "New message from \(senderName)"
-            content.body = messageContent.count > 50 ? String(messageContent.prefix(50)) + "..." : messageContent
+            var firstName = senderName.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? senderName
+            if firstName.isEmpty {
+                firstName = senderName
+            }
+            let preview = messageContent.count > 50 ? String(messageContent.prefix(50)) + "..." : messageContent
+            content.title = "message.notification.push.title".localized
+            content.body = String(format: "message.notification.push.body".localized, firstName, preview)
             content.sound = .default
             content.badge = NSNumber(value: badgeCount)
             content.userInfo = ["type": "message", "senderId": senderId]

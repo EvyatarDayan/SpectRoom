@@ -20,6 +20,8 @@ class FirebaseAuthService: ObservableObject {
     @Published var isAuthenticated: Bool
     /// Becomes true after Firebase emits the first auth-state callback.
     @Published var hasResolvedAuthState = false
+    /// Becomes true after the first Firestore profile load attempt finishes for the current session.
+    @Published var hasResolvedUserProfile = false
     
     let auth = Auth.auth()
     private let db = Firestore.firestore()
@@ -44,6 +46,7 @@ class FirebaseAuthService: ObservableObject {
                 
                 self.isAuthenticated = firebaseUser != nil
                 if let firebaseUser = firebaseUser {
+                    self.hasResolvedUserProfile = false
                     // Load user data from Firestore when Firebase user changes
                     Task {
                         await self.loadUserData(for: firebaseUser.uid)
@@ -52,6 +55,7 @@ class FirebaseAuthService: ObservableObject {
                     }
                 } else {
                     self.currentUser = nil
+                    self.hasResolvedUserProfile = true
                 }
             }
         }
@@ -102,6 +106,14 @@ class FirebaseAuthService: ObservableObject {
             throw error
         }
         
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let firebaseUser = auth.currentUser, !trimmedName.isEmpty {
+            let changeRequest = firebaseUser.createProfileChangeRequest()
+            changeRequest.displayName = trimmedName
+            try await changeRequest.commitChanges()
+            print("✅ Saved signup name on Auth account: \(trimmedName)")
+        }
+        
         // Don't create user document automatically - let user complete profile first
         print("✅ User account created: \(auth.currentUser?.uid ?? "unknown")")
         print("📝 User can now complete their profile through the app")
@@ -144,6 +156,7 @@ class FirebaseAuthService: ObservableObject {
     func signIn(email: String, password: String) async throws {
         await MainActor.run {
             self.isVerifyingSignIn = true
+            self.hasResolvedUserProfile = false
         }
         
         do {
@@ -156,6 +169,7 @@ class FirebaseAuthService: ObservableObject {
                     self.isVerifyingSignIn = false
                     self.isAuthenticated = false
                     self.currentUser = nil
+                    self.hasResolvedUserProfile = true
                 }
                 throw SpectRoomAuthError.accountPendingDeletion
             }
@@ -163,6 +177,7 @@ class FirebaseAuthService: ObservableObject {
             let userId = auth.currentUser?.uid
             await MainActor.run {
                 self.isVerifyingSignIn = false
+                self.hasResolvedUserProfile = false
                 self.isAuthenticated = self.auth.currentUser != nil
             }
             
@@ -254,6 +269,12 @@ class FirebaseAuthService: ObservableObject {
     }
     
     private func loadUserData(for userID: String) async {
+        defer {
+            Task { @MainActor in
+                self.hasResolvedUserProfile = true
+            }
+        }
+        
         do {
             if let userData = try await fetchUserData() {
                 if userData["isDeleted"] as? Bool == true {
@@ -336,8 +357,14 @@ class FirebaseAuthService: ObservableObject {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let resolvedEmail = firestoreEmail.isEmpty ? authEmail : firestoreEmail
                 
+                let firestoreName = (userData["name"] as? String ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let authName = (auth.currentUser?.displayName ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let resolvedName = firestoreName.isEmpty ? authName : firestoreName
+                
                 let spectRoomUser = SpectRoomUser(
-                    name: userData["name"] as? String ?? "",
+                    name: resolvedName,
                     age: userData["age"] as? Int ?? 0,
                     email: resolvedEmail,
                     bio: userData["bio"] as? String ?? "",
@@ -636,7 +663,7 @@ class FirebaseAuthService: ObservableObject {
         let shareIdealFirstDate = userData["shareIdealFirstDate"] as? Bool ?? false
         let sensoryPreferences = userData["sensoryPreferences"] as? [String] ?? []
         let shareSensoryPreferences = userData["shareSensoryPreferences"] as? Bool ?? false
-        let energyLevel = userData["energyLevel"] as? Int ?? 2
+        let energyLevel = userData["energyLevel"] as? Int ?? 4
         let isOnline = userData["isOnline"] as? Bool ?? false
         let lastSeenInterval = userData["lastSeen"] as? TimeInterval
         let lastSeen = lastSeenInterval.map { Date(timeIntervalSince1970: $0) } ?? Date()
@@ -1497,7 +1524,7 @@ class FirebaseAuthService: ObservableObject {
         let shareIdealFirstDate = userData["shareIdealFirstDate"] as? Bool ?? false
         let sensoryPreferences = userData["sensoryPreferences"] as? [String] ?? []
         let shareSensoryPreferences = userData["shareSensoryPreferences"] as? Bool ?? false
-        let energyLevel = userData["energyLevel"] as? Int ?? 2
+        let energyLevel = userData["energyLevel"] as? Int ?? 4
         let preferredAgeMin = userData["preferredAgeMin"] as? Int ?? age
         let preferredAgeMax = userData["preferredAgeMax"] as? Int ?? min(age + 5, 80)
         let isOnline = userData["isOnline"] as? Bool ?? false
@@ -1511,6 +1538,13 @@ class FirebaseAuthService: ObservableObject {
                 interests: interests,
                 age: age,
                 gender: gender,
+                lookingFor: lookingFor,
+                sensoryPreferences: sensoryPreferences,
+                shareSensoryPreferences: shareSensoryPreferences,
+                lifestyle: lifestyle,
+                shareLifestyle: shareLifestyle,
+                idealFirstDate: idealFirstDate,
+                shareIdealFirstDate: shareIdealFirstDate,
                 currentUser: viewer
             )
         } else {

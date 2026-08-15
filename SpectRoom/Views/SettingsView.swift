@@ -41,11 +41,11 @@ struct SettingsView: View {
 //                    // Account section is now empty - could be removed or used for other account-related settings
 //                }
 //                
-                // App Settings Section
-                Section("settings.app.settings".localized) {
+                // Preferences
+                Section("settings.section.preferences".localized) {
                     HStack {
                         Image(systemName: "bell.circle.fill")
-                            .foregroundColor(.orange)
+                            .foregroundColor(.blue)
                             .font(.title2)
                         VStack(alignment: .leading) {
                             Text("settings.notifications".localized)
@@ -75,7 +75,6 @@ struct SettingsView: View {
                                         }
                                     }
                                 } else {
-                                    // User disabled notifications
                                     UserDefaults.standard.set(false, forKey: "notificationsEnabled")
                                 }
                             }
@@ -83,7 +82,7 @@ struct SettingsView: View {
                     
                     HStack {
                         Image(systemName: "moon.circle.fill")
-                            .foregroundColor(.purple)
+                            .foregroundColor(.blue)
                             .font(.title2)
                         VStack(alignment: .leading) {
                             Text("settings.dark.mode".localized)
@@ -134,14 +133,14 @@ struct SettingsView: View {
                     }
                 }
                 
-                // Support Section
-                Section("settings.support".localized) {
+                // Privacy & Safety
+                Section("settings.section.privacy.safety".localized) {
                     HStack {
                         Image(systemName: "lock.circle.fill")
-                            .foregroundColor(.green)
+                            .foregroundColor(.blue)
                             .font(.title2)
                         VStack(alignment: .leading) {
-                            Text("settings.privacy.safety".localized)
+                            Text("settings.privacy.settings".localized)
                                 .font(.headline)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.85)
@@ -161,124 +160,24 @@ struct SettingsView: View {
                         showingPrivacySafety = true
                     }
                     
-                    HStack {
-                        Image(systemName: "questionmark.circle.fill")
-                            .foregroundColor(.cyan)
-                            .font(.title2)
-                        VStack(alignment: .leading) {
-                            Text("settings.help.support".localized)
-                                .font(.headline)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.85)
-                            Text("settings.help.support.description".localized)
-                                .font(.caption)
-                                .foregroundColor(SpectRoomTheme.secondaryText)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundColor(SpectRoomTheme.secondaryText)
-                            .font(.caption)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        // Open Help & Support modal
-                        showingHelpSupport = true
-                    }
-                    
-                    HStack {
-                        Image(systemName: "info.circle.fill")
-                            .foregroundColor(.blue)
-                            .font(.title2)
-                        VStack(alignment: .leading) {
-                            Text("settings.about".localized)
-                                .font(.headline)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.85)
-                            Text("settings.about.description".localized)
-                                .font(.caption)
-                                .foregroundColor(SpectRoomTheme.secondaryText)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundColor(SpectRoomTheme.secondaryText)
-                            .font(.caption)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        showingAbout = true
-                    }
-                }
-                
-                // Development Section (Debug builds only)
-                #if DEBUG
-                Section("settings.development".localized) {
-//                    HStack {
-//                        Image(systemName: "arrow.clockwise.circle.fill")
-//                            .foregroundColor(.red)
-//                            .font(.title2)
-//                        VStack(alignment: .leading) {
-//                            Text("Reset Onboarding")
-//                                .font(.headline)
-//                            Text("Reset onboarding flow for testing")
-//                                .font(.caption)
-//                                .foregroundColor(SpectRoomTheme.secondaryText)
-//                                .lineLimit(1)
-//                                .minimumScaleFactor(0.8)
-//                        }
-//                        Spacer()
-//                        Image(systemName: "chevron.right")
-//                            .foregroundColor(SpectRoomTheme.secondaryText)
-//                            .font(.caption)
-//                    }
-//                    .contentShape(Rectangle())
-//                    .onTapGesture {
-//                        appState.resetOnboarding()
-//                    }
-                    
-                    HStack {
-                        Image(systemName: "trash.circle.fill")
-                            .foregroundColor(.red)
-                            .font(.title2)
-                        VStack(alignment: .leading) {
-                            Text("settings.reset.user.data".localized)
-                                .font(.headline)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.85)
-                            Text("settings.reset.user.data.description".localized)
-                                .font(.caption)
-                                .foregroundColor(SpectRoomTheme.secondaryText)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundColor(SpectRoomTheme.secondaryText)
-                            .font(.caption)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        appState.resetAllAppState()
-                    }
-                }
-                #endif
-                
-                Section("settings.blocked.users.section.title".localized.uppercased()) {
                     Button(action: {
                         showingBlockedUsers = true
                     }) {
                         HStack {
                             Image(systemName: "hand.raised.slash.fill")
-                                .foregroundColor(.red)
+                                .foregroundColor(.blue)
                                 .font(.title2)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("settings.blocked.users.button.title".localized)
+                                Text(
+                                    String(
+                                        format: "settings.blocked.users.button.title.count".localized,
+                                        appState.blockedUsers.count
+                                    )
+                                )
                                     .font(.headline)
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.85)
+                                    .foregroundColor(SpectRoomTheme.text)
                                 Text("settings.blocked.users.button.subtitle".localized)
                                     .font(.caption)
                                     .foregroundColor(SpectRoomTheme.secondaryText)
@@ -286,19 +185,15 @@ struct SettingsView: View {
                                     .minimumScaleFactor(0.8)
                             }
                             Spacer()
-                            Text("\(appState.blockedUsers.count)")
-                                .font(.footnote.bold())
-                                .foregroundColor(.white)
-                                .padding(.vertical, 4)
-                                .padding(.horizontal, 8)
-                                .background(Color.orange)
-                                .clipShape(Capsule())
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(SpectRoomTheme.secondaryText)
+                                .font(.caption)
                         }
                     }
                 }
                 
-                // Account Section
-                Section("settings.account.section.title".localized.uppercased()) {
+                // Account & Data
+                Section("settings.section.account.data".localized) {
                     Button(action: exportMessages) {
                         HStack {
                             Image(systemName: "square.and.arrow.up.circle.fill")
@@ -329,20 +224,18 @@ struct SettingsView: View {
                     .disabled(isExportingMessages)
                     
                     Button(action: {
-                        // Use AppStateManager.signOut() to ensure proper state management
-                        // Welcome shows again after logout unless "Don't show this again" was checked
                         appState.signOut()
                     }) {
                         HStack {
                             Image(systemName: "rectangle.portrait.and.arrow.right.fill")
-                                .foregroundColor(.red)
+                                .foregroundColor(.blue)
                                 .font(.title2)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("settings.sign.out".localized)
                                     .font(.headline)
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.85)
-                                    .foregroundColor(.red)
+                                    .foregroundColor(SpectRoomTheme.text)
                                 Text("settings.authentication.signout.subtitle".localized)
                                     .font(.caption)
                                     .foregroundColor(SpectRoomTheme.secondaryText)
@@ -365,7 +258,7 @@ struct SettingsView: View {
                     }) {
                         HStack {
                             Image(systemName: "trash.circle.fill")
-                                .foregroundColor(.red)
+                                .foregroundColor(.blue)
                                 .font(.title2)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("settings.delete.account.button".localized)
@@ -384,6 +277,89 @@ struct SettingsView: View {
                     }
                     .disabled(isDeletingAccount)
                 }
+                
+                // Support & About
+                Section("settings.section.support.about".localized) {
+                    HStack {
+                        Image(systemName: "questionmark.circle.fill")
+                            .foregroundColor(.blue)
+                            .font(.title2)
+                        VStack(alignment: .leading) {
+                            Text("settings.help.support".localized)
+                                .font(.headline)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                            Text("settings.help.support.description".localized)
+                                .font(.caption)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(SpectRoomTheme.secondaryText)
+                            .font(.caption)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        showingHelpSupport = true
+                    }
+                    
+                    HStack {
+                        Image(systemName: "info.circle.fill")
+                            .foregroundColor(.blue)
+                            .font(.title2)
+                        VStack(alignment: .leading) {
+                            Text("settings.about.spectroom".localized)
+                                .font(.headline)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                            Text("settings.about.description".localized)
+                                .font(.caption)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(SpectRoomTheme.secondaryText)
+                            .font(.caption)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        showingAbout = true
+                    }
+                }
+                
+                // Development only — alone at the bottom
+                #if DEBUG
+                Section {
+                    HStack {
+                        Image(systemName: "trash.circle.fill")
+                            .foregroundColor(.blue)
+                            .font(.title2)
+                        VStack(alignment: .leading) {
+                            Text("settings.reset.user.data".localized)
+                                .font(.headline)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                            Text("settings.reset.user.data.description".localized)
+                                .font(.caption)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(SpectRoomTheme.secondaryText)
+                            .font(.caption)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        appState.resetAllAppState()
+                    }
+                }
+                #endif
             }
             .padding(.bottom, 60)
             .scrollContentBackground(.hidden)
@@ -574,7 +550,6 @@ private struct BlockedUsersModal: View {
                     List(appState.blockedUsers) { blocked in
                         BlockedUserRow(
                             blocked: blocked,
-                            isBlocked: true,
                             onRequestUnblock: {
                                 pendingUnblockUser = blocked
                                 showingUnblockConfirmation = true
@@ -593,19 +568,20 @@ private struct BlockedUsersModal: View {
                     }
                 }
             }
-            .alert("profile.block.confirm.title".localized, isPresented: $showingUnblockConfirmation) {
-                Button("common.cancel".localized, role: .cancel) {
-                    pendingUnblockUser = nil
-                }
-                Button("settings.blocked.users.unblock.action".localized, role: .destructive) {
-                    if let user = pendingUnblockUser {
-                        appState.unblockUser(userId: user.id)
-                    }
-                    pendingUnblockUser = nil
-                }
-            } message: {
-                if let user = pendingUnblockUser {
-                    Text(String(format: "settings.blocked.users.unblock.confirm.message".localized, firstName(from: user.name)))
+            .overlay {
+                if showingUnblockConfirmation, let user = pendingUnblockUser {
+                    UnblockConfirmationOverlay(
+                        firstName: firstName(from: user.name),
+                        onCancel: {
+                            showingUnblockConfirmation = false
+                            pendingUnblockUser = nil
+                        },
+                        onConfirm: {
+                            showingUnblockConfirmation = false
+                            appState.unblockUser(userId: user.id)
+                            pendingUnblockUser = nil
+                        }
+                    )
                 }
             }
         }
@@ -617,23 +593,71 @@ private struct BlockedUsersModal: View {
     }
 }
 
+private struct UnblockConfirmationOverlay: View {
+    let firstName: String
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onCancel)
+            
+            VStack(spacing: 0) {
+                VStack(spacing: 8) {
+                    Text("settings.blocked.users.unblock.confirm.title".localized(with: firstName))
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(SpectRoomTheme.text)
+                    
+                    Text("settings.blocked.users.unblock.confirm.message".localized(with: firstName))
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 22)
+                .padding(.bottom, 18)
+                
+                Divider()
+                
+                HStack(spacing: 0) {
+                    Button(action: onCancel) {
+                        Text("common.cancel".localized)
+                            .font(.body.weight(.medium))
+                            .foregroundColor(SpectRoomTheme.text)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Divider()
+                        .frame(height: 48)
+                    
+                    Button(action: onConfirm) {
+                        Text("settings.blocked.users.unblock.action".localized)
+                            .font(.body.weight(.semibold))
+                            .foregroundColor(.green)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .background(SpectRoomTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 48)
+        }
+    }
+}
+
 private struct BlockedUserRow: View {
     let blocked: BlockedUser
-    let isBlocked: Bool
     let onRequestUnblock: () -> Void
     
     @State private var photoURL: String?
-    
-    private var toggleBinding: Binding<Bool> {
-        Binding(
-            get: { isBlocked },
-            set: { newValue in
-                if !newValue {
-                    onRequestUnblock()
-                }
-            }
-        )
-    }
     
     var body: some View {
         HStack(spacing: 12) {
@@ -649,9 +673,10 @@ private struct BlockedUserRow: View {
             
             Spacer()
             
-            Toggle("", isOn: toggleBinding)
-                .labelsHidden()
-                .compactToggleStyle()
+            Button("settings.blocked.users.unblock.action".localized, action: onRequestUnblock)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.green)
+                .buttonStyle(.plain)
         }
         .padding(.vertical, 4)
         .task(id: blocked.id) {

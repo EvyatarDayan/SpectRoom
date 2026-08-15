@@ -75,6 +75,10 @@
 // MARK: - Settings
 "settings.title" = "Einstellungen";
 "settings.app.settings" = "App-Einstellungen";
+"settings.section.preferences" = "Präferenzen";
+"settings.section.privacy.safety" = "Datenschutz & Sicherheit";
+"settings.section.account.data" = "Konto und Daten";
+"settings.section.support.about" = "Support und Info";
 "settings.notifications" = "Benachrichtigungen";
 "settings.notifications.description" = "Benachrichtigungen aktivieren";
 "settings.dark.mode" = "Dunkler Modus";
@@ -91,10 +95,12 @@
 "settings.language.description" = "App-Sprache auswählen";
 "settings.support" = "Support";
 "settings.privacy.safety" = "Datenschutz und Sicherheit";
+"settings.privacy.settings" = "Datenschutzeinstellungen";
 "settings.privacy.safety.description" = "Steuern Sie Ihre Datenschutzeinstellungen";
 "settings.help.support" = "Hilfe und Support";
 "settings.help.support.description" = "Hilfe erhalten und Support kontaktieren";
 "settings.about" = "Über";
+"settings.about.spectroom" = "Über SpectRoom";
 "settings.about.description" = "App-Version und Informationen";
 "settings.sign.out" = "Abmelden";
 "settings.development" = "Entwicklung";
@@ -106,13 +112,15 @@
 "settings.cancel" = "Abbrechen";
 "settings.blocked.users.section.title" = "Blockierte Profile";
 "settings.blocked.users.button.title" = "Blockierte Profile";
+"settings.blocked.users.button.title.count" = "Blockierte Profile (%d)";
 "settings.blocked.users.button.subtitle" = "Alle blockierten Profile anzeigen";
 "settings.blocked.users.modal.title" = "Blockierte Profile";
 "settings.blocked.users.empty" = "Keine blockierten Profile";
 "settings.blocked.users.since" = "Blockiert %@";
 "settings.blocked.users.no.date" = "Blockiert";
 "settings.blocked.users.unblock.action" = "Entsperren";
-"settings.blocked.users.unblock.confirm.message" = "Möchtest du %@ entsperren?";
+"settings.blocked.users.unblock.confirm.title" = "%@ entsperren?";
+"settings.blocked.users.unblock.confirm.message" = "Dadurch kann %@ dein Profil und frühere Unterhaltungen wieder sehen";
 
 "settings.authentication.section.title" = "Authentifizierung";
 "settings.account.section.title" = "Konto";
@@ -203,8 +211,8 @@
 "profile.nothing.specific" = "nichts Bestimmtes";
 "profile.block.title" = "Dieses Profil blockieren";
 "profile.unblock.title" = "Dieses Profil entsperren";
-"profile.block.confirm.title" = "Bist du sicher?";
-"profile.block.confirm.message" = "%@ kann dich nicht mehr sehen oder mit dir kommunizieren.";
+"profile.block.confirm.title" = "%@ blockieren?";
+"profile.block.confirm.message" = "Diese Person kann dein Profil nicht mehr sehen und dir keine Nachrichten mehr senden. Sie wird nicht benachrichtigt.";
 "profile.block.confirm.action" = "Blockieren";
 "profile.actions.title" = "Aktionen";
 "profile.unlike.title" = "Dieses Profil nicht mehr liken";

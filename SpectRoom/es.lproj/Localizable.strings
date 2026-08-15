@@ -75,6 +75,10 @@
 // MARK: - Settings
 "settings.title" = "Configuración";
 "settings.app.settings" = "Configuración de la App";
+"settings.section.preferences" = "Preferencias";
+"settings.section.privacy.safety" = "Privacidad y Seguridad";
+"settings.section.account.data" = "Cuenta y Datos";
+"settings.section.support.about" = "Soporte y Acerca de";
 "settings.notifications" = "Notificaciones";
 "settings.notifications.description" = "Activar notificaciones";
 "settings.dark.mode" = "Modo Oscuro";
@@ -91,10 +95,12 @@
 "settings.language.description" = "Seleccionar idioma de la app";
 "settings.support" = "Soporte";
 "settings.privacy.safety" = "Privacidad y Seguridad";
+"settings.privacy.settings" = "Configuración de privacidad";
 "settings.privacy.safety.description" = "Controla tu configuración de privacidad";
 "settings.help.support" = "Ayuda y Soporte";
 "settings.help.support.description" = "Obtén ayuda y contacta con soporte";
 "settings.about" = "Acerca de";
+"settings.about.spectroom" = "Acerca de SpectRoom";
 "settings.about.description" = "Versión de la app e información";
 "settings.sign.out" = "Cerrar Sesión";
 "settings.development" = "Desarrollo";
@@ -106,13 +112,15 @@
 "settings.cancel" = "Cancelar";
 "settings.blocked.users.section.title" = "Perfiles bloqueados";
 "settings.blocked.users.button.title" = "Perfiles bloqueados";
+"settings.blocked.users.button.title.count" = "Perfiles bloqueados (%d)";
 "settings.blocked.users.button.subtitle" = "Ver todos los perfiles bloqueados";
 "settings.blocked.users.modal.title" = "Perfiles bloqueados";
 "settings.blocked.users.empty" = "No hay perfiles bloqueados";
 "settings.blocked.users.since" = "Bloqueado %@";
 "settings.blocked.users.no.date" = "Bloqueado";
 "settings.blocked.users.unblock.action" = "Desbloquear";
-"settings.blocked.users.unblock.confirm.message" = "¿Quieres desbloquear a %@?";
+"settings.blocked.users.unblock.confirm.title" = "¿Desbloquear a %@?";
+"settings.blocked.users.unblock.confirm.message" = "Esto permitirá que %@ vea tu perfil y cualquier comunicación anterior";
 
 "settings.authentication.section.title" = "Autenticación";
 "settings.account.section.title" = "Cuenta";
@@ -203,8 +211,8 @@
 "profile.nothing.specific" = "nada específico";
 "profile.block.title" = "Bloquear este perfil";
 "profile.unblock.title" = "Desbloquear este perfil";
-"profile.block.confirm.title" = "¿Estás seguro?";
-"profile.block.confirm.message" = "%@ no podrá verte ni comunicarse contigo.";
+"profile.block.confirm.title" = "¿Bloquear a %@?";
+"profile.block.confirm.message" = "Ya no podrá ver tu perfil ni enviarte mensajes. No se le notificará.";
 "profile.block.confirm.action" = "Bloquear";
 "profile.actions.title" = "Acciones";
 "profile.unlike.title" = "Dejar de gustar este perfil";

@@ -75,6 +75,10 @@
 // MARK: - Settings
 "settings.title" = "Inställningar";
 "settings.app.settings" = "Appinställningar";
+"settings.section.preferences" = "Preferenser";
+"settings.section.privacy.safety" = "Integritet och Säkerhet";
+"settings.section.account.data" = "Konto och Data";
+"settings.section.support.about" = "Support och Om";
 "settings.notifications" = "Notifikationer";
 "settings.notifications.description" = "Aktivera notifikationer";
 "settings.dark.mode" = "Mörkt Läge";
@@ -91,10 +95,12 @@
 "settings.language.description" = "Välj appens språk";
 "settings.support" = "Support";
 "settings.privacy.safety" = "Integritet och Säkerhet";
+"settings.privacy.settings" = "Integritetsinställningar";
 "settings.privacy.safety.description" = "Kontrollera dina integritetsinställningar";
 "settings.help.support" = "Hjälp och Support";
 "settings.help.support.description" = "Få hjälp och kontakta support";
 "settings.about" = "Om";
+"settings.about.spectroom" = "Om SpectRoom";
 "settings.about.description" = "Appversion och information";
 "settings.sign.out" = "Logga Ut";
 "settings.development" = "Utveckling";
@@ -106,13 +112,15 @@
 "settings.cancel" = "Avbryt";
 "settings.blocked.users.section.title" = "Blockerade profiler";
 "settings.blocked.users.button.title" = "Blockerade profiler";
+"settings.blocked.users.button.title.count" = "Blockerade profiler (%d)";
 "settings.blocked.users.button.subtitle" = "Visa alla blockerade profiler";
 "settings.blocked.users.modal.title" = "Blockerade profiler";
 "settings.blocked.users.empty" = "Inga blockerade profiler";
 "settings.blocked.users.since" = "Blockerad %@";
 "settings.blocked.users.no.date" = "Blockerad";
 "settings.blocked.users.unblock.action" = "Avblockera";
-"settings.blocked.users.unblock.confirm.message" = "Vill du avblockera %@?";
+"settings.blocked.users.unblock.confirm.title" = "Avblockera %@?";
+"settings.blocked.users.unblock.confirm.message" = "Detta gör att %@ kan se din profil och tidigare kommunikation";
 
 "settings.authentication.section.title" = "Autentisering";
 "settings.account.section.title" = "Konto";
@@ -203,8 +211,8 @@
 "profile.nothing.specific" = "inget specifikt";
 "profile.block.title" = "Blockera denna profil";
 "profile.unblock.title" = "Avblockera denna profil";
-"profile.block.confirm.title" = "Är du säker?";
-"profile.block.confirm.message" = "%@ kommer inte att kunna se eller kommunicera med dig.";
+"profile.block.confirm.title" = "Blockera %@?";
+"profile.block.confirm.message" = "Personen kommer inte längre kunna se din profil eller skicka meddelanden till dig. Hen får ingen avisering.";
 "profile.block.confirm.action" = "Blockera";
 "profile.actions.title" = "Åtgärder";
 "profile.unlike.title" = "Sluta gilla denna profil";

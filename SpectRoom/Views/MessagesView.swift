@@ -30,10 +30,18 @@ struct MessagesView: View {
     /// Height of the custom tab menu body (above the home indicator).
     private let tabMenuBodyHeight: CGFloat = 70
     
+    private func conversationOtherUserId(for conversation: MessageDisplay) -> String {
+        conversation.senderName == "You" ? conversation.recipientId : conversation.senderId
+    }
+    
+    private var visibleConversations: [MessageDisplay] {
+        conversations.filter { !appState.isHiddenByBlock(conversationOtherUserId(for: $0)) }
+    }
+    
     private var filteredConversations: [MessageDisplay] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return conversations }
-        return conversations.filter { conversationMatchesSearch($0, query: query) }
+        guard !query.isEmpty else { return visibleConversations }
+        return visibleConversations.filter { conversationMatchesSearch($0, query: query) }
     }
     
     var body: some View {
@@ -56,7 +64,7 @@ struct MessagesView: View {
                             Spacer()
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if conversations.isEmpty {
+                    } else if visibleConversations.isEmpty {
                         emptyConversationsView
                     } else {
                         ZStack {
@@ -548,11 +556,16 @@ struct MessagesView: View {
         print("💬 Conversation tapped for: \(conversation.recipientName)")
         print("💬 Message content: \(conversation.content)")
         print("💬 Message senderId: \(conversation.senderId), recipientId: \(conversation.recipientId)")
+        
+        let otherUserId = conversation.senderName == "You" ? conversation.recipientId : conversation.senderId
+        guard !appState.isHiddenByBlock(otherUserId) else {
+            print("🚫 Ignoring tap on blocked conversation with \(otherUserId)")
+            return
+        }
+        
         print("💬 Setting selectedMessage to conversation")
         selectedMessage = conversation
         
-        // Determine the other user's ID (the one we're conversing with)
-        let otherUserId = conversation.senderName == "You" ? conversation.recipientId : conversation.senderId
         appState.currentlyOpenConversationSenderId = otherUserId
         print("💬 Set currentlyOpenConversationSenderId to: \(otherUserId)")
         
@@ -580,6 +593,15 @@ struct MessagesView: View {
     
     private func openConversationForSender(senderId: String, retryCount: Int = 0) {
         print("💬 Opening conversation for sender: \(senderId) (retry: \(retryCount))")
+        
+        guard !appState.isHiddenByBlock(senderId) else {
+            print("🚫 Ignoring open for blocked conversation with \(senderId)")
+            appState.conversationToOpenSenderId = nil
+            appState.shouldOpenConversation = false
+            appState.conversationToOpenProfile = nil
+            return
+        }
+        
         print("💬 Current conversations count: \(conversations.count)")
         print("💬 isLoading: \(isLoading)")
         print("💬 Conversation list: \(conversations.map { "\($0.recipientName) (sender: \($0.senderId), recipient: \($0.recipientId))" })")
@@ -1310,6 +1332,12 @@ struct MessageConversationModal: View {
             loadConversationMessages()
             startAutoRefresh()
         }
+        .onChange(of: appState.blockedUsers.map(\.id)) { _, _ in
+            syncBlockStateFromAppState()
+        }
+        .onChange(of: appState.blockedByUsers.map(\.id)) { _, _ in
+            syncBlockStateFromAppState()
+        }
         .onReceive(appState.newMessageReceivedPublisher) { newMessage in
             appendIncomingMessageIfNeeded(newMessage)
             refreshPartnerNameFromIncomingMessageIfNeeded(newMessage)
@@ -1372,7 +1400,7 @@ struct MessageConversationModal: View {
             appState.currentlyOpenConversationSenderId = otherUserId
         }) {
             if let otherUserProfile {
-                UserProfileModal(profile: otherUserProfile, showsUnlikeOption: true)
+                UserProfileModal(profile: otherUserProfile)
                     .environmentObject(appState)
             }
         }
@@ -1737,21 +1765,45 @@ struct MessageConversationModal: View {
     }
     
     private func checkBlockStatus() async {
+        let locallyHidden = await MainActor.run { appState.isMessagingBlocked(with: otherUserId) }
         do {
-            let blocked = try await FirebaseAuthService.shared.isBlockedBy(userId: otherUserId)
-            print("🚫 Block status for \(otherUserId): blocked=\(blocked)")
+            let theyBlockedMe = try await FirebaseAuthService.shared.isBlockedBy(userId: otherUserId)
+            print("🚫 Block status for \(otherUserId): theyBlockedMe=\(theyBlockedMe) locallyHidden=\(locallyHidden)")
             await MainActor.run {
+                let blocked = theyBlockedMe || appState.isMessagingBlocked(with: otherUserId)
                 isBlockedByRecipient = blocked
                 if blocked {
                     replyText = ""
-                    if appState.shouldShowBlockedAlert(for: otherUserId) {
+                    // Only show the "they've blocked you" alert when they blocked you
+                    // (not when you blocked them — they're simply hidden from your lists).
+                    if theyBlockedMe, appState.shouldShowBlockedAlert(for: otherUserId) {
                         showingBlockedAlert = true
                     }
-                    appState.refreshBlockedByUsers()
+                    if theyBlockedMe {
+                        appState.refreshBlockedByUsers()
+                    }
+                    if appState.isMessagingBlocked(with: otherUserId) {
+                        dismiss()
+                    }
                 }
             }
         } catch {
             print("⚠️ Unable to check block status for \(otherUserId): \(error.localizedDescription)")
+            await MainActor.run {
+                isBlockedByRecipient = locallyHidden || appState.isMessagingBlocked(with: otherUserId)
+                if appState.isMessagingBlocked(with: otherUserId) {
+                    dismiss()
+                }
+            }
+        }
+    }
+    
+    private func syncBlockStateFromAppState() {
+        let blocked = appState.isMessagingBlocked(with: otherUserId)
+        isBlockedByRecipient = blocked
+        if blocked {
+            replyText = ""
+            dismiss()
         }
     }
     

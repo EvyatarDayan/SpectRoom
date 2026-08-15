@@ -201,6 +201,10 @@ struct SearchView: View {
     @State private var undoEnableWorkItem: DispatchWorkItem?
     /// Triggers a fly-back entrance on the restored top card after undo.
     @State private var pendingUndoEntrance: UndoCardEntrance?
+    /// Bumped on each deck reload so stale in-flight fetches cannot overwrite a newer load.
+    @State private var discoverLoadEpoch = 0
+    /// Top-card block: play the pass fly-off instead of splicing the array (which desyncs the UI).
+    @State private var blockPassInProgressUserId: String?
     
     private var hasReachedDailyLimit: Bool {
         dailySwipeCount >= DiscoverDailyLimit.maxSwipesPerDay
@@ -249,7 +253,19 @@ struct SearchView: View {
     
     let filterOptions = ["Nearby", "Similar Interests", "Same Age Group", "Online Now"]
     
+    /// Stable key so one `onChange` can watch both lat & long without blowing up type-check time.
+    private var discoverLocationSignature: String {
+        let lat = appState.currentUser?.location.latitude.map { String($0) } ?? "nil"
+        let lon = appState.currentUser?.location.longitude.map { String($0) } ?? "nil"
+        return "\(lat),\(lon)"
+    }
+    
     var body: some View {
+        applyDiscoverLifecycle(to: discoverChrome)
+    }
+    
+    @ViewBuilder
+    private var discoverChrome: some View {
         NavigationView {
             ZStack {
                 VStack(spacing: 0) {
@@ -305,16 +321,8 @@ struct SearchView: View {
                                         },
                                         onTap: {
                                             guard !showsDailyLimitOverlay else { return }
-                                            print("🔍 Card tapped for profile: \(profile.name)")
-                                            print("🔍 Profile userId: \(profile.userId), age: \(profile.age)")
-                                            print("🔍 Setting selectedProfile to: \(profile.name)")
                                             selectedProfile = profile
-                                            print("🔍 selectedProfile after set: \(selectedProfile?.name ?? "nil"), userId: \(selectedProfile?.userId ?? "nil")")
-                                            print("🔍 showingProfileModal before: \(showingProfileModal)")
                                             showingProfileModal = true
-                                            print("🔍 showingProfileModal after: \(showingProfileModal)")
-                                            print("🔍 Selected profile set: \(selectedProfile?.name ?? "nil")")
-                                            print("🔍 Modal should show: \(showingProfileModal)")
                                         },
                                         onSecondThoughtsTap: {
                                             startSecondThoughtsReview()
@@ -499,123 +507,198 @@ struct SearchView: View {
                 .padding(.top, 8)
                 .padding(.trailing, 16)
         }
-        .onAppear {
-            dailySwipeCount = DiscoverDailyLimit.currentCount()
-            hasUsedSecondThoughtsToday = DiscoverDailyLimit.hasUsedSecondThoughtsToday()
-            selectedDistanceOption = DiscoverDistanceLimit.currentOption
-            restoreDiscoverSessionIfAvailable()
-        }
-        .onChange(of: appState.hasResolvedUserProfile) { _, resolved in
-            guard resolved else { return }
-            restoreDiscoverSessionIfAvailable()
-        }
-        .onChange(of: needsProfileCompletion) { _, needsCompletion in
-            guard hasResolvedDiscoverProfileState else { return }
-            if needsCompletion {
-                restoreDiscoverSessionIfAvailable()
-            } else {
-                reloadDiscoverDeck()
-            }
-        }
-        .onChange(of: appState.hasCompletedInitialProfile) { _, isComplete in
-            guard isComplete else { return }
-            reloadDiscoverDeck()
-        }
-        .onChange(of: appState.discoverDeckRefreshID) { _, _ in
-            reloadDiscoverDeck()
-        }
-        .onChange(of: selectedTab) { tab in
-            if tab == 2 {
+    }
+    
+    private func applyDiscoverLifecycle<Content: View>(to content: Content) -> some View {
+        content
+            .onAppear {
                 dailySwipeCount = DiscoverDailyLimit.currentCount()
                 hasUsedSecondThoughtsToday = DiscoverDailyLimit.hasUsedSecondThoughtsToday()
                 selectedDistanceOption = DiscoverDistanceLimit.currentOption
-                // Profile or distance changes may have cleared the cache.
-                // While the daily limit is active, never rebuild the frozen blurry deck.
-                if !appState.hasValidDiscoverProfilesCache
-                    && !isLoading
-                    && DiscoverDailyLimit.currentCount() < DiscoverDailyLimit.maxSwipesPerDay {
+                appState.refreshBlockedByUsers()
+                restoreDiscoverSessionIfAvailable()
+                restoreUnblockedProfileToDeckIfNeeded()
+            }
+            .onChange(of: appState.hasResolvedUserProfile) { _, resolved in
+                guard resolved else { return }
+                restoreDiscoverSessionIfAvailable()
+            }
+            .onChange(of: needsProfileCompletion) { _, needsCompletion in
+                guard hasResolvedDiscoverProfileState else { return }
+                if needsCompletion {
+                    restoreDiscoverSessionIfAvailable()
+                } else {
                     reloadDiscoverDeck()
                 }
             }
-        }
-        .onChange(of: appState.currentUser?.id) { _ in
-            dailySwipeCount = DiscoverDailyLimit.currentCount()
-            hasUsedSecondThoughtsToday = DiscoverDailyLimit.hasUsedSecondThoughtsToday()
-        }
-        .alert(
-            "search.daily.limit.second.thoughts".localized,
-            isPresented: Binding(
-                get: { secondThoughtsErrorMessage != nil },
-                set: { if !$0 { secondThoughtsErrorMessage = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) {
-                secondThoughtsErrorMessage = nil
+            .onChange(of: appState.hasCompletedInitialProfile) { _, isComplete in
+                guard isComplete else { return }
+                reloadDiscoverDeck()
             }
-        } message: {
-            Text(secondThoughtsErrorMessage ?? "")
-        }
-        .onChange(of: appState.currentUser?.id) { _ in
-            guard appState.currentUser != nil else { return }
-            appState.loadPersistedDiscoverProfilesCacheIfNeeded()
-            if profiles.isEmpty {
-                restoreDiscoverSessionIfAvailable()
-                return
+            .onChange(of: appState.discoverDeckRefreshID) { _, _ in
+                reloadDiscoverDeck()
             }
-            guard !appState.hasValidDiscoverProfilesCache else { return }
-            guard !hasCompletedDiscoverLoad else { return }
-            loadDiscoverProfilesWhenReady()
+            .onChange(of: appState.blockedUsers.map(\.id)) { _, _ in
+                removeHiddenBlockedProfilesFromDeck()
+            }
+            .onChange(of: appState.blockedByUsers.map(\.id)) { _, _ in
+                removeHiddenBlockedProfilesFromDeck()
+            }
+            .onChange(of: appState.pendingDiscoverUnblockRestoreUserId) { _, userId in
+                guard userId != nil else { return }
+                restoreUnblockedProfileToDeckIfNeeded()
+            }
+            .onChange(of: selectedTab) { _, tab in
+                handleSelectedTabChange(tab)
+            }
+            .onChange(of: appState.currentUser?.id) { _, _ in
+                handleCurrentUserChange()
+            }
+            .onChange(of: discoverLocationSignature) { _, _ in
+                retryDiscoverLoadAfterLocationReady()
+            }
+            .onChange(of: showingProfileModal) { _, isShowing in
+                handleProfileModalDismissed(isShowing: isShowing)
+            }
+            .onDisappear {
+                syncDiscoverCache()
+                matchCheckTimer?.invalidate()
+                matchCheckTimer = nil
+            }
+            .alert(
+                "search.daily.limit.second.thoughts".localized,
+                isPresented: Binding(
+                    get: { secondThoughtsErrorMessage != nil },
+                    set: { if !$0 { secondThoughtsErrorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) {
+                    secondThoughtsErrorMessage = nil
+                }
+            } message: {
+                Text(secondThoughtsErrorMessage ?? "")
+            }
+            .sheet(isPresented: $showingProfileModal) {
+                if let profile = selectedProfile {
+                    UserProfileModal(profile: profile)
+                        .environmentObject(appState)
+                }
+            }
+            .sheet(isPresented: $showingNewMessageModal) {
+                if let profile = matchedProfile {
+                    NewMessageModal(profile: profile, isExistingConversation: false)
+                }
+            }
+    }
+    
+    private func handleSelectedTabChange(_ tab: Int) {
+        guard tab == 2 else { return }
+        dailySwipeCount = DiscoverDailyLimit.currentCount()
+        hasUsedSecondThoughtsToday = DiscoverDailyLimit.hasUsedSecondThoughtsToday()
+        selectedDistanceOption = DiscoverDistanceLimit.currentOption
+        restoreUnblockedProfileToDeckIfNeeded()
+        if !appState.hasValidDiscoverProfilesCache
+            && !isLoading
+            && DiscoverDailyLimit.currentCount() < DiscoverDailyLimit.maxSwipesPerDay {
+            reloadDiscoverDeck()
         }
-        .onChange(of: showingProfileModal) { isShowing in
-            guard !isShowing else { return }
-            let previousCount = profiles.count
-            profiles.removeAll { appState.isUserBlocked($0.userId) }
-            if profiles.count != previousCount {
-                if currentCardIndex >= profiles.count {
-                    currentCardIndex = max(0, profiles.count - 1)
+    }
+    
+    private func handleCurrentUserChange() {
+        dailySwipeCount = DiscoverDailyLimit.currentCount()
+        hasUsedSecondThoughtsToday = DiscoverDailyLimit.hasUsedSecondThoughtsToday()
+        guard appState.currentUser != nil else { return }
+        appState.loadPersistedDiscoverProfilesCacheIfNeeded()
+        if profiles.isEmpty {
+            restoreDiscoverSessionIfAvailable()
+            return
+        }
+        guard !appState.hasValidDiscoverProfilesCache else { return }
+        guard !hasCompletedDiscoverLoad else { return }
+        loadDiscoverProfilesWhenReady()
+    }
+    
+    private func handleProfileModalDismissed(isShowing: Bool) {
+        guard !isShowing else { return }
+        if let selected = selectedProfile, appState.isHiddenByBlock(selected.userId) {
+            selectedProfile = nil
+        }
+        // Let the sheet finish dismissing so the Home pile is visible for the pass animation.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            removeHiddenBlockedProfilesFromDeck()
+        }
+    }
+    
+    /// When a profile is blocked, fly the top card away like Pass; never splice the top card out of the array.
+    private func removeHiddenBlockedProfilesFromDeck() {
+        pendingDiscoverProfiles.removeAll {
+            guard appState.isHiddenByBlock($0.userId) else { return false }
+            appState.rememberDiscoverProfileHiddenByBlock($0)
+            return true
+        }
+        
+        guard currentCardIndex < profiles.count else {
+            syncDiscoverCache()
+            return
+        }
+        
+        let top = profiles[currentCardIndex]
+        if appState.isHiddenByBlock(top.userId) {
+            guard !showingProfileModal else { return }
+            triggerBlockPassAnimation(for: top)
+            return
+        }
+        
+        // Drop blocked profiles that are still ahead in the pile (not the visible top card).
+        let kept = profiles.enumerated().compactMap { index, profile -> ProfileCard? in
+            if index > currentCardIndex && appState.isHiddenByBlock(profile.userId) {
+                appState.rememberDiscoverProfileHiddenByBlock(profile)
+                return nil
+            }
+            return profile
+        }
+        if kept.count != profiles.count {
+            profiles = kept
+            syncDiscoverCache()
+            prefetchMoreProfilesIfNeeded()
+        }
+    }
+    
+    private func triggerBlockPassAnimation(for profile: ProfileCard) {
+        guard blockPassInProgressUserId == nil else { return }
+        guard currentCardIndex < profiles.count,
+              profiles[currentCardIndex].userId == profile.userId else { return }
+        
+        appState.rememberDiscoverProfileHiddenByBlock(profile)
+        blockPassInProgressUserId = profile.userId
+        
+        let feedback = UINotificationFeedbackGenerator()
+        feedback.notificationOccurred(.error)
+        
+        // Same path as the Pass button — card flies left, then handleSwipeLeft advances the pile.
+        programmaticSwipeDirection = "left"
+    }
+    
+    private func restoreUnblockedProfileToDeckIfNeeded() {
+        guard let profile = appState.consumePendingDiscoverUnblockRestore() else { return }
+        guard !profiles.contains(where: { $0.userId == profile.userId }) else {
+            // Already in the pile (e.g. left behind after the block pass) — jump back to it.
+            if let index = profiles.firstIndex(where: { $0.userId == profile.userId }) {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                    currentCardIndex = index
                 }
                 syncDiscoverCache()
             }
+            return
         }
-        .onDisappear {
-            syncDiscoverCache()
-            matchCheckTimer?.invalidate()
-            matchCheckTimer = nil
+        
+        let insertAt = min(currentCardIndex, profiles.count)
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+            profiles.insert(profile, at: insertAt)
+            currentCardIndex = insertAt
         }
-        .sheet(isPresented: Binding(
-            get: { 
-                let isPresented = showingProfileModal
-                print("🔍 Sheet binding GET - isPresented: \(isPresented), selectedProfile: \(selectedProfile?.name ?? "nil")")
-                return isPresented
-            },
-            set: { newValue in
-                print("🔍 Sheet binding SET - newValue: \(newValue), current showingProfileModal: \(showingProfileModal)")
-                print("🔍 selectedProfile at set time: \(selectedProfile?.name ?? "nil"), userId: \(selectedProfile?.userId ?? "nil")")
-                showingProfileModal = newValue
-                print("🔍 showingProfileModal after set: \(showingProfileModal)")
-            }
-        )) {
-            let _ = print("🔍 Sheet closure EXECUTING - selectedProfile: \(selectedProfile?.name ?? "nil")")
-            if let profile = selectedProfile {
-                let _ = print("🔍 Creating UserProfileModal with profile: \(profile.name), userId: \(profile.userId), age: \(profile.age)")
-                UserProfileModal(profile: profile)
-                    .environmentObject(appState)
-            } else {
-                let _ = print("❌ selectedProfile is nil in sheet closure!")
-                VStack {
-                    Text("Error: No profile selected")
-                        .foregroundColor(.red)
-                    Button("Close") {
-                        showingProfileModal = false
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showingNewMessageModal) {
-            if let profile = matchedProfile {
-                NewMessageModal(profile: profile, isExistingConversation: false)
-            }
-        }
+        pendingDiscoverProfiles.removeAll { $0.userId == profile.userId }
+        syncDiscoverCache()
     }
     
     // MARK: - Helper function to calculate distance between two coordinates using Haversine formula
@@ -859,6 +942,7 @@ struct SearchView: View {
         canUseUndoButton = false
         undoEnableWorkItem?.cancel()
         pendingUndoEntrance = nil
+        discoverLoadEpoch += 1
         restoreDiscoverSessionIfAvailable()
     }
     
@@ -906,7 +990,25 @@ struct SearchView: View {
         hasMoreRemoteUsers = true
         cachedSwipeFilter = nil
         pendingDiscoverProfiles = []
+        // If a radius is set but we don't have coordinates yet, wait — otherwise every
+        // candidate is filtered out and Home shows the empty "everyone nearby" card.
+        if DiscoverDistanceLimit.currentOption.maxKilometers != nil,
+           appState.currentUser?.location.latitude == nil
+            || appState.currentUser?.location.longitude == nil {
+            print("🔍 SearchView: Waiting for location coordinates before discover load")
+            return
+        }
         loadDiscoverProfiles()
+    }
+    
+    /// After signup, location coords can arrive a moment after Home appears.
+    private func retryDiscoverLoadAfterLocationReady() {
+        guard !needsProfileCompletion else { return }
+        guard profiles.isEmpty else { return }
+        guard appState.currentUser?.location.latitude != nil,
+              appState.currentUser?.location.longitude != nil else { return }
+        print("🔍 SearchView: Location ready — reloading discover deck")
+        reloadDiscoverDeck()
     }
 
     private func syncDiscoverCache() {
@@ -1000,6 +1102,8 @@ struct SearchView: View {
         preferServerSwipeData: Bool = false,
         append: Bool = false
     ) {
+        let loadEpoch = discoverLoadEpoch
+        
         if append {
             guard !isLoadingMoreProfiles, hasMoreUsersToLoad else { return }
             isLoadingMoreProfiles = true
@@ -1040,12 +1144,14 @@ struct SearchView: View {
                 } else {
                     swipeFilter = try await FirebaseAuthService.shared.fetchSwipeFilterState(preferServer: preferServerSwipeData)
                     await MainActor.run {
+                        guard loadEpoch == discoverLoadEpoch else { return }
                         cachedSwipeFilter = swipeFilter
                     }
                 }
                 
-                guard let currentUser = appState.currentUser else {
+                guard let currentUser = await MainActor.run(body: { appState.currentUser }) else {
                     await MainActor.run {
+                        guard loadEpoch == discoverLoadEpoch else { return }
                         hasCompletedDiscoverLoad = false
                         isLoading = false
                         isLoadingMoreProfiles = false
@@ -1053,14 +1159,17 @@ struct SearchView: View {
                     return
                 }
                 
-                let blockedUserIds = Set(appState.blockedUsers.map(\.id))
+                let blockedUserIds = await MainActor.run { appState.hiddenByBlockUserIds }
                 var collectedProfiles: [ProfileCard] = []
-                var cursor = append ? lastFetchedUserDocumentId : nil
+                var cursor = await MainActor.run { append ? lastFetchedUserDocumentId : nil }
                 var hasMore = true
-                var seenUserIds = Set(profiles.map(\.userId))
+                var seenUserIds = await MainActor.run { Set(profiles.map(\.userId)) }
                 let minimumProfiles = DiscoverConstants.profilesPerBatch
                 
                 while hasMore && collectedProfiles.count < minimumProfiles {
+                    let stillCurrent = await MainActor.run { loadEpoch == discoverLoadEpoch }
+                    guard stillCurrent else { return }
+                    
                     let page = try await FirebaseAuthService.shared.fetchUsersPage(
                         limit: DiscoverConstants.firestorePageSize,
                         startAfterDocumentId: cursor
@@ -1095,6 +1204,11 @@ struct SearchView: View {
                 let sortedProfiles = sortProfilesByMatchPercentage(collectedProfiles)
                 
                 await MainActor.run {
+                    guard loadEpoch == discoverLoadEpoch else {
+                        print("🔍 SearchView: Ignoring stale discover load result (epoch \(loadEpoch))")
+                        return
+                    }
+                    
                     lastFetchedUserDocumentId = cursor
                     hasMoreRemoteUsers = hasMore
                     
@@ -1116,6 +1230,7 @@ struct SearchView: View {
             } catch {
                 print("❌ SearchView: Error loading users: \(error.localizedDescription)")
                 await MainActor.run {
+                    guard loadEpoch == discoverLoadEpoch else { return }
                     if !append {
                         profiles = []
                         pendingDiscoverProfiles = []
@@ -1252,6 +1367,31 @@ struct SearchView: View {
     
     private func handleSwipeLeft(profile: ProfileCard) {
         guard !showsDailyLimitOverlay else { return }
+        
+        // Block from profile: same fly-off as Pass, but do not record a swipe (so unblock can restore).
+        if blockPassInProgressUserId == profile.userId {
+            blockPassInProgressUserId = nil
+            print("🚫 Block-pass cleared from pile: \(profile.name)")
+            lastUndoableSwipe = nil
+            canUseUndoButton = false
+            undoEnableWorkItem?.cancel()
+            moveToNextCard()
+            // Remove blocked profiles still waiting ahead in the pile.
+            let kept = profiles.enumerated().compactMap { index, card -> ProfileCard? in
+                if index > currentCardIndex && appState.isHiddenByBlock(card.userId) {
+                    appState.rememberDiscoverProfileHiddenByBlock(card)
+                    return nil
+                }
+                return card
+            }
+            if kept.count != profiles.count {
+                profiles = kept
+            }
+            syncDiscoverCache()
+            prefetchMoreProfilesIfNeeded()
+            return
+        }
+        
         guard lastUndoableSwipe?.profile.userId == profile.userId,
               lastUndoableSwipe?.action == .pass else {
             // Undo cancelled this swipe before it committed.
@@ -1829,10 +1969,6 @@ struct SwipeableProfileCard: View {
             isProcessingProgrammaticSwipe = false
         }
         .onChange(of: programmaticSwipeDirection) { newDirection in
-            guard !isDailyLimitReached else {
-                programmaticSwipeDirection = nil
-                return
-            }
             guard let direction = newDirection, isTopCard, !isProcessingProgrammaticSwipe else { return }
             
             // Set flag to prevent re-triggering
@@ -2262,9 +2398,8 @@ private struct EnergyLevelPickerOverlay: View {
         }
         .padding(24)
         .frame(width: cardWidth, height: cardHeight, alignment: .topLeading)
-        .background(Color.black.opacity(0.88))
+        .background(Color.black)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
     }
 }
 
@@ -2329,15 +2464,13 @@ private struct SearchRadiusPickerOverlay: View {
         }
         .padding(24)
         .frame(width: cardWidth, height: cardHeight, alignment: .topLeading)
-        .background(Color.black.opacity(0.88))
+        .background(Color.black)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
     }
 }
 
 struct UserProfileModal: View {
     let profile: ProfileCard
-    let showsUnlikeOption: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject var appState: AppStateManager
@@ -2345,16 +2478,12 @@ struct UserProfileModal: View {
     @State private var selectedPhotoIndex = 0
     @State private var refreshedProfile: ProfileCard?
     @State private var showingBlockConfirmation = false
-    @State private var showingUnlikeConfirmation = false
-    @State private var isProfileUnliked = false
-    @State private var hasLoadedUnlikeState = false
     @State private var showingMatchDetails = false
     @State private var showingLookingForDetails = false
     
-    init(profile: ProfileCard, showsUnlikeOption: Bool = false) {
+    init(profile: ProfileCard) {
         self.profile = profile
-        self.showsUnlikeOption = showsUnlikeOption
-        print("🔍 UserProfileModal INIT called with profile: \(profile.name), userId: \(profile.userId), showsUnlikeOption: \(showsUnlikeOption)")
+        print("🔍 UserProfileModal INIT called with profile: \(profile.name), userId: \(profile.userId)")
     }
     
     private var profileTitle: String {
@@ -2435,8 +2564,6 @@ struct UserProfileModal: View {
                     
                     // My Interests Section
                     myInterestsSection
-                    
-                    profileActionsSection
                 }
                 .padding(.horizontal)
                 .padding(.top, 16)
@@ -2449,6 +2576,23 @@ struct UserProfileModal: View {
             .navigationBarTitleDisplayMode(.inline)
             .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if isProfileBlocked {
+                        Button("settings.blocked.users.unblock.action".localized) {
+                            appState.unblockUser(userId: displayProfile.userId)
+                        }
+                    } else {
+                        Button {
+                            showingBlockConfirmation = true
+                        } label: {
+                            Image("block")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 22, height: 22)
+                        }
+                        .accessibilityLabel("profile.block.confirm.action".localized)
+                    }
+                }
                 ToolbarItem(placement: .principal) {
                     Text(profileTitle)
                         .font(.headline)
@@ -2471,7 +2615,6 @@ struct UserProfileModal: View {
                 print("❌ Profile userId is empty!")
                 return
             }
-            loadUnlikeStateIfNeeded()
             // Refresh profile data in background after view renders
             // Use a longer delay to ensure view is fully rendered first
             Task {
@@ -2500,13 +2643,17 @@ struct UserProfileModal: View {
                 .presentationBackground(.clear)
             }
         }
-        .alert("profile.block.confirm.title".localized, isPresented: $showingBlockConfirmation) {
+        .alert(
+            String(format: "profile.block.confirm.title".localized, firstName(from: displayProfile.name)),
+            isPresented: $showingBlockConfirmation
+        ) {
             Button("common.cancel".localized, role: .cancel) {}
             Button("profile.block.confirm.action".localized, role: .destructive) {
                 appState.blockUser(userId: displayProfile.userId, name: displayProfile.name)
+                dismiss()
             }
         } message: {
-            Text(String(format: "profile.block.confirm.message".localized, firstName(from: displayProfile.name)))
+            Text("profile.block.confirm.message".localized)
         }
         .overlay {
             if showingMatchDetails {
@@ -2534,125 +2681,10 @@ struct UserProfileModal: View {
                 )
             }
         }
-        .alert("profile.unlike.confirm.title".localized, isPresented: $showingUnlikeConfirmation) {
-            Button("common.cancel".localized, role: .cancel) {}
-            Button("profile.unlike.confirm.action".localized, role: .destructive) {
-                isProfileUnliked = true
-                appState.unlikeUser(userId: displayProfile.userId)
-                dismiss()
-            }
-        } message: {
-            Text("profile.unlike.confirm.message".localized)
-        }
     }
     
     private var isProfileBlocked: Bool {
         appState.isUserBlocked(displayProfile.userId)
-    }
-    
-    private var blockToggleBinding: Binding<Bool> {
-        Binding(
-            get: { isProfileBlocked },
-            set: { newValue in
-                if newValue {
-                    showingBlockConfirmation = true
-                } else {
-                    appState.unblockUser(userId: displayProfile.userId)
-                }
-            }
-        )
-    }
-    
-    private var unlikeToggleBinding: Binding<Bool> {
-        Binding(
-            get: { isProfileUnliked },
-            set: { newValue in
-                if newValue {
-                    showingUnlikeConfirmation = true
-                } else {
-                    isProfileUnliked = false
-                    appState.relikeUser(userId: displayProfile.userId)
-                }
-            }
-        )
-    }
-    
-    private var profileActionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("profile.actions.title".localized)
-                .font(.headline)
-                .fontWeight(.semibold)
-            
-            VStack(spacing: 0) {
-                if showsUnlikeOption {
-                    HStack {
-                        Image(systemName: "heart.slash.circle.fill")
-                            .foregroundColor(.pink)
-                            .font(.title2)
-                        Text(isProfileUnliked ? "profile.relike.title".localized : "profile.unlike.title".localized)
-                            .font(.headline)
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.85)
-                        Spacer()
-                        Toggle("", isOn: unlikeToggleBinding)
-                            .scaleEffect(0.8, anchor: .trailing)
-                            .frame(width: 46, height: 28, alignment: .trailing)
-                    }
-                    
-                    Divider()
-                        .padding(.vertical, 10)
-                }
-                
-                HStack {
-                    Image(systemName: "hand.raised.circle.fill")
-                        .foregroundColor(.red)
-                        .font(.title2)
-                    Text(isProfileBlocked ? "profile.unblock.title".localized : "profile.block.title".localized)
-                        .font(.headline)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.85)
-                    Spacer()
-                    Toggle("", isOn: blockToggleBinding)
-                        .scaleEffect(0.8, anchor: .trailing)
-                        .frame(width: 46, height: 28, alignment: .trailing)
-                }
-            }
-            .blueFieldStyle()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(SpectRoomTheme.card)
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
-    }
-    
-    private func loadUnlikeStateIfNeeded() {
-        guard showsUnlikeOption else { return }
-        
-        // Prefer cached match presence for a fast initial value.
-        let isMatch = appState.cachedMatches.contains { $0.otherUser.userId == displayProfile.userId }
-        if isMatch {
-            isProfileUnliked = false
-            hasLoadedUnlikeState = true
-        }
-        
-        Task {
-            do {
-                let swipeFilter = try await FirebaseAuthService.shared.fetchSwipeFilterState()
-                await MainActor.run {
-                    // Latest pass wins; otherwise keep matched/liked as not unliked.
-                    isProfileUnliked = swipeFilter.passedUserIds.contains(displayProfile.userId)
-                    hasLoadedUnlikeState = true
-                }
-            } catch {
-                await MainActor.run {
-                    if !hasLoadedUnlikeState {
-                        isProfileUnliked = !isMatch
-                        hasLoadedUnlikeState = true
-                    }
-                }
-            }
-        }
     }
     
     private func firstName(from fullName: String) -> String {
@@ -3594,18 +3626,36 @@ struct NewMessageModal: View {
                 await checkBlockStatus()
             }
         }
+        .onChange(of: appState.blockedUsers.map(\.id)) { _, _ in
+            if appState.isMessagingBlocked(with: profile.userId) {
+                isBlockedByRecipient = true
+                messageText = ""
+                dismiss()
+            }
+        }
+        .onChange(of: appState.blockedByUsers.map(\.id)) { _, _ in
+            if appState.isMessagingBlocked(with: profile.userId) {
+                isBlockedByRecipient = true
+                messageText = ""
+                dismiss()
+            }
+        }
     }
     
     private func checkBlockStatus() async {
+        let locallyHidden = await MainActor.run { appState.isMessagingBlocked(with: profile.userId) }
         do {
-            let blocked = try await FirebaseAuthService.shared.isBlockedBy(userId: profile.userId)
-            print("🚫 Block status for \(profile.userId): blocked=\(blocked)")
+            let theyBlockedMe = try await FirebaseAuthService.shared.isBlockedBy(userId: profile.userId)
+            print("🚫 Block status for \(profile.userId): theyBlockedMe=\(theyBlockedMe) locallyHidden=\(locallyHidden)")
             await MainActor.run {
+                let blocked = theyBlockedMe || appState.isMessagingBlocked(with: profile.userId)
                 isBlockedByRecipient = blocked
                 if blocked {
                     messageText = ""
-                    if appState.shouldShowBlockedAlert(for: profile.userId) {
+                    if theyBlockedMe, appState.shouldShowBlockedAlert(for: profile.userId) {
                         showingBlockedAlert = true
+                    } else if appState.isMessagingBlocked(with: profile.userId) {
+                        dismiss()
                     }
                 } else if !isExistingConversation {
                     messageText = "matches.default.message".localized
@@ -3615,7 +3665,10 @@ struct NewMessageModal: View {
         } catch {
             print("⚠️ Unable to check block status for \(profile.userId): \(error.localizedDescription)")
             await MainActor.run {
-                if !isExistingConversation {
+                isBlockedByRecipient = locallyHidden || appState.isMessagingBlocked(with: profile.userId)
+                if isBlockedByRecipient {
+                    dismiss()
+                } else if !isExistingConversation {
                     messageText = "matches.default.message".localized
                 }
             }

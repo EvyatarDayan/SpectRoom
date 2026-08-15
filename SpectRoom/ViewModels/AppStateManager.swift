@@ -38,6 +38,9 @@ class AppStateManager: ObservableObject {
     @Published var cachedDiscoverProfiles: [ProfileCard] = []
     @Published var cachedDiscoverCardIndex: Int = 0
     @Published private(set) var discoverDeckRefreshID = UUID()
+    /// Profiles removed from Home only because of a block — restored to the pile on unblock.
+    @Published private(set) var discoverProfilesHeldByBlock: [String: ProfileCard] = [:]
+    @Published private(set) var pendingDiscoverUnblockRestoreUserId: String?
     private var isDiscoverProfilesCacheValid = false
     private var cachedDiscoverFilterSignature: DiscoverDeckFilterSignature?
     @Published var blockedUsers: [BlockedUser] = []
@@ -140,12 +143,14 @@ class AppStateManager: ObservableObject {
                     // Start listening for new messages when authenticated
                     // This will notify users when they receive a new message
                     self?.startListeningForNewMessages()
+                    self?.startListeningForBlockedByUsers()
                     self?.refreshUnreadMessageCount()
                 } else {
                     // Set offline status before clearing data
                     Task {
                         await self?.updateOnlineStatus(isOnline: false)
                     }
+                    self?.firebaseAuth.stopListeningForBlockedByUsers()
                     // Clear user data when not authenticated to prevent stale data
                     self?.currentUser = nil
                     self?.unreadMessageCount = 0
@@ -178,6 +183,8 @@ class AppStateManager: ObservableObject {
                 } else {
                     self?.blockedUsers = []
                     self?.blockedByUsers = []
+                    self?.discoverProfilesHeldByBlock = [:]
+                    self?.pendingDiscoverUnblockRestoreUserId = nil
                     self?.suppressedBlockedAlertUserIds = []
                 }
             }
@@ -314,6 +321,8 @@ class AppStateManager: ObservableObject {
                     conversations = []
                     blockedUsers = []
                     blockedByUsers = []
+                    discoverProfilesHeldByBlock = [:]
+                    pendingDiscoverUnblockRestoreUserId = nil
                     clearMessageConversationsCache()
                     clearDiscoverProfilesCache()
                     
@@ -800,8 +809,18 @@ class AppStateManager: ObservableObject {
         blockedByUsers.contains(where: { $0.id == userId })
     }
     
+    /// True when either side has blocked the other — use for mutual hide in UI.
     func isMessagingBlocked(with userId: String) -> Bool {
         isUserBlocked(userId) || isBlockedByUser(userId)
+    }
+    
+    /// User IDs that must be hidden from discover / matches / messages.
+    var hiddenByBlockUserIds: Set<String> {
+        Set(blockedUsers.map(\.id)).union(blockedByUsers.map(\.id))
+    }
+    
+    func isHiddenByBlock(_ userId: String) -> Bool {
+        isMessagingBlocked(with: userId)
     }
     
     func shouldShowBlockedAlert(for userId: String) -> Bool {
@@ -842,16 +861,86 @@ class AppStateManager: ObservableObject {
             do {
                 let users = try await firebaseAuth.fetchBlockedByUsers()
                 await MainActor.run {
-                    self.blockedByUsers = users
-                    if var current = self.currentUser {
-                        current.blockedByUsers = users
-                        self.currentUser = current
-                    }
+                    self.applyBlockedByUsers(users)
                 }
             } catch {
                 print("⚠️ Unable to refresh blockedBy users: \(error.localizedDescription)")
             }
         }
+    }
+    
+    func startListeningForBlockedByUsers() {
+        guard isAuthenticated else { return }
+        firebaseAuth.listenForBlockedByUsers { [weak self] users in
+            Task { @MainActor in
+                self?.applyBlockedByUsers(users)
+            }
+        }
+    }
+    
+    @MainActor
+    private func applyBlockedByUsers(_ users: [BlockedUser]) {
+        let previousIds = Set(blockedByUsers.map(\.id))
+        let newIds = Set(users.map(\.id))
+        blockedByUsers = users
+        if var current = currentUser {
+            current.blockedByUsers = users
+            currentUser = current
+        }
+        
+        let newlyBlockedIds = newIds.subtracting(previousIds)
+        if !newlyBlockedIds.isEmpty {
+            stripDiscoverProfiles(matching: newlyBlockedIds, reloadDeck: false)
+            if let openId = currentlyOpenConversationSenderId, newlyBlockedIds.contains(openId) {
+                currentlyOpenConversationSenderId = nil
+            }
+            if showingMatchNotification, let profile = newMatchProfile, newlyBlockedIds.contains(profile.userId) {
+                showingMatchNotification = false
+                newMatchProfile = nil
+            }
+            if showingNewMessageNotification, newlyBlockedIds.contains(newMessageSenderId) {
+                dismissNewMessageNotification()
+            }
+        }
+        
+        // Someone unblocked us — refresh discover so they can appear in cards again.
+        let newlyUnblockedIds = previousIds.subtracting(newIds)
+        if !newlyUnblockedIds.isEmpty {
+            invalidateDiscoverDeckAfterProfileUpdate()
+        }
+    }
+    
+    @MainActor
+    private func stripDiscoverProfiles(matching userIds: Set<String>, reloadDeck: Bool) {
+        guard !userIds.isEmpty else { return }
+        
+        for profile in cachedDiscoverProfiles where userIds.contains(profile.userId) {
+            discoverProfilesHeldByBlock[profile.userId] = profile
+        }
+        
+        cachedDiscoverProfiles.removeAll { userIds.contains($0.userId) }
+        if cachedDiscoverProfiles.isEmpty {
+            clearDiscoverProfilesCache()
+        } else {
+            if cachedDiscoverCardIndex > cachedDiscoverProfiles.count {
+                cachedDiscoverCardIndex = cachedDiscoverProfiles.count
+            }
+            persistDiscoverProfilesCache()
+        }
+        
+        if reloadDeck {
+            discoverDeckRefreshID = UUID()
+        }
+    }
+    
+    func rememberDiscoverProfileHiddenByBlock(_ profile: ProfileCard) {
+        discoverProfilesHeldByBlock[profile.userId] = profile
+    }
+    
+    func consumePendingDiscoverUnblockRestore() -> ProfileCard? {
+        guard let userId = pendingDiscoverUnblockRestoreUserId else { return nil }
+        pendingDiscoverUnblockRestoreUserId = nil
+        return discoverProfilesHeldByBlock.removeValue(forKey: userId)
     }
 
     @MainActor
@@ -899,29 +988,35 @@ class AppStateManager: ObservableObject {
         }
     }
 
+    @MainActor
     func blockUser(userId: String, name: String) {
         guard !isUserBlocked(userId) else { return }
         let blockedUser = BlockedUser(id: userId, name: name, blockedAt: Date())
 
-        Task {
-            await MainActor.run {
-                self.blockedUsers.append(blockedUser)
-                self.cachedDiscoverProfiles.removeAll { $0.userId == userId }
-                if self.cachedDiscoverProfiles.isEmpty {
-                    self.clearDiscoverProfilesCache()
-                } else {
-                    if self.cachedDiscoverCardIndex > self.cachedDiscoverProfiles.count {
-                        self.cachedDiscoverCardIndex = self.cachedDiscoverProfiles.count
-                    }
-                    self.persistDiscoverProfilesCache()
-                }
-                if var current = self.currentUser {
-                    current.blockedUsers = self.blockedUsers
-                    self.currentUser = current
-                }
-                self.saveAppState()
-            }
+        // Apply locally first so Home can remove the card before the profile sheet closes.
+        blockedUsers.append(blockedUser)
+        if let cached = cachedDiscoverProfiles.first(where: { $0.userId == userId }) {
+            discoverProfilesHeldByBlock[userId] = cached
+        }
+        // Keep the live deck in place; SearchView removes the card like a pass.
+        stripDiscoverProfiles(matching: [userId], reloadDeck: false)
+        if var current = currentUser {
+            current.blockedUsers = blockedUsers
+            currentUser = current
+        }
+        if currentlyOpenConversationSenderId == userId {
+            currentlyOpenConversationSenderId = nil
+        }
+        if showingMatchNotification, newMatchProfile?.userId == userId {
+            showingMatchNotification = false
+            newMatchProfile = nil
+        }
+        if showingNewMessageNotification, newMessageSenderId == userId {
+            dismissNewMessageNotification()
+        }
+        saveAppState()
 
+        Task {
             do {
                 try await firebaseAuth.blockUser(userId: userId, name: name)
             } catch {
@@ -930,20 +1025,33 @@ class AppStateManager: ObservableObject {
         }
     }
 
+    @MainActor
     func unblockUser(userId: String) {
         guard isUserBlocked(userId) else { return }
         unsuppressBlockedAlert(for: userId)
 
-        Task {
-            await MainActor.run {
-                self.blockedUsers.removeAll { $0.id == userId }
-                if var current = self.currentUser {
-                    current.blockedUsers = self.blockedUsers
-                    self.currentUser = current
-                }
-                self.saveAppState()
-            }
+        blockedUsers.removeAll { $0.id == userId }
+        if var current = currentUser {
+            current.blockedUsers = blockedUsers
+            currentUser = current
+        }
+        saveAppState()
 
+        if discoverProfilesHeldByBlock[userId] != nil {
+            // Put the card back on Home without rebuilding the whole deck.
+            if let held = discoverProfilesHeldByBlock[userId],
+               !cachedDiscoverProfiles.contains(where: { $0.userId == userId }) {
+                let insertAt = min(cachedDiscoverCardIndex, cachedDiscoverProfiles.count)
+                cachedDiscoverProfiles.insert(held, at: insertAt)
+                isDiscoverProfilesCacheValid = true
+                persistDiscoverProfilesCache()
+            }
+            pendingDiscoverUnblockRestoreUserId = userId
+        } else {
+            invalidateDiscoverDeckAfterProfileUpdate()
+        }
+
+        Task {
             do {
                 try await firebaseAuth.unblockUser(userId: userId)
             } catch {
@@ -993,6 +1101,11 @@ class AppStateManager: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             print("💕 New match received: \(matchDisplay.otherUser.name)")
             print("💕 Match ID: \(matchDisplay.id)")
+            
+            guard self?.isHiddenByBlock(matchDisplay.otherUser.userId) != true else {
+                print("💕 Ignoring match notification — blocked with \(matchDisplay.otherUser.userId)")
+                return
+            }
             
             guard self?.lastMatchId != matchDisplay.id else {
                 print("💕 Duplicate match notification, ignoring")
@@ -1183,6 +1296,24 @@ class AppStateManager: ObservableObject {
         
         firebaseAuth.listenForNewMessages { [weak self] senderId, senderName, senderPhotoURL, messageDocId, content, type, voiceDuration, createdAt, hasProfile in
             DispatchQueue.main.async {
+                // Mutual block: keep quiet (no sound/badge/push). Cache still updates via preview
+                // so unblock can restore the thread as it was.
+                if self?.isHiddenByBlock(senderId) == true {
+                    if !hasProfile {
+                        self?.applyIncomingMessagePreview(
+                            senderId: senderId,
+                            senderName: senderName.isEmpty ? nil : senderName,
+                            senderPhotoURL: senderPhotoURL,
+                            content: content,
+                            type: type,
+                            voiceDuration: voiceDuration,
+                            createdAt: createdAt
+                        )
+                    }
+                    self?.lastMessageId = messageDocId
+                    return
+                }
+                
                 if !hasProfile {
                     print("💬 New message preview from: \(senderId), content: \(content.prefix(20))...")
                     self?.applyIncomingMessagePreview(
@@ -1613,7 +1744,7 @@ class AppStateManager: ObservableObject {
     func exportAllMessagesToFile() async throws -> URL? {
         let export = try await firebaseAuth.fetchAllConversationsForExport()
         guard !export.conversations.isEmpty else { return nil }
-        return try await MessagesExport.writeTextFile(
+        return try await MessagesExport.writePDFFile(
             currentUserName: export.currentUserName,
             currentUserId: export.currentUserId,
             conversations: export.conversations

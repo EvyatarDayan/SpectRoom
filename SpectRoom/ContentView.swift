@@ -157,7 +157,7 @@ struct CustomFooterMenu: View {
     @Environment(\.colorScheme) private var colorScheme
     
     private var displayMatchCount: Int {
-        appState.cachedMatches.count
+        appState.cachedMatches.filter { !appState.isHiddenByBlock($0.otherUser.userId) }.count
     }
     
     private var displayUnreadMessageCount: Int {

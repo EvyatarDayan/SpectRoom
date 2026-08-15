@@ -26,6 +26,7 @@ class FirebaseAuthService: ObservableObject {
     let auth = Auth.auth()
     private let db = Firestore.firestore()
     private var matchesListener: ListenerRegistration?
+    private var blockedByListener: ListenerRegistration?
     private var authStateListenerHandle: AuthStateDidChangeListenerHandle?
     /// Keeps the app on the login screen while we verify the account isn't soft-deleted.
     private var isVerifyingSignIn = false
@@ -292,15 +293,7 @@ class FirebaseAuthService: ObservableObject {
                 print("🖼️ Loaded profile photo URL: \(profilePhotoURL ?? "nil")")
                 
                 // Parse location data from Firebase
-                let locationData = userData["location"] as? [String: Any] ?? [:]
-                let location = Location(
-                    displayString: locationData["displayString"] as? String ?? "",
-                    city: locationData["city"] as? String ?? "",
-                    state: locationData["state"] as? String ?? "",
-                    country: locationData["country"] as? String ?? "",
-                    latitude: locationData["latitude"] as? Double,
-                    longitude: locationData["longitude"] as? Double
-                )
+                let location = Self.parseLocation(from: userData)
                 
                 let interests = userData["interests"] as? [String] ?? []
                 print("🔍 Firebase - Loaded interests from database: \(interests)")
@@ -630,17 +623,9 @@ class FirebaseAuthService: ObservableObject {
             return nil
         }
         
-        let locationData = userData["location"] as? [String: Any] ?? [:]
         let lifestyle = userData["lifestyle"] as? String ?? ""
         
-        let location = Location(
-            displayString: locationData["displayString"] as? String ?? "",
-            city: locationData["city"] as? String ?? "",
-            state: locationData["state"] as? String ?? "",
-            country: locationData["country"] as? String ?? "",
-            latitude: locationData["latitude"] as? Double,
-            longitude: locationData["longitude"] as? Double
-        )
+        let location = Self.parseLocation(from: userData)
         
         let interests = userData["interests"] as? [String] ?? []
         let gender = userData["gender"] as? String ?? ""
@@ -925,12 +910,41 @@ class FirebaseAuthService: ObservableObject {
             .getDocuments()
         
         return snapshot.documents.compactMap { document in
-            let data = document.data()
-            let name = data["name"] as? String ?? "Unknown"
-            let blockedAtInterval = data["blockedAt"] as? TimeInterval
-            let blockedAt = blockedAtInterval.map { Date(timeIntervalSince1970: $0) }
-            return BlockedUser(id: document.documentID, name: name, blockedAt: blockedAt)
+            Self.parseBlockedUser(documentID: document.documentID, data: document.data())
         }
+    }
+    
+    func stopListeningForBlockedByUsers() {
+        blockedByListener?.remove()
+        blockedByListener = nil
+    }
+    
+    /// Live updates when someone blocks/unblocks the current user (mutual hide).
+    func listenForBlockedByUsers(completion: @escaping ([BlockedUser]) -> Void) {
+        guard let currentUserId = auth.currentUser?.uid else { return }
+        
+        stopListeningForBlockedByUsers()
+        let ref = db.collection("users").document(currentUserId).collection("blockedBy")
+        blockedByListener = ref.addSnapshotListener { snapshot, error in
+            if let error = error {
+                print("⚠️ Error listening for blockedBy: \(error.localizedDescription)")
+                return
+            }
+            guard let documents = snapshot?.documents else { return }
+            let users = documents.compactMap { document in
+                Self.parseBlockedUser(documentID: document.documentID, data: document.data())
+            }
+            DispatchQueue.main.async {
+                completion(users)
+            }
+        }
+    }
+    
+    private static func parseBlockedUser(documentID: String, data: [String: Any]) -> BlockedUser? {
+        let name = data["name"] as? String ?? "Unknown"
+        let blockedAtInterval = data["blockedAt"] as? TimeInterval
+        let blockedAt = blockedAtInterval.map { Date(timeIntervalSince1970: $0) }
+        return BlockedUser(id: documentID, name: name, blockedAt: blockedAt)
     }
     
     // MARK: - Matching Functions
@@ -3230,6 +3244,20 @@ class FirebaseAuthService: ObservableObject {
 }
 
 private extension FirebaseAuthService {
+    /// Firestore may return numbers as `Double` or `NSNumber`; `as? Double` alone often fails.
+    static func firestoreDouble(from value: Any?) -> Double? {
+        if let double = value as? Double {
+            return double
+        }
+        if let number = value as? NSNumber {
+            return number.doubleValue
+        }
+        if let int = value as? Int {
+            return Double(int)
+        }
+        return nil
+    }
+    
     static func parseLocation(from userData: [String: Any]) -> Location {
         let locationData = userData["location"] as? [String: Any] ?? [:]
         return Location(
@@ -3237,8 +3265,8 @@ private extension FirebaseAuthService {
             city: locationData["city"] as? String ?? "",
             state: locationData["state"] as? String ?? "",
             country: locationData["country"] as? String ?? "",
-            latitude: locationData["latitude"] as? Double,
-            longitude: locationData["longitude"] as? Double
+            latitude: firestoreDouble(from: locationData["latitude"]),
+            longitude: firestoreDouble(from: locationData["longitude"])
         )
     }
     

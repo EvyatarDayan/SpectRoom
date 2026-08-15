@@ -75,6 +75,10 @@
 // MARK: - Settings
 "settings.title" = "Settings";
 "settings.app.settings" = "App Settings";
+"settings.section.preferences" = "Preferences";
+"settings.section.privacy.safety" = "Privacy & Safety";
+"settings.section.account.data" = "Account & Data";
+"settings.section.support.about" = "Support & About";
 "settings.notifications" = "Notifications";
 "settings.notifications.description" = "Enable notifications";
 "settings.dark.mode" = "Dark Mode";
@@ -91,10 +95,12 @@
 "settings.language.description" = "Select app language";
 "settings.support" = "Support";
 "settings.privacy.safety" = "Privacy & Safety";
+"settings.privacy.settings" = "Privacy Settings";
 "settings.privacy.safety.description" = "Control your privacy settings";
 "settings.help.support" = "Help & Support";
 "settings.help.support.description" = "Get help and contact support";
 "settings.about" = "About";
+"settings.about.spectroom" = "About SpectRoom";
 "settings.about.description" = "App version and information";
 "settings.sign.out" = "Sign Out";
 "settings.development" = "Development";
@@ -106,13 +112,15 @@
 "settings.cancel" = "Cancel";
 "settings.blocked.users.section.title" = "Blocked profiles";
 "settings.blocked.users.button.title" = "Blocked profiles";
+"settings.blocked.users.button.title.count" = "Blocked Profiles (%d)";
 "settings.blocked.users.button.subtitle" = "See all blocked profiles";
 "settings.blocked.users.modal.title" = "Blocked profiles";
 "settings.blocked.users.empty" = "No blocked profiles";
 "settings.blocked.users.since" = "Blocked %@";
 "settings.blocked.users.no.date" = "Blocked";
 "settings.blocked.users.unblock.action" = "Unblock";
-"settings.blocked.users.unblock.confirm.message" = "Do you want to unblock %@?";
+"settings.blocked.users.unblock.confirm.title" = "Unblock %@?";
+"settings.blocked.users.unblock.confirm.message" = "This will allow %@ to see your profile and any previous communication";
 
 "settings.authentication.section.title" = "Authentication";
 "settings.account.section.title" = "Account";
@@ -198,8 +206,8 @@
 "profile.nothing.specific" = "nothing specific";
 "profile.block.title" = "Block this profile";
 "profile.unblock.title" = "Unblock this profile";
-"profile.block.confirm.title" = "Are you sure?";
-"profile.block.confirm.message" = "%@ will not be able to see or communicate with you.";
+"profile.block.confirm.title" = "Block %@?";
+"profile.block.confirm.message" = "They will no longer be able to see your profile or message you. They won't be notified.";
 "profile.block.confirm.action" = "Block";
 "profile.actions.title" = "Actions";
 "profile.unlike.title" = "Unlike this profile";

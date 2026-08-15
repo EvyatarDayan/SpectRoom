@@ -31,10 +31,14 @@ struct MatchesView: View {
         return floor(screenWidth - (listPadding * 2))
     }
     
+    private var visibleMatches: [MatchDisplay] {
+        matches.filter { !appState.isHiddenByBlock($0.otherUser.userId) }
+    }
+    
     private var filteredMatches: [MatchDisplay] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return matches }
-        return matches.filter { matchMatchesSearch($0, query: query) }
+        guard !query.isEmpty else { return visibleMatches }
+        return visibleMatches.filter { matchMatchesSearch($0, query: query) }
     }
 
     var body: some View {
@@ -48,7 +52,7 @@ struct MatchesView: View {
                 Group {
                     if isLoading {
                         loadingView
-                    } else if matches.isEmpty {
+                    } else if visibleMatches.isEmpty {
                         emptyMatchesView
                     } else {
                         ZStack {
@@ -108,7 +112,7 @@ struct MatchesView: View {
             let _ = print("🔍 MatchesView Sheet closure EXECUTING - selectedProfile: \(selectedProfile?.name ?? "nil")")
             if let profile = selectedProfile {
                 let _ = print("🔍 MatchesView Creating UserProfileModal with profile: \(profile.name), userId: \(profile.userId), age: \(profile.age)")
-                UserProfileModal(profile: profile, showsUnlikeOption: true)
+                UserProfileModal(profile: profile)
                     .environmentObject(appState)
             } else {
                 let _ = print("❌ MatchesView selectedProfile is nil in sheet closure!")
@@ -151,6 +155,7 @@ struct MatchesView: View {
     }
 
     private func openProfile(for match: MatchDisplay) {
+        guard !appState.isHiddenByBlock(match.otherUser.userId) else { return }
         print("🔍 Match card tapped for profile: \(match.otherUser.name)")
         selectedProfile = match.otherUser
         appState.viewedMatchProfileId = match.otherUser.userId
@@ -158,6 +163,7 @@ struct MatchesView: View {
     }
 
     private func openMessage(for match: MatchDisplay) {
+        guard !appState.isHiddenByBlock(match.otherUser.userId) else { return }
         print("💬 Message button tapped for: \(match.otherUser.name)")
         let userId = match.otherUser.userId
         appState.viewedMatchProfileId = userId

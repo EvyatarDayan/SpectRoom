@@ -1832,10 +1832,18 @@ struct ProfileEditView: View {
                 // This will update FirebaseAuthService.currentUser, which will propagate to AppStateManager
                 await FirebaseAuthService.shared.forceRefreshUserData()
                 
+                // Keep AppState in sync on this run loop so Home's first discover load
+                // sees location coordinates and preferences (Combine can lag one tick).
+                if let refreshed = FirebaseAuthService.shared.currentUser {
+                    appState.currentUser = refreshed
+                }
+                
                 isLoading = false
                 
-                appState.completeInitialProfile()
+                // Clear discover cache before switching to Home so SearchView's first
+                // appear is the only load (invalidate-after-complete caused a race).
                 appState.invalidateDiscoverDeckAfterProfileUpdate()
+                appState.completeInitialProfile()
                 hideCompletionBarAfterCompleteSave()
                 
                 if !isMandatoryCompletion {

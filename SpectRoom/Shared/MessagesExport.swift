@@ -11,13 +11,13 @@ enum MessagesExport {
     /// Short enough to stay on one line on phone screens when viewing the export.
     private static let divider = String(repeating: "─", count: 28)
     
-    static func writeTextFile(
+    static func writePDFFile(
         currentUserName: String,
         currentUserId: String,
         conversations: [MessagesExportConversation]
     ) async throws -> URL {
         let dateStamp = fileDateFormatter.string(from: Date())
-        let fileName = "SpectRoom-Messages-\(dateStamp).rtf"
+        let fileName = "SpectRoom-Messages-\(dateStamp).pdf"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         
         let bodyFont = UIFont.systemFont(ofSize: 14)
@@ -25,9 +25,18 @@ enum MessagesExport {
         let titleFont = UIFont.boldSystemFont(ofSize: 18)
         let headerFont = UIFont.boldSystemFont(ofSize: 16)
         
-        let regular: [NSAttributedString.Key: Any] = [.font: bodyFont]
-        let bold: [NSAttributedString.Key: Any] = [.font: boldFont]
-        let title: [NSAttributedString.Key: Any] = [.font: titleFont]
+        let regular: [NSAttributedString.Key: Any] = [
+            .font: bodyFont,
+            .foregroundColor: UIColor.black
+        ]
+        let bold: [NSAttributedString.Key: Any] = [
+            .font: boldFont,
+            .foregroundColor: UIColor.black
+        ]
+        let title: [NSAttributedString.Key: Any] = [
+            .font: titleFont,
+            .foregroundColor: UIColor.black
+        ]
         let header: [NSAttributedString.Key: Any] = [
             .font: headerFont,
             .foregroundColor: UIColor.systemBlue
@@ -40,6 +49,7 @@ enum MessagesExport {
         bulletParagraph.headIndent = bulletIndent
         let bullet: [NSAttributedString.Key: Any] = [
             .font: bodyFont,
+            .foregroundColor: UIColor.black,
             .paragraphStyle: bulletParagraph
         ]
         
@@ -97,12 +107,49 @@ enum MessagesExport {
             }
         }
         
-        let data = try document.data(
-            from: NSRange(location: 0, length: document.length),
-            documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
-        )
+        let data = renderPDF(from: document)
         try data.write(to: url, options: .atomic)
         return url
+    }
+    
+    /// US Letter pages with margins; paginates via TextKit layout.
+    private static func renderPDF(from attributedString: NSAttributedString) -> Data {
+        let pageWidth: CGFloat = 612
+        let pageHeight: CGFloat = 792
+        let margin: CGFloat = 48
+        let pageRect = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
+        let textBounds = CGRect(
+            x: margin,
+            y: margin,
+            width: pageWidth - margin * 2,
+            height: pageHeight - margin * 2
+        )
+        
+        let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
+        return renderer.pdfData { context in
+            let textStorage = NSTextStorage(attributedString: attributedString)
+            let layoutManager = NSLayoutManager()
+            textStorage.addLayoutManager(layoutManager)
+            
+            var done = false
+            while !done {
+                context.beginPage()
+                
+                let textContainer = NSTextContainer(size: textBounds.size)
+                textContainer.lineFragmentPadding = 0
+                layoutManager.addTextContainer(textContainer)
+                
+                let glyphRange = layoutManager.glyphRange(for: textContainer)
+                layoutManager.drawBackground(forGlyphRange: glyphRange, at: textBounds.origin)
+                layoutManager.drawGlyphs(forGlyphRange: glyphRange, at: textBounds.origin)
+                
+                if glyphRange.length == 0 {
+                    done = true
+                } else {
+                    done = NSMaxRange(glyphRange) >= layoutManager.numberOfGlyphs
+                }
+            }
+        }
     }
     
     private struct ExportMessageGroup {

@@ -26,6 +26,7 @@ class FirebaseAuthService: ObservableObject {
     let auth = Auth.auth()
     private let db = Firestore.firestore()
     private var matchesListener: ListenerRegistration?
+    private var authStateListenerHandle: AuthStateDidChangeListenerHandle?
     /// Keeps the app on the login screen while we verify the account isn't soft-deleted.
     private var isVerifyingSignIn = false
     
@@ -34,8 +35,8 @@ class FirebaseAuthService: ObservableObject {
         isAuthenticated = auth.currentUser != nil
         
         // Listen for authentication state changes
-        auth.addStateDidChangeListener { [weak self] _, firebaseUser in
-            DispatchQueue.main.async {
+        authStateListenerHandle = auth.addStateDidChangeListener { [weak self] _, firebaseUser in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.hasResolvedAuthState = true
                 
@@ -48,11 +49,9 @@ class FirebaseAuthService: ObservableObject {
                 if let firebaseUser = firebaseUser {
                     self.hasResolvedUserProfile = false
                     // Load user data from Firestore when Firebase user changes
-                    Task {
-                        await self.loadUserData(for: firebaseUser.uid)
-                        // Update FCM token when user logs in
-                        await self.updateFCMTokenIfNeeded()
-                    }
+                    await self.loadUserData(for: firebaseUser.uid)
+                    // Update FCM token when user logs in
+                    await self.updateFCMTokenIfNeeded()
                 } else {
                     self.currentUser = nil
                     self.hasResolvedUserProfile = true
@@ -439,8 +438,9 @@ class FirebaseAuthService: ObservableObject {
                     userWithPhotos.blockedByUsers = []
                     print("⚠️ Failed to load blockedBy users for \(userID): \(error.localizedDescription)")
                 }
+                let resolvedUser = userWithPhotos
                 await MainActor.run {
-                    self.currentUser = userWithPhotos
+                    self.currentUser = resolvedUser
                 }
                 
                 // Preload photos from Firebase Storage to improve user experience
@@ -727,8 +727,9 @@ class FirebaseAuthService: ObservableObject {
             // Update the current user's photos array
             if var currentUser = self.currentUser {
                 currentUser.photos = photoURLs
+                let updatedUser = currentUser
                 await MainActor.run {
-                    self.currentUser = currentUser
+                    self.currentUser = updatedUser
                 }
                 
                 // Update Firestore with the synced photos
@@ -961,6 +962,34 @@ class FirebaseAuthService: ObservableObject {
         try await swipeRef.setData(swipeData)
         
         print("✅ Swipe recorded successfully")
+    }
+    
+    /// Deletes the most recent swipe to `targetUserId` (like or pass) for single-step undo.
+    func undoLastSwipe(to targetUserId: String) async throws {
+        guard let currentUserId = auth.currentUser?.uid else {
+            throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let snapshot = try await db.collection("users")
+            .document(currentUserId)
+            .collection("swipes")
+            .whereField("toUserId", isEqualTo: targetUserId)
+            .getDocuments()
+        
+        guard let newest = snapshot.documents.max(by: {
+            ($0.data()["createdAt"] as? TimeInterval ?? 0) < ($1.data()["createdAt"] as? TimeInterval ?? 0)
+        }) else {
+            print("⚠️ No swipe found to undo for \(targetUserId)")
+            return
+        }
+        
+        let action = newest.data()["action"] as? String
+        try await newest.reference.delete()
+        print("✅ Undid swipe (\(action ?? "unknown")) to \(targetUserId)")
+        
+        if action == SwipeType.like.rawValue || action == SwipeType.superLike.rawValue {
+            try? await deleteMatch(with: targetUserId)
+        }
     }
     
     /// Next pass number for a target (1 or 2+), based on existing pass docs.
@@ -1485,6 +1514,37 @@ class FirebaseAuthService: ObservableObject {
         return matches
     }
     
+    /// Latest energy levels from the server (not the local Firestore cache).
+    func fetchEnergyLevels(for userIds: [String]) async -> [String: Int] {
+        let uniqueIds = Array(Set(userIds.filter { !$0.isEmpty }))
+        guard !uniqueIds.isEmpty else { return [:] }
+        
+        return await withTaskGroup(of: (String, Int)?.self, returning: [String: Int].self) { group in
+            for userId in uniqueIds {
+                group.addTask {
+                    do {
+                        let document = try await self.db.collection("users")
+                            .document(userId)
+                            .getDocument(source: .server)
+                        let level = document.data()?["energyLevel"] as? Int ?? 4
+                        return (userId, level)
+                    } catch {
+                        print("❌ Error fetching energy level for \(userId): \(error)")
+                        return nil
+                    }
+                }
+            }
+            
+            var levels: [String: Int] = [:]
+            for await result in group {
+                if let result {
+                    levels[result.0] = result.1
+                }
+            }
+            return levels
+        }
+    }
+    
     func fetchUserProfile(for userId: String, currentUserLocation: Location? = nil, forMatches: Bool = false) async throws -> ProfileCard {
         let userDoc = try await db.collection("users").document(userId).getDocument()
         guard let userData = userDoc.data() else {
@@ -1507,7 +1567,21 @@ class FirebaseAuthService: ObservableObject {
             distanceString = "Matched"
         }
         
-        let name = userData["name"] as? String ?? "Unknown"
+        let rawName = (userData["name"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = (userData["displayName"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let name: String = {
+            if !rawName.isEmpty,
+               rawName.caseInsensitiveCompare("Unknown") != .orderedSame,
+               rawName.caseInsensitiveCompare("Unknown User") != .orderedSame {
+                return rawName
+            }
+            if !displayName.isEmpty {
+                return displayName
+            }
+            return rawName.isEmpty ? "Unknown" : rawName
+        }()
         let age = userData["age"] as? Int ?? 0
         let bio = userData["bio"] as? String ?? ""
         let interests = userData["interests"] as? [String] ?? []
@@ -2035,13 +2109,116 @@ class FirebaseAuthService: ObservableObject {
         return messages
     }
     
+    func fetchAllConversationsForExport() async throws -> (currentUserName: String, currentUserId: String, conversations: [MessagesExportConversation]) {
+        guard let currentUserId = auth.currentUser?.uid else {
+            throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        
+        let cutoffDate = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date().addingTimeInterval(-15552000)
+        let cutoffTimestamp = cutoffDate.timeIntervalSince1970
+        
+        async let sentSnapshotTask = db.collection("users")
+            .document(currentUserId)
+            .collection("sentMessages")
+            .whereField("createdAt", isGreaterThanOrEqualTo: cutoffTimestamp)
+            .getDocuments()
+        async let incomingSnapshotTask = db.collection("users")
+            .document(currentUserId)
+            .collection("incomingMessages")
+            .whereField("createdAt", isGreaterThanOrEqualTo: cutoffTimestamp)
+            .getDocuments()
+        
+        let sentSnapshot = try await sentSnapshotTask
+        let incomingSnapshot = try await incomingSnapshotTask
+        
+        struct RawMessage {
+            let data: [String: Any]
+            let otherUserId: String
+            let isOutgoing: Bool
+        }
+        
+        var rawMessages: [RawMessage] = []
+        var partnerIds = Set<String>()
+        
+        for document in sentSnapshot.documents {
+            let data = document.data()
+            guard let recipientId = data["recipientId"] as? String, !recipientId.isEmpty else { continue }
+            if let createdAt = data["createdAt"] as? TimeInterval, createdAt < cutoffTimestamp {
+                continue
+            }
+            partnerIds.insert(recipientId)
+            rawMessages.append(RawMessage(data: data, otherUserId: recipientId, isOutgoing: true))
+        }
+        
+        for document in incomingSnapshot.documents {
+            let data = document.data()
+            guard let senderId = data["senderId"] as? String, !senderId.isEmpty else { continue }
+            if let createdAt = data["createdAt"] as? TimeInterval, createdAt < cutoffTimestamp {
+                continue
+            }
+            partnerIds.insert(senderId)
+            rawMessages.append(RawMessage(data: data, otherUserId: senderId, isOutgoing: false))
+        }
+        
+        let profiles = await fetchUserSummaries(for: Array(partnerIds))
+        let currentUserName = currentUser?.name
+            ?? AppStateManager.shared.currentUser?.name
+            ?? "settings.export.messages.you".localized
+        
+        var grouped: [String: [MessageDisplay]] = [:]
+        for raw in rawMessages {
+            let partnerName = profiles[raw.otherUserId]?.name ?? "Unknown User"
+            guard let display = messageDisplay(
+                from: raw.data,
+                currentUserId: currentUserId,
+                otherUserId: raw.otherUserId,
+                otherUserName: partnerName,
+                otherUserPhotoURL: profiles[raw.otherUserId]?.photoURL,
+                currentUserPhotoURL: nil,
+                isOutgoing: raw.isOutgoing
+            ) else { continue }
+            guard display.createdAt >= cutoffDate else { continue }
+            grouped[raw.otherUserId, default: []].append(display)
+        }
+        
+        let conversations = grouped.compactMap { partnerId, messages -> MessagesExportConversation? in
+            let sorted = messages.sorted { $0.createdAt < $1.createdAt }
+            guard !sorted.isEmpty else { return nil }
+            return MessagesExportConversation(
+                partnerName: profiles[partnerId]?.name ?? sorted.first?.recipientName ?? "Unknown User",
+                messages: sorted
+            )
+        }
+        .sorted { lhs, rhs in
+            let lhsDate = lhs.messages.last?.createdAt ?? .distantPast
+            let rhsDate = rhs.messages.last?.createdAt ?? .distantPast
+            return lhsDate > rhsDate
+        }
+        
+        return (currentUserName, currentUserId, conversations)
+    }
+    
     func fetchSenderName(for senderId: String) async throws -> String {
         let userDoc = try await db.collection("users").document(senderId).getDocument()
-        guard let userData = userDoc.data(),
-              let name = userData["name"] as? String else {
+        guard let userData = userDoc.data() else {
             return "Unknown User"
         }
-        return name
+        
+        let rawName = (userData["name"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !rawName.isEmpty,
+           rawName.caseInsensitiveCompare("Unknown") != .orderedSame,
+           rawName.caseInsensitiveCompare("Unknown User") != .orderedSame {
+            return rawName
+        }
+        
+        let displayName = (userData["displayName"] as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !displayName.isEmpty {
+            return displayName
+        }
+        
+        return "Unknown User"
     }
     
     func fetchRecipientName(for recipientId: String) async throws -> String {
@@ -2584,13 +2761,13 @@ class FirebaseAuthService: ObservableObject {
     private func messageFromDocument(_ data: [String: Any]) -> Message? {
         guard let content = data["content"] as? String,
               let senderId = data["senderId"] as? String,
-              let createdAt = data["createdAt"] as? TimeInterval else {
+              let createdAt = Self.timeIntervalValue(data["createdAt"]) else {
             return nil
         }
         
         let messageTypeString = data["type"] as? String ?? "text"
         let messageType = MessageType(rawValue: messageTypeString) ?? .text
-        let voiceDuration = data["voiceDuration"] as? TimeInterval
+        let voiceDuration = Self.timeIntervalValue(data["voiceDuration"])
         
         return Message(
             conversationId: UUID(),
@@ -2601,6 +2778,23 @@ class FirebaseAuthService: ObservableObject {
             type: messageType,
             voiceDuration: voiceDuration
         )
+    }
+    
+    /// Firestore may return Int or Double for numeric fields.
+    private static func timeIntervalValue(_ value: Any?) -> TimeInterval? {
+        if let value = value as? TimeInterval {
+            return value
+        }
+        if let value = value as? Int {
+            return TimeInterval(value)
+        }
+        if let value = value as? Float {
+            return TimeInterval(value)
+        }
+        if let value = value as? NSNumber {
+            return value.doubleValue
+        }
+        return nil
     }
     
     private func messageDisplay(

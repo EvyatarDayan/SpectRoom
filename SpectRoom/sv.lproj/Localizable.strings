@@ -117,6 +117,19 @@
 "settings.authentication.section.title" = "Autentisering";
 "settings.account.section.title" = "Konto";
 "settings.authentication.signout.subtitle" = "Logga ut från ditt konto";
+"settings.export.messages" = "Exportera meddelanden";
+"settings.export.messages.description" = "Exportera meddelanden från senaste 6 månaderna";
+"settings.export.messages.file.title" = "SpectRoom-export av meddelanden";
+"settings.export.messages.exported.at" = "Exporterad: %@";
+"settings.export.messages.account" = "Konto: %@";
+"settings.export.messages.conversation.with" = "Konversation med %@";
+"settings.export.messages.you" = "Du";
+"settings.export.messages.voice" = "[Röstbilaga]";
+"settings.export.messages.voice.duration" = "[Röstbilaga, %d:%02d]";
+"settings.export.messages.photo" = "[Fotobilaga]";
+"settings.export.messages.video" = "[Videobilaga]";
+"settings.export.messages.empty" = "Du har inga meddelanden att exportera ännu.";
+"settings.export.messages.error" = "Kunde inte exportera dina meddelanden. Försök igen.";
 
 "settings.delete.account.section.title" = "Radera konto";
 "settings.delete.account.button" = "Radera Konto";
@@ -326,6 +339,7 @@
 "search.no.more.profiles.description" = "Kom tillbaka senare för nya personer!";
 "search.pass" = "Hoppa Över";
 "search.like" = "Gilla";
+"search.undo" = "Ångra senaste swipe";
 "search.view.profile" = "Visa Profil";
 "search.new.message" = "Nytt Meddelande";
 "search.distance.km" = "%@ km bort";

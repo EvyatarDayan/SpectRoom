@@ -152,10 +152,7 @@ private struct LaunchAuthPlaceholderView: View {
     
     var body: some View {
         ZStack {
-            Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .ignoresSafeArea()
+            SpectRoomBackground()
         }
     }
 }
@@ -275,6 +272,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     // Handle notification when app is in foreground
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         syncBadgeCount(from: notification.request.content.userInfo)
+        
+        if NotificationService.shouldSuppressForegroundMatchNotification(userInfo: notification.request.content.userInfo) {
+            completionHandler([])
+            return
+        }
         
         if NotificationService.shouldSuppressForegroundMessageNotification(userInfo: notification.request.content.userInfo) {
             completionHandler([])

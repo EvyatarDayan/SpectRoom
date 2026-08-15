@@ -16,7 +16,7 @@ struct NewMessageNotificationModal: View {
     @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
-        let modalBackgroundColor = colorScheme == .dark ? Color(.secondarySystemGroupedBackground) : Color(.systemGroupedBackground)
+        let modalBackgroundColor = SpectRoomTheme.card
         
         return ZStack {
             // Background overlay (existing, for tap gesture)

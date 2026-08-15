@@ -117,6 +117,19 @@
 "settings.authentication.section.title" = "Authentifizierung";
 "settings.account.section.title" = "Konto";
 "settings.authentication.signout.subtitle" = "Von deinem Konto abmelden";
+"settings.export.messages" = "Nachrichten exportieren";
+"settings.export.messages.description" = "Nachrichten der letzten 6 Monate exportieren";
+"settings.export.messages.file.title" = "SpectRoom-Nachrichtenexport";
+"settings.export.messages.exported.at" = "Exportiert: %@";
+"settings.export.messages.account" = "Konto: %@";
+"settings.export.messages.conversation.with" = "Unterhaltung mit %@";
+"settings.export.messages.you" = "Du";
+"settings.export.messages.voice" = "[Sprachanhang]";
+"settings.export.messages.voice.duration" = "[Sprachanhang, %d:%02d]";
+"settings.export.messages.photo" = "[Fotoanhang]";
+"settings.export.messages.video" = "[Videoanhang]";
+"settings.export.messages.empty" = "Du hast noch keine Nachrichten zum Exportieren.";
+"settings.export.messages.error" = "Deine Nachrichten konnten nicht exportiert werden. Bitte versuche es erneut.";
 
 "settings.delete.account.section.title" = "Konto löschen";
 "settings.delete.account.button" = "Konto Löschen";
@@ -326,6 +339,7 @@
 "search.no.more.profiles.description" = "Kommen Sie später zurück für neue Personen!";
 "search.pass" = "Überspringen";
 "search.like" = "Gefällt Mir";
+"search.undo" = "Letzten Swipe rückgängig";
 "search.view.profile" = "Profil Anzeigen";
 "search.new.message" = "Neue Nachricht";
 "search.distance.km" = "%@ km entfernt";

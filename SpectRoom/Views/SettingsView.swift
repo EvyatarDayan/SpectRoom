@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UserNotifications
+import UIKit
 import Foundation
 
 struct SettingsView: View {
@@ -26,6 +27,11 @@ struct SettingsView: View {
     @State private var deleteConfirmationText = ""
     @State private var isDeletingAccount = false
     @State private var deleteAccountErrorMessage: String?
+    @State private var isExportingMessages = false
+    @State private var showingExportShareSheet = false
+    @State private var exportFileURL: URL?
+    @State private var showingExportEmptyAlert = false
+    @State private var showingExportErrorAlert = false
     
     var body: some View {
         NavigationView {
@@ -48,7 +54,7 @@ struct SettingsView: View {
                                 .minimumScaleFactor(0.85)
                             Text("settings.notifications.description".localized)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
@@ -86,7 +92,7 @@ struct SettingsView: View {
                                 .minimumScaleFactor(0.85)
                             Text("settings.dark.mode.description".localized)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
@@ -106,7 +112,7 @@ struct SettingsView: View {
                                 .minimumScaleFactor(0.85)
                             Text("settings.language.description".localized)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
@@ -116,9 +122,9 @@ struct SettingsView: View {
                                 .font(.title3)
                             Text(currentLanguageName)
                                 .font(.subheadline)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                             Image(systemName: "chevron.right")
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                                 .font(.caption)
                         }
                     }
@@ -141,13 +147,13 @@ struct SettingsView: View {
                                 .minimumScaleFactor(0.85)
                             Text("settings.privacy.safety.description".localized)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
                         Spacer()
                         Image(systemName: "chevron.right")
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                             .font(.caption)
                     }
                     .contentShape(Rectangle())
@@ -166,13 +172,13 @@ struct SettingsView: View {
                                 .minimumScaleFactor(0.85)
                             Text("settings.help.support.description".localized)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
                         Spacer()
                         Image(systemName: "chevron.right")
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                             .font(.caption)
                     }
                     .contentShape(Rectangle())
@@ -192,13 +198,13 @@ struct SettingsView: View {
                                 .minimumScaleFactor(0.85)
                             Text("settings.about.description".localized)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
                         Spacer()
                         Image(systemName: "chevron.right")
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                             .font(.caption)
                     }
                     .contentShape(Rectangle())
@@ -219,13 +225,13 @@ struct SettingsView: View {
 //                                .font(.headline)
 //                            Text("Reset onboarding flow for testing")
 //                                .font(.caption)
-//                                .foregroundColor(.secondary)
+//                                .foregroundColor(SpectRoomTheme.secondaryText)
 //                                .lineLimit(1)
 //                                .minimumScaleFactor(0.8)
 //                        }
 //                        Spacer()
 //                        Image(systemName: "chevron.right")
-//                            .foregroundColor(.secondary)
+//                            .foregroundColor(SpectRoomTheme.secondaryText)
 //                            .font(.caption)
 //                    }
 //                    .contentShape(Rectangle())
@@ -244,13 +250,13 @@ struct SettingsView: View {
                                 .minimumScaleFactor(0.85)
                             Text("settings.reset.user.data.description".localized)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
                         Spacer()
                         Image(systemName: "chevron.right")
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                             .font(.caption)
                     }
                     .contentShape(Rectangle())
@@ -275,7 +281,7 @@ struct SettingsView: View {
                                     .minimumScaleFactor(0.85)
                                 Text("settings.blocked.users.button.subtitle".localized)
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.8)
                             }
@@ -293,6 +299,35 @@ struct SettingsView: View {
                 
                 // Account Section
                 Section("settings.account.section.title".localized.uppercased()) {
+                    Button(action: exportMessages) {
+                        HStack {
+                            Image(systemName: "square.and.arrow.up.circle.fill")
+                                .foregroundColor(.blue)
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("settings.export.messages".localized)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                                    .foregroundColor(SpectRoomTheme.text)
+                                Text("settings.export.messages.description".localized)
+                                    .font(.caption)
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            Spacer()
+                            if isExportingMessages {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                    .disabled(isExportingMessages)
+                    
                     Button(action: {
                         // Use AppStateManager.signOut() to ensure proper state management
                         // Welcome shows again after logout unless "Don't show this again" was checked
@@ -310,13 +345,13 @@ struct SettingsView: View {
                                     .foregroundColor(.red)
                                 Text("settings.authentication.signout.subtitle".localized)
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.8)
                             }
                             Spacer()
                             Image(systemName: "chevron.right")
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                                 .font(.caption)
                         }
                     }
@@ -340,7 +375,7 @@ struct SettingsView: View {
                                     .foregroundColor(.red)
                                 Text("settings.delete.account.subtitle".localized)
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
                                     .lineLimit(2)
                                     .minimumScaleFactor(0.8)
                             }
@@ -353,10 +388,7 @@ struct SettingsView: View {
             .padding(.bottom, 60)
             .scrollContentBackground(.hidden)
             .background(
-                Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .ignoresSafeArea()
+                SpectRoomBackground()
             )
             .sheet(isPresented: $showingBlockedUsers) {
                 BlockedUsersModal()
@@ -367,6 +399,7 @@ struct SettingsView: View {
             }
             .navigationTitle("settings.title".localized)
             .navigationBarTitleDisplayMode(.inline)
+            .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("settings.title".localized)
@@ -396,6 +429,23 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingAbout) {
                 AboutView()
+            }
+            .sheet(isPresented: $showingExportShareSheet, onDismiss: {
+                exportFileURL = nil
+            }) {
+                if let exportFileURL {
+                    ActivityShareSheet(items: [exportFileURL])
+                }
+            }
+            .alert("settings.export.messages".localized, isPresented: $showingExportEmptyAlert) {
+                Button("common.ok".localized, role: .cancel) { }
+            } message: {
+                Text("settings.export.messages.empty".localized)
+            }
+            .alert("settings.export.messages".localized, isPresented: $showingExportErrorAlert) {
+                Button("common.ok".localized, role: .cancel) { }
+            } message: {
+                Text("settings.export.messages.error".localized)
             }
             .overlay {
                 if showingDeleteAccountConfirmation {
@@ -472,6 +522,30 @@ struct SettingsView: View {
         }
     }
     
+    private func exportMessages() {
+        guard !isExportingMessages else { return }
+        isExportingMessages = true
+        Task {
+            do {
+                let fileURL = try await appState.exportAllMessagesToFile()
+                await MainActor.run {
+                    isExportingMessages = false
+                    if let fileURL {
+                        exportFileURL = fileURL
+                        showingExportShareSheet = true
+                    } else {
+                        showingExportEmptyAlert = true
+                    }
+                }
+            } catch {
+                print("❌ Error exporting messages: \(error)")
+                await MainActor.run {
+                    isExportingMessages = false
+                    showingExportErrorAlert = true
+                }
+            }
+        }
+    }
 }
 
 
@@ -489,13 +563,13 @@ private struct BlockedUsersModal: View {
                     VStack(spacing: 16) {
                         Image(systemName: "person.crop.circle.badge.xmark")
                             .font(.system(size: 48))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                         Text("settings.blocked.users.empty".localized)
                             .font(.headline)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(.systemGroupedBackground))
+                    .background(SpectRoomTheme.card)
                 } else {
                     List(appState.blockedUsers) { blocked in
                         BlockedUserRow(
@@ -570,7 +644,7 @@ private struct BlockedUserRow: View {
                     .font(.headline)
                 Text(dateText(for: blocked))
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
             }
             
             Spacer()
@@ -679,7 +753,7 @@ private struct DeleteAccountConfirmationDialog: View {
                         if step == .sure {
                             Text("settings.delete.account.confirm.message".localized)
                                 .font(.subheadline)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                                 .multilineTextAlignment(.center)
                                 .padding(.top, 10)
                                 .padding(.horizontal, 20)
@@ -687,13 +761,13 @@ private struct DeleteAccountConfirmationDialog: View {
                             VStack(spacing: 12) {
                                 Text("settings.delete.account.type.message".localized)
                                     .font(.subheadline)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
                                     .multilineTextAlignment(.center)
                                 
                                 SecureField("settings.delete.account.type.placeholder".localized, text: $confirmationText)
                                     .textContentType(.password)
                                     .padding(10)
-                                    .background(Color(.secondarySystemBackground))
+                                    .background(SpectRoomTheme.card)
                                     .cornerRadius(8)
                                     .disabled(isDeleting)
                                 
@@ -762,7 +836,7 @@ private struct DeleteAccountConfirmationDialog: View {
                 }
             }
             .frame(maxWidth: 300)
-            .background(Color(.systemBackground))
+            .background(SpectRoomTheme.card)
             .cornerRadius(14)
             .shadow(color: .black.opacity(0.2), radius: 20, y: 8)
             .padding(.horizontal, 40)
@@ -775,6 +849,18 @@ private extension View {
         scaleEffect(0.8, anchor: .trailing)
             .frame(width: 46, height: 28, alignment: .trailing)
     }
+}
+
+private struct ActivityShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        controller.popoverPresentationController?.sourceView = UIView()
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 #Preview {

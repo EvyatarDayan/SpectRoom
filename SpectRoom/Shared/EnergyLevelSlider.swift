@@ -62,7 +62,7 @@ struct EnergyLevelSlider: View {
                 
                 // Interactive thumb only — drag here to change level.
                 Circle()
-                    .fill(Color(.systemBackground))
+                    .fill(SpectRoomTheme.card)
                     .frame(width: thumbSize, height: thumbSize)
                     .overlay(Circle().strokeBorder(levelColor, lineWidth: 3))
                     .overlay(

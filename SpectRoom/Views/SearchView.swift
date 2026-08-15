@@ -89,6 +89,19 @@ enum DiscoverDailyLimit {
         return count
     }
     
+    /// Rolls back one recorded discover swipe for today (used by single-step undo).
+    @discardableResult
+    static func undoLastSwipe() -> Int {
+        clearLegacyDeviceKeys()
+        guard let accountKey else { return 0 }
+        
+        let count = max(0, currentCount() - 1)
+        let defaults = UserDefaults.standard
+        defaults.set(todayKey, forKey: dateStorageKey(for: accountKey))
+        defaults.set(count, forKey: countStorageKey(for: accountKey))
+        return count
+    }
+    
     static var hasReachedLimit: Bool {
         currentCount() >= maxSwipesPerDay
     }
@@ -127,6 +140,22 @@ enum DiscoverDailyLimit {
     }
 }
 
+/// One undoable Home discover action (only the latest swipe can be reversed).
+private struct UndoableDiscoverSwipe {
+    let profile: ProfileCard
+    let action: SwipeType
+    let cardIndexBeforeSwipe: Int
+    let countedTowardDailyLimit: Bool
+}
+
+/// Drives the card fly-back animation when undoing a swipe.
+struct UndoCardEntrance: Equatable {
+    let profileId: String
+    /// `true` = enter from left (undo pass); `false` = enter from right (undo like).
+    let fromLeadingEdge: Bool
+    let token: UUID
+}
+
 struct SearchView: View {
     @Binding var selectedTab: Int
     @EnvironmentObject var appState: AppStateManager
@@ -160,6 +189,18 @@ struct SearchView: View {
     @State private var showingEnergyLevelPicker = false
     @State private var showingDistancePicker = false
     @State private var selectedDistanceOption = DiscoverDistanceLimit.currentOption
+    /// Single-step undo for the most recent like/pass on Home.
+    @State private var lastUndoableSwipe: UndoableDiscoverSwipe?
+    @State private var isUndoingSwipe = false
+    /// Kept false until the swipe animation has finished so quick taps can't fight the fly-off.
+    @State private var canUseUndoButton = false
+    /// Invalidates in-flight swipe writes if the user undoes before they finish.
+    @State private var activeSwipeTokens: [String: UUID] = [:]
+    /// Bumped to cancel in-flight card fly-off animations / delayed swipe handlers.
+    @State private var swipeActionEpoch = 0
+    @State private var undoEnableWorkItem: DispatchWorkItem?
+    /// Triggers a fly-back entrance on the restored top card after undo.
+    @State private var pendingUndoEntrance: UndoCardEntrance?
     
     private var hasReachedDailyLimit: Bool {
         dailySwipeCount >= DiscoverDailyLimit.maxSwipesPerDay
@@ -221,7 +262,7 @@ struct SearchView: View {
                                 
                                 Text("search.loading".localized)
                                     .font(.headline)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
                             }
                         } else if shouldShowProfileIncompleteCard {
                             EmptyStateCard(
@@ -238,6 +279,8 @@ struct SearchView: View {
                                         isDailyLimitReached: showsDailyLimitOverlay,
                                         canUseSecondThoughts: !hasUsedSecondThoughtsToday,
                                         isLoadingSecondThoughts: isLoadingSecondThoughts,
+                                        swipeActionEpoch: swipeActionEpoch,
+                                        undoEntrance: index == currentCardIndex ? pendingUndoEntrance : nil,
                                         programmaticSwipeDirection: index == currentCardIndex ? Binding(
                                             get: { programmaticSwipeDirection },
                                             set: { programmaticSwipeDirection = $0 }
@@ -247,6 +290,18 @@ struct SearchView: View {
                                         },
                                         onSwipeLeft: {
                                             handleSwipeLeft(profile: profile)
+                                        },
+                                        onSwipeCommitted: { direction in
+                                            guard index == currentCardIndex else { return }
+                                            prepareUndoableSwipe(
+                                                profile: profile,
+                                                action: direction == "right" ? .like : .pass
+                                            )
+                                        },
+                                        onUndoEntranceConsumed: {
+                                            if pendingUndoEntrance?.profileId == profile.userId {
+                                                pendingUndoEntrance = nil
+                                            }
                                         },
                                         onTap: {
                                             guard !showsDailyLimitOverlay else { return }
@@ -276,7 +331,7 @@ struct SearchView: View {
                                 
                                 Text("search.loading".localized)
                                     .font(.subheadline)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
                             }
                         } else {
                             // Pool exhausted (e.g. distance filter) - not the daily swipe limit.
@@ -292,10 +347,7 @@ struct SearchView: View {
                     .padding(.top, -120) // Lowered cards (less negative = lower position)
                     .padding(.bottom, 10) // Space for floating buttons
                     .background(
-                        Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .ignoresSafeArea()
+                        SpectRoomBackground()
                     )
                 }
                 
@@ -305,10 +357,12 @@ struct SearchView: View {
                         Spacer()
                         
                         ZStack {
-                            HStack(spacing: 20) {
+                            HStack(spacing: 14) {
                                 // Pass button (left side)
                                 Button(action: {
                                     guard !showsDailyLimitOverlay else { return }
+                                    guard currentCardIndex < profiles.count else { return }
+                                    prepareUndoableSwipe(profile: profiles[currentCardIndex], action: .pass)
                                     // Haptic feedback for pass
                                     let feedback = UINotificationFeedbackGenerator()
                                     feedback.notificationOccurred(.error)
@@ -322,11 +376,24 @@ struct SearchView: View {
                                 }
                                 .disabled(showsDailyLimitOverlay)
                                 
-                                Spacer()
+                                // Undo last swipe (center, smaller)
+                                Button(action: {
+                                    undoLastSwipeIfPossible()
+                                }) {
+                                    Image(systemName: "arrow.uturn.backward")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundColor(SpectRoomTheme.text)
+                                        .floatingCircleButtonStyle(colorScheme: colorScheme, size: 52)
+                                }
+                                .disabled(!canUseUndoButton || lastUndoableSwipe == nil || isUndoingSwipe || showsDailyLimitOverlay)
+                                .opacity(!canUseUndoButton || lastUndoableSwipe == nil || isUndoingSwipe ? 0.4 : 1)
+                                .accessibilityLabel("search.undo".localized)
                                 
                                 // Like button (right side)
                                 Button(action: {
                                     guard !showsDailyLimitOverlay else { return }
+                                    guard currentCardIndex < profiles.count else { return }
+                                    prepareUndoableSwipe(profile: profiles[currentCardIndex], action: .like)
                                     // Haptic feedback for like
                                     let feedback = UINotificationFeedbackGenerator()
                                     feedback.notificationOccurred(.success)
@@ -340,15 +407,6 @@ struct SearchView: View {
                                 }
                                 .disabled(showsDailyLimitOverlay)
                             }
-                            .padding(.horizontal, 260)
-                            
-                            // DEBUG: big centered count between X and heart (own layer, not clipped by padding)
-                            Text("\(max(0, profiles.count - currentCardIndex))")
-                                .font(.system(size: 28, weight: .black, design: .rounded))
-                                .foregroundColor(.yellow)
-                                .shadow(color: .black, radius: 0, x: 1, y: 1)
-                                .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 1)
-                                .allowsHitTesting(false)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.bottom, 100)
@@ -426,8 +484,10 @@ struct SearchView: View {
                 }
                 .zIndex(201)
             }
+            .spectRoomScreenBackground()
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarHidden(true)
+            .spectRoomNavigationChrome(colorScheme: colorScheme)
         }
         .overlay(alignment: .topLeading) {
             searchRadiusCornerButton
@@ -795,6 +855,10 @@ struct SearchView: View {
         hasMoreRemoteUsers = true
         cachedSwipeFilter = nil
         pendingDiscoverProfiles = []
+        lastUndoableSwipe = nil
+        canUseUndoButton = false
+        undoEnableWorkItem?.cancel()
+        pendingUndoEntrance = nil
         restoreDiscoverSessionIfAvailable()
     }
     
@@ -1090,19 +1154,60 @@ struct SearchView: View {
         ]
     }
     
+    private func prepareUndoableSwipe(profile: ProfileCard, action: SwipeType) {
+        undoEnableWorkItem?.cancel()
+        canUseUndoButton = false
+        lastUndoableSwipe = UndoableDiscoverSwipe(
+            profile: profile,
+            action: action,
+            cardIndexBeforeSwipe: currentCardIndex,
+            countedTowardDailyLimit: !isReviewingTodaysPasses
+        )
+    }
+    
+    private func scheduleUndoButtonEnable() {
+        undoEnableWorkItem?.cancel()
+        canUseUndoButton = false
+        let work = DispatchWorkItem {
+            // Only arm undo once the fly-off has finished and the next card is showing.
+            if lastUndoableSwipe != nil {
+                canUseUndoButton = true
+            }
+        }
+        undoEnableWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+    
     private func handleSwipeRight(profile: ProfileCard) {
         guard !showsDailyLimitOverlay else { return }
+        guard lastUndoableSwipe?.profile.userId == profile.userId,
+              lastUndoableSwipe?.action == .like else {
+            // Undo cancelled this swipe before it committed.
+            return
+        }
         
         // Advance the deck immediately - never wait on network for the next-card animation.
         print("✅ Liked: \(profile.name)")
-        if !isReviewingTodaysPasses {
+        let countedTowardDailyLimit = lastUndoableSwipe?.countedTowardDailyLimit == true
+        if countedTowardDailyLimit {
             dailySwipeCount = DiscoverDailyLimit.recordSwipe()
         }
+        let swipeToken = UUID()
+        activeSwipeTokens[profile.userId] = swipeToken
         moveToNextCard()
+        scheduleUndoButtonEnable()
         
         Task {
             do {
                 try await FirebaseAuthService.shared.recordSwipe(to: profile.userId, action: .like)
+                
+                let stillActive = await MainActor.run {
+                    activeSwipeTokens[profile.userId] == swipeToken
+                }
+                if !stillActive {
+                    try? await FirebaseAuthService.shared.undoLastSwipe(to: profile.userId)
+                    return
+                }
                 
                 guard let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid else { return }
                 
@@ -1118,6 +1223,13 @@ struct SearchView: View {
                     // Poll briefly in the background - UI already advanced.
                     for _ in 0..<4 {
                         try await Task.sleep(nanoseconds: 500_000_000)
+                        let stillActive = await MainActor.run {
+                            activeSwipeTokens[profile.userId] == swipeToken
+                        }
+                        if !stillActive {
+                            try? await FirebaseAuthService.shared.undoLastSwipe(to: profile.userId)
+                            return
+                        }
                         isMatch = try await FirebaseAuthService.shared.matchExists(with: profile.userId)
                         if isMatch { break }
                     }
@@ -1125,6 +1237,7 @@ struct SearchView: View {
                 
                 if isMatch {
                     await MainActor.run {
+                        guard activeSwipeTokens[profile.userId] == swipeToken else { return }
                         print("💕 Match with \(profile.name)! Showing popup")
                         appState.presentMatchNotification(otherUser: profile, matchId: matchId)
                     }
@@ -1139,19 +1252,95 @@ struct SearchView: View {
     
     private func handleSwipeLeft(profile: ProfileCard) {
         guard !showsDailyLimitOverlay else { return }
+        guard lastUndoableSwipe?.profile.userId == profile.userId,
+              lastUndoableSwipe?.action == .pass else {
+            // Undo cancelled this swipe before it committed.
+            return
+        }
         
         // Advance the deck immediately - never wait on network for the next-card animation.
         print("❌ Passed: \(profile.name)")
-        if !isReviewingTodaysPasses {
+        let countedTowardDailyLimit = lastUndoableSwipe?.countedTowardDailyLimit == true
+        if countedTowardDailyLimit {
             dailySwipeCount = DiscoverDailyLimit.recordSwipe()
         }
+        let swipeToken = UUID()
+        activeSwipeTokens[profile.userId] = swipeToken
         moveToNextCard()
+        scheduleUndoButtonEnable()
         
         Task {
             do {
                 try await FirebaseAuthService.shared.recordSwipe(to: profile.userId, action: .pass)
+                let stillActive = await MainActor.run {
+                    activeSwipeTokens[profile.userId] == swipeToken
+                }
+                if !stillActive {
+                    try? await FirebaseAuthService.shared.undoLastSwipe(to: profile.userId)
+                }
             } catch {
                 print("❌ Error handling swipe left: \(error)")
+            }
+        }
+    }
+    
+    private func undoLastSwipeIfPossible() {
+        guard canUseUndoButton else { return }
+        guard let undo = lastUndoableSwipe, !isUndoingSwipe, !showsDailyLimitOverlay else { return }
+        
+        isUndoingSwipe = true
+        canUseUndoButton = false
+        undoEnableWorkItem?.cancel()
+        lastUndoableSwipe = nil
+        activeSwipeTokens[undo.profile.userId] = UUID()
+        // Cancel any in-flight fly-off animation / delayed swipe handler.
+        swipeActionEpoch += 1
+        programmaticSwipeDirection = nil
+        
+        let feedback = UINotificationFeedbackGenerator()
+        feedback.notificationOccurred(.warning)
+        
+        if undo.countedTowardDailyLimit {
+            dailySwipeCount = DiscoverDailyLimit.undoLastSwipe()
+        }
+        
+        // Restore this profile as the top of the pile (still in the array after a swipe).
+        let topIndex: Int
+        if let existingIndex = profiles.firstIndex(where: { $0.userId == undo.profile.userId }) {
+            topIndex = existingIndex
+        } else {
+            let insertAt = min(currentCardIndex, profiles.count)
+            profiles.insert(undo.profile, at: insertAt)
+            topIndex = insertAt
+        }
+        
+        // Unique token so a delayed undo still triggers entrance (card remounts at center otherwise).
+        pendingUndoEntrance = UndoCardEntrance(
+            profileId: undo.profile.userId,
+            fromLeadingEdge: undo.action == .pass,
+            token: UUID()
+        )
+        // No spring on the index change — the card owns the fly-back animation.
+        currentCardIndex = topIndex
+        
+        syncDiscoverCache()
+        cachedSwipeFilter = nil
+        
+        if appState.newMatchProfile?.userId == undo.profile.userId {
+            appState.dismissMatchNotification()
+        }
+        appState.removeMatchFromCache(userId: undo.profile.userId)
+        
+        Task {
+            defer {
+                Task { @MainActor in
+                    isUndoingSwipe = false
+                }
+            }
+            do {
+                try await FirebaseAuthService.shared.undoLastSwipe(to: undo.profile.userId)
+            } catch {
+                print("❌ Error undoing swipe: \(error)")
             }
         }
     }
@@ -1322,16 +1511,13 @@ struct SearchView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .lineLimit(1)
             }
-            .foregroundColor(.primary)
+            .foregroundColor(SpectRoomTheme.text)
             .padding(.horizontal, 12)
             .frame(height: 44)
-            .background(Color(.systemBackground))
-            .clipShape(Capsule())
-            .shadow(
-                color: colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.2),
-                radius: 8,
-                x: 0,
-                y: 4
+            .background(SpectRoomTheme.card, in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(SpectRoomTheme.floatingPillBorder(for: colorScheme), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -1362,7 +1548,7 @@ struct SearchView: View {
         } label: {
             Text(option.emoji)
                 .font(.system(size: 20))
-                .floatingCircleButtonStyle(colorScheme: colorScheme, size: 44)
+                .floatingCircleButtonStyle(colorScheme: colorScheme, size: 44, brighterFrame: true)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("profile.my.energy.level".localized)
@@ -1379,7 +1565,7 @@ struct EmptyStateCard: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
+                .fill(SpectRoomTheme.card)
                 .frame(width: cardWidth, height: cardHeight)
                 .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
             
@@ -1387,13 +1573,13 @@ struct EmptyStateCard: View {
                 if isProfileIncomplete {
                     Text("search.empty.complete.profile.title".localized)
                         .font(.system(size: 24, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
+                        .foregroundColor(SpectRoomTheme.text)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 28)
                     
                     Text("search.empty.complete.profile.message".localized)
                         .font(.system(size: 17, weight: .medium, design: .rounded))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 28)
                     
@@ -1411,7 +1597,7 @@ struct EmptyStateCard: View {
                 } else {
                     Text("search.empty.no.more.profiles".localized)
                         .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
+                        .foregroundColor(SpectRoomTheme.text)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 28)
                 }
@@ -1427,9 +1613,13 @@ struct SwipeableProfileCard: View {
     var isDailyLimitReached: Bool = false
     var canUseSecondThoughts: Bool = false
     var isLoadingSecondThoughts: Bool = false
+    var swipeActionEpoch: Int = 0
+    var undoEntrance: UndoCardEntrance? = nil
     @Binding var programmaticSwipeDirection: String?
     let onSwipeRight: () -> Void
     let onSwipeLeft: () -> Void
+    var onSwipeCommitted: ((String) -> Void)? = nil
+    var onUndoEntranceConsumed: (() -> Void)? = nil
     let onTap: () -> Void
     var onSecondThoughtsTap: (() -> Void)? = nil
     
@@ -1449,6 +1639,47 @@ struct SwipeableProfileCard: View {
     @State private var programmaticDragOffset = CGSize.zero
     @State private var isProcessingProgrammaticSwipe = false
     @State private var showingDailyLimitWhy = false
+    @State private var lastPlayedUndoEntranceToken: UUID?
+    
+    /// Snap off-screen then spring home. Works for immediate and delayed undo.
+    private func playUndoEntranceIfNeeded() -> Bool {
+        guard isTopCard,
+              let entrance = undoEntrance,
+              entrance.profileId == profile.userId,
+              entrance.token != lastPlayedUndoEntranceToken else {
+            return false
+        }
+        
+        lastPlayedUndoEntranceToken = entrance.token
+        isProcessingProgrammaticSwipe = false
+        isDragging = false
+        
+        let screenWidth = UIScreen.main.bounds.width
+        let startX = entrance.fromLeadingEdge ? -screenWidth * 1.15 : screenWidth * 1.15
+        let startRotation = entrance.fromLeadingEdge ? -28.0 : 28.0
+        
+        var placeOffscreen = Transaction()
+        placeOffscreen.disablesAnimations = true
+        withTransaction(placeOffscreen) {
+            programmaticDragOffset = CGSize(width: startX, height: 0)
+            dragOffset = .zero
+            rotationAngle = startRotation
+        }
+        
+        // Next run loop so a remounted card paints off-screen before springing in.
+        // Keep entrance token until the spring finishes so nothing else resets offsets mid-flight.
+        DispatchQueue.main.async {
+            withAnimation(.spring(response: 0.48, dampingFraction: 0.78)) {
+                programmaticDragOffset = .zero
+                rotationAngle = 0
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+            onUndoEntranceConsumed?()
+        }
+        
+        return true
+    }
     
     var body: some View {
         ZStack {
@@ -1512,18 +1743,18 @@ struct SwipeableProfileCard: View {
                     height: dragOffset.height + programmaticDragOffset.height
                 )
                 
-                // X indicator for left swipe (pass)
+                // Pass indicator for left swipe
                 if combinedOffset.width < 0 {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 160))
+                    Text("search.pass".localized)
+                        .font(.system(size: 72, weight: .heavy))
                         .foregroundColor(.red)
                         .opacity(min(abs(combinedOffset.width) / 170.0, 1.0))
                 }
                 
-                // Heart indicator for right swipe (like)
+                // Like indicator for right swipe
                 if combinedOffset.width > 0 {
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: 160))
+                    Text("search.like".localized)
+                        .font(.system(size: 72, weight: .heavy))
                         .foregroundColor(.green)
                         .opacity(min(combinedOffset.width / 170.0, 1.0))
                 }
@@ -1548,8 +1779,14 @@ struct SwipeableProfileCard: View {
             Text("search.daily.limit.why.message".localized)
         }
         .onAppear {
-            // Reset state when card becomes the top card
             if isTopCard {
+                if playUndoEntranceIfNeeded() {
+                    return
+                }
+                // Don't snap-reset while an entrance is pending for this profile.
+                if undoEntrance?.profileId == profile.userId {
+                    return
+                }
                 programmaticDragOffset = .zero
                 dragOffset = .zero
                 rotationAngle = 0
@@ -1557,13 +1794,39 @@ struct SwipeableProfileCard: View {
             }
         }
         .onChange(of: isTopCard) { newValue in
-            // Reset state when card becomes the top card
             if newValue {
+                if playUndoEntranceIfNeeded() {
+                    return
+                }
+                if undoEntrance?.profileId == profile.userId {
+                    return
+                }
                 programmaticDragOffset = .zero
                 dragOffset = .zero
                 rotationAngle = 0
                 isProcessingProgrammaticSwipe = false
             }
+        }
+        .onChange(of: undoEntrance?.token) { _ in
+            _ = playUndoEntranceIfNeeded()
+        }
+        .task(id: undoEntrance?.token) {
+            // Backup trigger for delayed undos where onAppear raced the entrance value.
+            _ = playUndoEntranceIfNeeded()
+        }
+        .onChange(of: swipeActionEpoch) { _ in
+            guard isTopCard else { return }
+            // Don't clobber an in-progress undo entrance.
+            if let entrance = undoEntrance, entrance.profileId == profile.userId {
+                return
+            }
+            // Undo / cancel snapped the card back before the fly-off finished.
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                programmaticDragOffset = .zero
+                dragOffset = .zero
+                rotationAngle = 0
+            }
+            isProcessingProgrammaticSwipe = false
         }
         .onChange(of: programmaticSwipeDirection) { newDirection in
             guard !isDailyLimitReached else {
@@ -1577,6 +1840,7 @@ struct SwipeableProfileCard: View {
             
             // Store the direction locally before clearing
             let swipeDirection = direction
+            let epochAtStart = swipeActionEpoch
             
             // Reset programmatic drag state
             programmaticDragOffset = .zero
@@ -1595,6 +1859,10 @@ struct SwipeableProfileCard: View {
             
             // Step 2: After indicator is fully visible (full opacity), animate card off-screen
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                guard swipeActionEpoch == epochAtStart else {
+                    isProcessingProgrammaticSwipe = false
+                    return
+                }
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                     if swipeDirection == "right" {
                         programmaticDragOffset = CGSize(width: 1000, height: 0)
@@ -1607,6 +1875,10 @@ struct SwipeableProfileCard: View {
                 
                 // Call handler after animation starts
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    guard swipeActionEpoch == epochAtStart else {
+                        isProcessingProgrammaticSwipe = false
+                        return
+                    }
                     if swipeDirection == "right" {
                         onSwipeRight()
                     } else if swipeDirection == "left" {
@@ -1643,16 +1915,19 @@ struct SwipeableProfileCard: View {
                         isDragging = false
                         
                         let threshold: CGFloat = 100
+                        let epochAtStart = swipeActionEpoch
                         
                         // Only complete swipe action if user lifted their hand (drag ended)
                         if value.translation.width > threshold {
                             // Swipe right - Like
+                            onSwipeCommitted?("right")
                             withAnimation(.spring()) {
                                 dragOffset = CGSize(width: 1000, height: 0)
                                 rotationAngle = 30
                             }
                             // Action only executes after user lifts hand (onEnded)
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                guard swipeActionEpoch == epochAtStart else { return }
                                 // Double-check: only execute if user has lifted hand
                                 if !isDragging {
                                     onSwipeRight()
@@ -1660,12 +1935,14 @@ struct SwipeableProfileCard: View {
                             }
                         } else if value.translation.width < -threshold {
                             // Swipe left - Pass
+                            onSwipeCommitted?("left")
                             withAnimation(.spring()) {
                                 dragOffset = CGSize(width: -1000, height: 0)
                                 rotationAngle = -30
                             }
                             // Action only executes after user lifts hand (onEnded)
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                guard swipeActionEpoch == epochAtStart else { return }
                                 // Double-check: only execute if user has lifted hand
                                 if !isDragging {
                                     onSwipeLeft()
@@ -1688,7 +1965,7 @@ struct SwipeableProfileCard: View {
         ZStack {
             // Card background with fixed width
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
+                .fill(SpectRoomTheme.card)
                 .frame(width: cardWidth, height: cardHeight)
                 .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
             
@@ -1807,7 +2084,7 @@ struct SwipeableProfileCard: View {
                 VStack(alignment: .leading, spacing: 30) {
                     Text(profile.bio)
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.primary)
+                        .foregroundColor(SpectRoomTheme.text)
                         .lineLimit(2)
                         .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1839,7 +2116,7 @@ struct SwipeableProfileCard: View {
                          + Text("search.match.label".localized)
                          + Text(String(format: "search.match.suffix".localized, profileFirstName)))
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                             .lineLimit(2)
                     }
                 }
@@ -2166,13 +2443,11 @@ struct UserProfileModal: View {
                 .padding(.bottom, 100) // Increased bottom padding
             }
             .background(
-                Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .ignoresSafeArea()
+                SpectRoomBackground()
             )
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
+            .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text(profileTitle)
@@ -2346,7 +2621,7 @@ struct UserProfileModal: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -2479,7 +2754,7 @@ struct UserProfileModal: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: ProfilePhotoStyle.cardCorner, style: .continuous)
-                .fill(Color(.systemBackground))
+                .fill(SpectRoomTheme.card)
         )
     }
     
@@ -2496,7 +2771,7 @@ struct UserProfileModal: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -2514,7 +2789,7 @@ struct UserProfileModal: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -2538,7 +2813,7 @@ struct UserProfileModal: View {
                         .foregroundColor(levelColor)
                     Text(energyOption.subtitle)
                         .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(.primary)
+                        .foregroundColor(SpectRoomTheme.text)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
@@ -2556,7 +2831,7 @@ struct UserProfileModal: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -2580,7 +2855,7 @@ struct UserProfileModal: View {
                     .fontWeight(.semibold)
                 Text(formattedLifestyle(displayProfile.lifestyle))
                     .font(.body)
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
                     .blueFieldStyle()
             }
             
@@ -2590,7 +2865,7 @@ struct UserProfileModal: View {
                     .fontWeight(.semibold)
                 Text(formattedBodyType(displayProfile.bodyType))
                     .font(.body)
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
                     .blueFieldStyle()
             }
             
@@ -2600,7 +2875,7 @@ struct UserProfileModal: View {
                     .fontWeight(.semibold)
                 Text(formattedIdealFirstDate(displayProfile.idealFirstDate))
                     .font(.body)
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
                     .blueFieldStyle()
             }
             
@@ -2610,13 +2885,13 @@ struct UserProfileModal: View {
                     .fontWeight(.semibold)
                 Text(SensoryPreferenceOption.formattedTitles(displayProfile.sensoryPreferences))
                     .font(.body)
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
                     .blueFieldStyle()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -2631,18 +2906,18 @@ struct UserProfileModal: View {
             if displayProfile.interests.isEmpty {
                 Text("profile.no.interests".localized)
                     .font(.body)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
                     .blueFieldStyle()
             } else {
                 Text(displayProfile.interests.map { localizedInterest($0) }.joined(separator: ", "))
                     .font(.body)
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
                     .blueFieldStyle()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -2673,7 +2948,7 @@ struct UserProfileModal: View {
                             }
                         }
                         .font(.body)
-                        .foregroundColor(.primary)
+                        .foregroundColor(SpectRoomTheme.text)
                         .italic()
                         .blueFieldStyle()
                     }
@@ -2685,7 +2960,7 @@ struct UserProfileModal: View {
                         HStack(alignment: .center, spacing: 8) {
                             Text(lookingForText)
                                 .font(.body)
-                                .foregroundColor(.primary)
+                                .foregroundColor(SpectRoomTheme.text)
                                 .italic()
                                 .lineLimit(1)
                                 .truncationMode(.tail)
@@ -2709,7 +2984,7 @@ struct UserProfileModal: View {
                     if hasCustomPreferredAge {
                         Text(String(format: "profile.preferred.age".localized, "\(displayProfile.preferredAgeMin)", "\(displayProfile.preferredAgeMax)"))
                             .font(.body)
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                             .italic()
                             .blueFieldStyle()
                     }
@@ -2717,14 +2992,14 @@ struct UserProfileModal: View {
             } else {
                 Text("profile.no.preferences".localized)
                     .font(.body)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
                     .italic()
                     .blueFieldStyle()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -2882,7 +3157,7 @@ struct UserProfileModal: View {
                      + Text("search.match.label".localized)
                      + Text(String(format: "search.match.suffix".localized, profileFirstName)))
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.primary)
+                        .foregroundColor(SpectRoomTheme.text)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     
@@ -2894,7 +3169,7 @@ struct UserProfileModal: View {
             }
             .blueFieldStyle()
             .padding()
-            .background(Color(.secondarySystemGroupedBackground))
+            .background(SpectRoomTheme.card)
             .cornerRadius(12)
             .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
         }
@@ -3209,7 +3484,7 @@ struct NewMessageModal: View {
                     HStack {
                         Text("matches.message.label".localized)
                             .font(.headline)
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                         
                         Spacer()
                         
@@ -3235,7 +3510,7 @@ struct NewMessageModal: View {
                     TextEditor(text: $messageText)
                         .frame(minHeight: 120)
                         .padding(12)
-                        .background(Color(.systemGray6))
+                        .background(SpectRoomTheme.card)
                         .cornerRadius(12)
                         .overlay(
                             RoundedRectangle(cornerRadius: 12)
@@ -3268,12 +3543,10 @@ struct NewMessageModal: View {
                 .padding(.bottom, 20)
             }
             .background(
-                Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .ignoresSafeArea()
+                SpectRoomBackground()
             )
             .navigationBarTitleDisplayMode(.inline)
+            .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 2) {
@@ -3281,7 +3554,7 @@ struct NewMessageModal: View {
                             .font(.headline)
                         Text(String(format: "matches.new.message.to".localized, profile.name))
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -3416,10 +3689,7 @@ struct PreMessageOptionsModal: View {
         NavigationView {
             ZStack {
                 // Background
-                Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .ignoresSafeArea()
+                SpectRoomBackground()
                 
                 ScrollView {
                     VStack(spacing: 12) {
@@ -3434,18 +3704,18 @@ struct PreMessageOptionsModal: View {
                                 HStack(alignment: .top, spacing: 12) {
                                     Text(messageKey.localized)
                                         .font(.body)
-                                        .foregroundColor(.primary)
+                                        .foregroundColor(SpectRoomTheme.text)
                                         .multilineTextAlignment(.leading)
                                         .fixedSize(horizontal: false, vertical: true)
                                         .lineLimit(nil)
                                     Spacer()
                                     Image(systemName: "chevron.right")
                                         .font(.caption)
-                                        .foregroundColor(.secondary)
+                                        .foregroundColor(SpectRoomTheme.secondaryText)
                                         .padding(.top, 2)
                                 }
                                 .padding()
-                                .background(Color(.secondarySystemGroupedBackground))
+                                .background(SpectRoomTheme.card)
                                 .cornerRadius(12)
                             }
                             .buttonStyle(PlainButtonStyle())
@@ -3471,6 +3741,7 @@ struct PreMessageOptionsModal: View {
                 )
             }
             .navigationBarTitleDisplayMode(.inline)
+            .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 2) {
@@ -3478,7 +3749,7 @@ struct PreMessageOptionsModal: View {
                             .font(.headline)
                         Text("matches.pre.message.subtitle".localized)
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                             .padding(.bottom, -50)
                     }
 

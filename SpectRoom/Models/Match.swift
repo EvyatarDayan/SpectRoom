@@ -136,7 +136,7 @@ struct ProfileCard: Codable {
     let shareIdealFirstDate: Bool
     let sensoryPreferences: [String]
     let shareSensoryPreferences: Bool
-    let energyLevel: Int
+    var energyLevel: Int
     let matchPercentage: Int
     
     init(

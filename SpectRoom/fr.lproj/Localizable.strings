@@ -117,6 +117,19 @@
 "settings.authentication.section.title" = "Authentification";
 "settings.account.section.title" = "Compte";
 "settings.authentication.signout.subtitle" = "Déconnectez-vous de votre compte";
+"settings.export.messages" = "Exporter les messages";
+"settings.export.messages.description" = "Exporter les messages des 6 derniers mois";
+"settings.export.messages.file.title" = "Export des messages SpectRoom";
+"settings.export.messages.exported.at" = "Exporté : %@";
+"settings.export.messages.account" = "Compte : %@";
+"settings.export.messages.conversation.with" = "Conversation avec %@";
+"settings.export.messages.you" = "Vous";
+"settings.export.messages.voice" = "[Pièce jointe vocale]";
+"settings.export.messages.voice.duration" = "[Pièce jointe vocale, %d:%02d]";
+"settings.export.messages.photo" = "[Pièce jointe photo]";
+"settings.export.messages.video" = "[Pièce jointe vidéo]";
+"settings.export.messages.empty" = "Vous n’avez pas encore de messages à exporter.";
+"settings.export.messages.error" = "Impossible d’exporter vos messages. Veuillez réessayer.";
 
 "settings.delete.account.section.title" = "Supprimer le compte";
 "settings.delete.account.button" = "Supprimer le Compte";
@@ -326,6 +339,7 @@
 "search.no.more.profiles.description" = "Revenez plus tard pour de nouvelles personnes!";
 "search.pass" = "Passer";
 "search.like" = "J'aime";
+"search.undo" = "Annuler le dernier swipe";
 "search.view.profile" = "Voir le Profil";
 "search.new.message" = "Nouveau Message";
 "search.distance.km" = "%@ km de distance";

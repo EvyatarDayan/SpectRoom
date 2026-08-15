@@ -17,10 +17,7 @@ struct HelpSupportView: View {
         NavigationView {
             ZStack {
                 // Background
-                Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .ignoresSafeArea()
+                SpectRoomBackground()
                 
                 ScrollView {
                     VStack(spacing: 40) {
@@ -30,7 +27,7 @@ struct HelpSupportView: View {
                         Text("We'd love to hear from you!")
                             .font(.system(size: 24, weight: .bold))
                             .multilineTextAlignment(.center)
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                             .padding(.horizontal, 24)
                             .padding(.top, 70)
                         
@@ -38,7 +35,7 @@ struct HelpSupportView: View {
                         Text("Whether you have questions, feedback, or just want to say hi, feel free to reach out.")
                             .font(.body)
                             .multilineTextAlignment(.center)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                             .padding(.horizontal, 24)
                         
                         // Top divider
@@ -86,7 +83,7 @@ struct HelpSupportView: View {
                         // OR separator
                         Text("OR")
                             .font(.subheadline)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                             .padding(.top, 6)
                             .padding(.bottom, 6)
                         
@@ -113,7 +110,7 @@ struct HelpSupportView: View {
                             .font(.body)
                             .fontWeight(.semibold)
                             .multilineTextAlignment(.center)
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                             .padding(.horizontal, 24)
                         
                         Spacer().frame(height: 24)
@@ -123,6 +120,7 @@ struct HelpSupportView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("Help and support")
@@ -183,10 +181,7 @@ struct ContactFormView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .ignoresSafeArea()
+                SpectRoomBackground()
                 
                 ScrollView {
                     VStack(spacing: 16) {
@@ -203,12 +198,12 @@ struct ContactFormView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Message")
                                 .font(.subheadline)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                             ZStack(alignment: .topLeading) {
                                 TextEditor(text: $message)
                                     .frame(minHeight: 140)
                                     .padding(10)
-                                    .background(Color(.systemBackground))
+                                    .background(SpectRoomTheme.card)
                                     .cornerRadius(12)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
@@ -241,6 +236,7 @@ struct ContactFormView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("Contact form")
@@ -371,11 +367,11 @@ Message:
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(SpectRoomTheme.secondaryText)
             TextField(title, text: text)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 12)
-                .background(Color(.systemBackground))
+                .background(SpectRoomTheme.card)
                 .cornerRadius(12)
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)

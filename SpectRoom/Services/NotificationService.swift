@@ -18,6 +18,12 @@ class NotificationService: NSObject, ObservableObject {
         return AppStateManager.shared.shouldSuppressMessageNotification(for: senderId)
     }
     
+    /// Match pushes are only for closed/backgrounded app — in foreground the match popup is enough.
+    static func shouldSuppressForegroundMatchNotification(userInfo: [AnyHashable: Any]) -> Bool {
+        guard notificationString(userInfo, key: "type") == "match" else { return false }
+        return UIApplication.shared.applicationState == .active
+    }
+    
     /// FCM data values usually arrive as strings in notification userInfo.
     static func notificationString(_ userInfo: [AnyHashable: Any], key: String) -> String? {
         if let value = userInfo[key] as? String {
@@ -66,8 +72,12 @@ class NotificationService: NSObject, ObservableObject {
         }
     }
     
-    /// Send a local push notification for a new match
+    /// Send a local push notification for a new match (background / closed app only).
     func sendNewMatchNotification(matchName: String, matchId: String) {
+        guard UIApplication.shared.applicationState != .active else {
+            print("📱 App is active — skipping match push (in-app popup will show)")
+            return
+        }
         guard areNotificationsEnabled() else {
             print("📱 Notifications disabled in settings, skipping push notification")
             return
@@ -122,7 +132,8 @@ class NotificationService: NSObject, ObservableObject {
             if firstName.isEmpty {
                 firstName = senderName
             }
-            let preview = messageContent.count > 50 ? String(messageContent.prefix(50)) + "..." : messageContent
+            let previewSource = Self.sanitizedMessagePreview(messageContent)
+            let preview = previewSource.count > 50 ? String(previewSource.prefix(50)) + "..." : previewSource
             content.title = "message.notification.push.title".localized
             content.body = String(format: "message.notification.push.body".localized, firstName, preview)
             content.sound = .default
@@ -146,6 +157,24 @@ class NotificationService: NSObject, ObservableObject {
                 print("❌ Failed to send message notification: \(error.localizedDescription)")
             }
         }
+    }
+    
+    /// Avoid showing raw Firebase Storage URLs in notification banners.
+    private static func sanitizedMessagePreview(_ content: String) -> String {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        if lower.contains("firebasestorage.googleapis.com")
+            || lower.hasPrefix("gs://")
+            || (lower.hasPrefix("http") && (lower.contains("/o/") || lower.contains(".m4a") || lower.contains(".mp3") || lower.contains(".caf") || lower.contains(".wav"))) {
+            if lower.contains(".m4a") || lower.contains(".mp3") || lower.contains(".caf") || lower.contains(".wav") || lower.contains("voice") {
+                return "messages.preview.voice".localized
+            }
+            if lower.contains(".jpg") || lower.contains(".jpeg") || lower.contains(".png") || lower.contains(".heic") || lower.contains("photo") || lower.contains("image") {
+                return "messages.preview.photo".localized
+            }
+            return "messages.preview.voice".localized
+        }
+        return trimmed
     }
     
     /// Request notification permission

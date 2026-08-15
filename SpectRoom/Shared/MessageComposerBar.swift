@@ -48,7 +48,7 @@ struct MessageComposerBar: View {
             .frame(height: fieldHeight)
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
-            .background(Color(.systemBackground))
+            .background(SpectRoomTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             
             if hasText {
@@ -73,7 +73,7 @@ struct MessageComposerBar: View {
                 Button(action: onCamera) {
                     Image(systemName: "paperclip")
                         .font(.system(size: 20, weight: .light))
-                        .foregroundColor(.primary)
+                        .foregroundColor(SpectRoomTheme.text)
                         .frame(width: 34, height: 34)
                 }
                 .disabled(isDisabled)

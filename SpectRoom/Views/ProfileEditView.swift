@@ -261,10 +261,7 @@ struct ProfileEditView: View {
                     .animation(.easeInOut(duration: 0.25), value: isCompletionBarVisible)
                     .profileEditScrollEdgeChrome()
                     .background(
-                        Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .ignoresSafeArea(edges: .bottom)
+                        SpectRoomBackground()
                     )
                     .opacity(isDataLoaded ? 1.0 : 0.3)
                     .disabled(!isDataLoaded)
@@ -276,10 +273,10 @@ struct ProfileEditView: View {
                                 .tint(.blue)
                             Text("profile.edit.loading".localized)
                                 .font(.headline)
-                                .foregroundColor(.primary)
+                                .foregroundColor(SpectRoomTheme.text)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color(.systemGroupedBackground).opacity(0.8))
+                        .background(SpectRoomTheme.card.opacity(0.8))
                     }
                 }
                 .onChange(of: scrollToValidationSection) { _, section in
@@ -299,9 +296,7 @@ struct ProfileEditView: View {
             }
             .navigationTitle(isMandatoryCompletion ? "profile.edit.complete.title".localized : "profile.edit.title".localized)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color(.systemBackground), for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(colorScheme, for: .navigationBar)
+            .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(isMandatoryCompletion ? "common.close".localized : "profile.edit.cancel".localized) {
@@ -406,10 +401,10 @@ struct ProfileEditView: View {
                         .tint(.blue)
                     Text("profile.edit.saving".localized)
                         .font(.headline)
-                        .foregroundColor(.primary)
+                        .foregroundColor(SpectRoomTheme.text)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(.systemGroupedBackground).opacity(0.8))
+                .background(SpectRoomTheme.card.opacity(0.8))
             }
         }
         .overlay {
@@ -444,7 +439,7 @@ struct ProfileEditView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: ProfilePhotoStyle.cardCorner, style: .continuous)
-                .fill(Color(.systemBackground))
+                .fill(SpectRoomTheme.card)
         )
         .overlay(validationFrame(isValid: isProfilePhotoValid))
     }
@@ -515,7 +510,7 @@ struct ProfileEditView: View {
             
             Text(displayName)
                 .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.secondary)
+                .foregroundColor(SpectRoomTheme.secondaryText)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 14)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -536,7 +531,7 @@ struct ProfileEditView: View {
             
             Text(displayEmail)
                 .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.secondary)
+                .foregroundColor(SpectRoomTheme.secondaryText)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 14)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -552,11 +547,11 @@ struct ProfileEditView: View {
             
             Text("profile.email.privacy.notice".localized)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(SpectRoomTheme.secondaryText)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .overlay(validationFrame(isValid: isNameValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
@@ -592,7 +587,7 @@ struct ProfileEditView: View {
                     VStack(spacing: 6) {
                         Text(formattedBirthDate(dateOfBirth))
                             .font(.system(size: 20, weight: .semibold, design: .rounded))
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                         
                         Text(String(format: "profile.edit.my.age".localized, "\(age)"))
                             .font(.system(size: 15, weight: .medium))
@@ -605,7 +600,7 @@ struct ProfileEditView: View {
                         Spacer()
                         Image(systemName: isDatePickerExpanded ? "chevron.up" : "chevron.down")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                     }
                 }
                 .padding(.vertical, 14)
@@ -636,7 +631,7 @@ struct ProfileEditView: View {
                 .clipped()
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color(.systemGroupedBackground))
+                        .fill(SpectRoomTheme.card)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -647,7 +642,7 @@ struct ProfileEditView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .overlay(validationFrame(isValid: isAgeValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
@@ -663,7 +658,7 @@ struct ProfileEditView: View {
             
             HStack {
                 Text(location.isEmpty ? "profile.edit.location.placeholder".localized : location)
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
                 Spacer()
@@ -689,11 +684,11 @@ struct ProfileEditView: View {
             
             Text("profile.location.privacy.notice".localized)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(SpectRoomTheme.secondaryText)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .overlay(validationFrame(isValid: isLocationValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
@@ -709,7 +704,7 @@ struct ProfileEditView: View {
             VStack(alignment: .leading, spacing: 8) {
                 TextEditor(text: bioTextBinding)
                     .frame(height: 200)
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
                     .scrollContentBackground(.hidden)
                     .padding()
                     .background(
@@ -731,7 +726,7 @@ struct ProfileEditView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .overlay(validationFrame(isValid: isBioValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
@@ -757,7 +752,7 @@ struct ProfileEditView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -782,7 +777,7 @@ struct ProfileEditView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -811,7 +806,7 @@ struct ProfileEditView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .overlay(validationFrame(isValid: isIdealFirstDateValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
@@ -854,7 +849,7 @@ struct ProfileEditView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -1039,7 +1034,7 @@ struct ProfileEditView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .overlay(validationFrame(isValid: isGenderValid && isInterestedInValid && isLookingForValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
@@ -1075,7 +1070,7 @@ struct ProfileEditView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .overlay(validationFrame(isValid: isInterestsValid))
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
@@ -1194,9 +1189,7 @@ struct ProfileEditView: View {
     
     private var profileCompletionBar: some View {
         let progressColor: Color = profileCompletionPercentage == 100 ? .green : .blue
-        let barBackground = colorScheme == .dark
-            ? Color(.secondarySystemGroupedBackground)
-            : Color(.systemGray6)
+        let barBackground = SpectRoomTheme.card
         
         return VStack(spacing: 0) {
             Divider()
@@ -1210,7 +1203,7 @@ struct ProfileEditView: View {
                     Text(String(format: "profile.edit.completion".localized, profileCompletionPercentage))
                         .font(.subheadline)
                         .fontWeight(.semibold)
-                        .foregroundColor(.primary)
+                        .foregroundColor(SpectRoomTheme.text)
                     
                     Spacer(minLength: 8)
                     

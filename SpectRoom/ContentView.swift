@@ -110,13 +110,13 @@ struct ContentView: View {
                 senderName: appState.newMessageSenderName,
                 senderProfilePhotoURL: appState.newMessageSenderPhotoURL,
                 onOpen: {
-                    appState.dismissNewMessageNotification()
                     let senderId = appState.newMessageSenderId
+                    appState.dismissNewMessageNotification()
                     selectedTab = 0 // Navigate to Messages tab
-                    // Wait for MessagesView to be ready before setting conversationToOpenSenderId
+                    // Wait for MessagesView to be ready before opening the conversation
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                        appState.conversationToOpenSenderId = senderId
-                        print("💬 Set conversationToOpenSenderId to: \(senderId) after navigation delay")
+                        appState.openConversationFromNotification(senderId: senderId)
+                        print("💬 Opened conversation from in-app notification for: \(senderId)")
                     }
                 },
                 onLater: {
@@ -254,7 +254,7 @@ struct CustomFooterMenu: View {
             }
             .padding(.horizontal, 15)
             .padding(.vertical, 18)
-            .background(Color(.systemBackground))
+            .background(SpectRoomTheme.card)
             .cornerRadius(15, corners: [.topLeft, .topRight])
             .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: -5)
             
@@ -337,12 +337,20 @@ extension View {
         clipShape(RoundedCorner(radius: radius, corners: corners))
     }
     
-    func floatingCircleButtonStyle(colorScheme: ColorScheme, size: CGFloat = 60) -> some View {
-        let shadowColor = colorScheme == .dark ? Color.white.opacity(0.35) : Color.black.opacity(0.2)
+    func floatingCircleButtonStyle(
+        colorScheme: ColorScheme,
+        size: CGFloat = 60,
+        brighterFrame: Bool = false
+    ) -> some View {
+        let border = brighterFrame
+            ? SpectRoomTheme.floatingPillBorder(for: colorScheme)
+            : SpectRoomTheme.subtleBorder(for: colorScheme)
         return frame(width: size, height: size)
-            .background(Color(.systemBackground))
-            .clipShape(Circle())
-            .shadow(color: shadowColor, radius: 8, x: 0, y: 4)
+            .background(SpectRoomTheme.card, in: Circle())
+            .overlay(
+                Circle()
+                    .stroke(border, lineWidth: 1)
+            )
     }
 }
 

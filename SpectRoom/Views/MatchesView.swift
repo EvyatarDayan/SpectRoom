@@ -70,6 +70,7 @@ struct MatchesView: View {
             }
             .background(colorsBackground)
             .navigationBarTitleDisplayMode(.inline)
+            .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("matches.title".localized)
@@ -84,7 +85,12 @@ struct MatchesView: View {
         }
         .onAppear {
             loadMatches()
+            refreshMatchEnergyLevels()
             appState.refreshBlockedByUsers()
+        }
+        .onChange(of: selectedTab) { tab in
+            guard tab == 1 else { return }
+            refreshMatchEnergyLevels()
         }
         .sheet(isPresented: Binding(
             get: {
@@ -128,12 +134,19 @@ struct MatchesView: View {
                     self.matches = cached
                     self.isLoading = false
                 }
+                await appState.refreshCachedMatchEnergyLevels()
             } catch {
                 print("❌ Error loading matches: \(error)")
                 await MainActor.run {
                     self.isLoading = false
                 }
             }
+        }
+    }
+
+    private func refreshMatchEnergyLevels() {
+        Task {
+            await appState.refreshCachedMatchEnergyLevels()
         }
     }
 
@@ -162,10 +175,7 @@ struct MatchesView: View {
 
 private extension MatchesView {
     var colorsBackground: some View {
-        Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-            .resizable()
-            .aspectRatio(contentMode: .fill)
-            .ignoresSafeArea()
+        SpectRoomBackground()
     }
 
     var loadingView: some View {
@@ -175,7 +185,7 @@ private extension MatchesView {
                 .scaleEffect(1.4)
             Text("matches.loading".localized)
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(SpectRoomTheme.secondaryText)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -206,11 +216,11 @@ private extension MatchesView {
     var matchesSearchBar: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .foregroundColor(.secondary)
+                .foregroundColor(SpectRoomTheme.secondaryText)
             
             TextField("matches.search.placeholder".localized, text: $searchText)
                 .textFieldStyle(.plain)
-                .foregroundColor(.primary)
+                .foregroundColor(SpectRoomTheme.text)
                 .autocorrectionDisabled(true)
                 .textInputAutocapitalization(.never)
                 .focused($isSearchFieldFocused)
@@ -221,7 +231,7 @@ private extension MatchesView {
                     isSearchFieldFocused = true
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("matches.search.clear".localized)
@@ -231,7 +241,7 @@ private extension MatchesView {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.systemBackground))
+                .fill(SpectRoomTheme.card)
                 .shadow(color: Color.black.opacity(0.08), radius: 4, x: 0, y: 1)
         )
     }
@@ -246,11 +256,11 @@ private extension MatchesView {
                 
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 22, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
                     .padding(6)
                     .background(
                         Circle()
-                            .fill(Color(.systemBackground))
+                            .fill(SpectRoomTheme.card)
                     )
                     .offset(x: 6, y: 6)
             }
@@ -264,7 +274,7 @@ private extension MatchesView {
             
             Text("matches.search.no.results.hint".localized)
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(SpectRoomTheme.secondaryText)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
             Spacer()
@@ -363,10 +373,10 @@ private extension MatchesView {
                 Text("matches.empty".localized)
                     .font(.title2)
                     .fontWeight(.medium)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
                 Text("matches.empty.description".localized)
                     .font(.body)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
                 Button(action: {
@@ -416,17 +426,15 @@ struct MatchGridCard: View {
     }
     
     private var cardBackground: Color {
-        colorScheme == .dark
-            ? Color(white: 0.20)
-            : Color(.secondarySystemGroupedBackground)
+        SpectRoomTheme.card
     }
     
     private var nameColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.92) : .primary
+        SpectRoomTheme.text
     }
     
     private var distanceColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.62) : .secondary
+        SpectRoomTheme.secondaryText
     }
     
     private var photoBorderColor: Color {

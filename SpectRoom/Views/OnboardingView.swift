@@ -58,11 +58,6 @@ struct OnboardingView: View {
     
     var body: some View {
         ZStack {
-            Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .ignoresSafeArea()
-            
             VStack(spacing: 0) {
                 // Same centered layout as before; photo is overlaid so it doesn't slide with text
                 TabView(selection: $currentPage) {
@@ -101,7 +96,7 @@ struct OnboardingView: View {
                             .foregroundColor(.blue)
                         Text("onboarding.dont.show.again".localized)
                             .font(.subheadline)
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                     }
                 }
                 .buttonStyle(.plain)
@@ -172,7 +167,7 @@ struct OnboardingView: View {
                             .foregroundColor(isDarkMode ? .yellow : .orange)
                         Text(isDarkMode ? "settings.light.mode".localized : "settings.dark.mode".localized)
                             .font(.subheadline)
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
@@ -190,7 +185,7 @@ struct OnboardingView: View {
                             .font(.headline)
                         Text(currentLanguageName)
                             .font(.subheadline)
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
@@ -199,9 +194,10 @@ struct OnboardingView: View {
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.top, 50)
+            .padding(.top, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .spectRoomScreenBackground()
         .sheet(isPresented: $showingLanguageModal) {
             LanguageSelectionModal()
         }
@@ -434,7 +430,7 @@ struct OnboardingPageView: View {
                     Text(step)
                         .font(.title3)
                         .fontWeight(.semibold)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
                         .multilineTextAlignment(.center)
                         .lineLimit(nil)
                         .fixedSize(horizontal: false, vertical: true)
@@ -444,7 +440,7 @@ struct OnboardingPageView: View {
                     Text(page.title)
                         .font(.largeTitle)
                         .fontWeight(.bold)
-                        .foregroundColor(.primary)
+                        .foregroundColor(SpectRoomTheme.text)
                         .multilineTextAlignment(.center)
                         .lineLimit(nil)
                         .fixedSize(horizontal: false, vertical: true)
@@ -455,7 +451,7 @@ struct OnboardingPageView: View {
                         Text("onboarding.intro.title.line2".localized)
                             .font(.system(size: 48, weight: .bold))
                     }
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 80)
@@ -512,7 +508,7 @@ struct OnboardingPageView: View {
                         .font(.subheadline)
                 }
             }
-            .foregroundColor(.primary)
+            .foregroundColor(SpectRoomTheme.text)
             .multilineTextAlignment(.leading)
             .lineSpacing(3)
             .lineLimit(nil)

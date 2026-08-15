@@ -115,24 +115,20 @@ struct AddressSearchView: View {
                             searchDelegate.searchResults = []
                         }) {
                             Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                         }
                         .buttonStyle(.plain)
                     }
                 }
                 .padding()
-                .background(
-                    Color(
-                        colorScheme == .dark ? .secondarySystemBackground : .systemGray6
-                    )
-                )
+                .background(SpectRoomTheme.card)
                 .cornerRadius(10)
                 .padding(.horizontal)
                 .padding(.top)
                 
                 Text("address.search.sweden.only.notice".localized)
                     .font(.footnote)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal)
 
@@ -145,7 +141,7 @@ struct AddressSearchView: View {
                                 .padding(.vertical, 12)
                         } else if filteredSearchResults.isEmpty {
                             Text("address.search.no.results.sweden".localized)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                                 .multilineTextAlignment(.center)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
@@ -199,7 +195,7 @@ struct AddressSearchView: View {
                         Text(previewAddressText)
                             .font(.subheadline)
                             .fontWeight(.medium)
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                             .lineLimit(2)
                             .minimumScaleFactor(0.85)
                             .padding(12)
@@ -371,13 +367,13 @@ struct AddressResultRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(result.title)
                         .font(.body.weight(.medium))
-                        .foregroundColor(.primary)
+                        .foregroundColor(SpectRoomTheme.text)
                         .multilineTextAlignment(.leading)
                     
                     if !result.subtitle.isEmpty {
                         Text(result.subtitle)
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                             .multilineTextAlignment(.leading)
                     }
                 }
@@ -394,7 +390,7 @@ struct AddressResultRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isSelected ? Color.blue.opacity(0.12) : Color(.secondarySystemBackground))
+                    .fill(isSelected ? Color.blue.opacity(0.12) : SpectRoomTheme.card)
             )
         }
         .buttonStyle(.plain)

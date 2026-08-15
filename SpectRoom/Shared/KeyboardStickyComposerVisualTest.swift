@@ -72,7 +72,7 @@ struct KeyboardStickyComposerVisualTest: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Text(phaseLabel)
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                     }
                 }
         }
@@ -131,7 +131,7 @@ struct KeyboardStickyComposerVisualTest: View {
                 .frame(minHeight: 38)
                 .frame(minWidth: 0, maxWidth: .infinity)
                 .layoutPriority(1)
-                .background(Color(.systemBackground))
+                .background(SpectRoomTheme.card)
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             
             Image(systemName: "folder").frame(width: 34, height: 34)

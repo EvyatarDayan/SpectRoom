@@ -38,13 +38,11 @@ struct ProfileView: View {
                 .padding(.bottom, 100) // Increased bottom padding
             }
             .background(
-                Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .ignoresSafeArea()
+                SpectRoomBackground()
             )
             .navigationTitle(profileTitle)
             .navigationBarTitleDisplayMode(.inline)
+            .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 0) {
@@ -145,7 +143,7 @@ struct ProfileView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -164,11 +162,11 @@ struct ProfileView: View {
             
             Text("profile.location.privacy.notice".localized)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(SpectRoomTheme.secondaryText)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -184,11 +182,11 @@ struct ProfileView: View {
             if let user = appState.currentUser, !user.bio.isEmpty {
                 Text(user.bio)
                     .font(.body)
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
             } else {
                 Text("profile.no.bio".localized)
                     .font(.body)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
                     .italic()
             }
             
@@ -199,7 +197,7 @@ struct ProfileView: View {
                     .foregroundColor(.blue)
                 Text(formattedLifestyle(user.lifestyle))
                     .font(.body)
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
             }
             
             if let user = appState.currentUser, user.shareBodyType, !user.bodyType.isEmpty {
@@ -209,7 +207,7 @@ struct ProfileView: View {
                     .foregroundColor(.blue)
                 Text(formattedBodyType(user.bodyType))
                     .font(.body)
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
             }
             
             if let user = appState.currentUser, !user.idealFirstDate.isEmpty {
@@ -219,7 +217,7 @@ struct ProfileView: View {
                     .foregroundColor(.blue)
                 Text(formattedIdealFirstDate(user.idealFirstDate))
                     .font(.body)
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
             }
             
             if let user = appState.currentUser, !user.sensoryPreferences.isEmpty {
@@ -229,12 +227,12 @@ struct ProfileView: View {
                     .foregroundColor(.blue)
                 Text(SensoryPreferenceOption.formattedTitles(user.sensoryPreferences))
                     .font(.body)
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -251,19 +249,19 @@ struct ProfileView: View {
                 let _ = print("🔍 myInterestsSection - Displaying \(user.interests.count) interests: \(user.interests)")
                 Text(user.interests.map { localizedInterest($0) }.joined(separator: ", "))
                     .font(.body)
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
             } else {
                 // Debug: Log why no interests are showing
                 let _ = print("🔍 myInterestsSection - No interests to display. User: \(appState.currentUser != nil), Interests count: \(appState.currentUser?.interests.count ?? 0)")
                 Text("profile.no.interests".localized)
                     .font(.body)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
                     .italic()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
@@ -282,19 +280,19 @@ struct ProfileView: View {
                     if !user.gender.isEmpty && !user.interestedIn.isEmpty {
                         Text("profile.im.a".localized + " \(formatGender(user.gender)), " + "profile.interested.in".localized + " \(formatInterestedIn(user.interestedIn))")
                             .font(.body)
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                             .italic()
                     } else if !user.gender.isEmpty {
                         // Show only gender if no preferences set
                         Text("profile.im.a".localized + " \(formatGender(user.gender))")
                             .font(.body)
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                             .italic()
                     } else if !user.interestedIn.isEmpty {
                         // Show only preferences if no gender set
                         Text("profile.interested.in".localized.capitalized + " \(formatInterestedIn(user.interestedIn))")
                             .font(.body)
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                             .italic()
                     }
                     
@@ -313,7 +311,7 @@ struct ProfileView: View {
                     if hasLookingFor {
                         Text("profile.looking.for".localized + " \(formatLookingFor(user.lookingFor))")
                             .font(.body)
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                             .italic()
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
@@ -335,20 +333,20 @@ struct ProfileView: View {
                     if hasCustomPreferredAge {
                         Text(String(format: "profile.my.preferred.age".localized, "\(user.preferredAgeMin)", "\(user.preferredAgeMax)"))
                             .font(.body)
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                             .italic()
                     }
                 }
             } else {
                 Text("profile.no.preferences".localized)
                     .font(.body)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
                     .italic()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(SpectRoomTheme.card)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }

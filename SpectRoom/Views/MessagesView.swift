@@ -52,7 +52,7 @@ struct MessagesView: View {
                                 .scaleEffect(1.5)
                             Text("messages.loading".localized)
                                 .font(.subheadline)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
                             Spacer()
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -88,12 +88,10 @@ struct MessagesView: View {
                     .padding(.top, searchContentSpacing)
             }
             .background(
-                Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .ignoresSafeArea()
+                SpectRoomBackground()
             )
             .navigationBarTitleDisplayMode(.inline)
+            .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("messages.title".localized)
@@ -228,6 +226,8 @@ struct MessagesView: View {
                     message: message,
                     conversationMessages: $conversationMessages
                 )
+                // Clear cover so swipe-right reveals the messages list underneath.
+                .presentationBackground(.clear)
             } else {
                 let _ = print("❌ MessagesView selectedMessage is nil in sheet closure!")
                 VStack {
@@ -237,6 +237,9 @@ struct MessagesView: View {
                         showingMessageModal = false
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(SpectRoomTheme.background.ignoresSafeArea())
+                .presentationBackground(.clear)
             }
         }
     }
@@ -349,11 +352,11 @@ struct MessagesView: View {
     private var messagesSearchBar: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .foregroundColor(.secondary)
+                .foregroundColor(SpectRoomTheme.secondaryText)
             
             TextField("messages.search.placeholder".localized, text: $searchText)
                 .textFieldStyle(.plain)
-                .foregroundColor(.primary)
+                .foregroundColor(SpectRoomTheme.text)
                 .autocorrectionDisabled(true)
                 .textInputAutocapitalization(.never)
                 .focused($isSearchFieldFocused)
@@ -364,7 +367,7 @@ struct MessagesView: View {
                     isSearchFieldFocused = true
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("messages.search.clear".localized)
@@ -374,7 +377,7 @@ struct MessagesView: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.systemBackground))
+                .fill(SpectRoomTheme.card)
                 .shadow(color: Color.black.opacity(0.08), radius: 4, x: 0, y: 1)
         )
     }
@@ -389,10 +392,10 @@ struct MessagesView: View {
                 Text("messages.empty".localized)
                     .font(.title2)
                     .fontWeight(.medium)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
                 Text("messages.empty.description".localized)
                     .font(.body)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
                 
@@ -424,11 +427,11 @@ struct MessagesView: View {
                 
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 22, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
                     .padding(6)
                     .background(
                         Circle()
-                            .fill(Color(.systemBackground))
+                            .fill(SpectRoomTheme.card)
                     )
                     .offset(x: 6, y: 6)
             }
@@ -442,7 +445,7 @@ struct MessagesView: View {
             
             Text("messages.search.no.results.hint".localized)
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(SpectRoomTheme.secondaryText)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
             Spacer()
@@ -553,10 +556,26 @@ struct MessagesView: View {
         appState.currentlyOpenConversationSenderId = otherUserId
         print("💬 Set currentlyOpenConversationSenderId to: \(otherUserId)")
         
+        prepareConversationMessages(for: otherUserId)
+        
         print("💬 selectedMessage after set: \(selectedMessage?.recipientName ?? "nil"), content: \(selectedMessage?.content.prefix(20) ?? "nil")...")
         print("💬 showingMessageModal before: \(showingMessageModal)")
         showingMessageModal = true
         print("💬 showingMessageModal after: \(showingMessageModal)")
+    }
+    
+    /// Seed the shared conversation binding before presenting so the modal
+    /// never briefly shows the previous chat (or an empty loading flash).
+    private func prepareConversationMessages(for otherUserId: String) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            if let cached = appState.getCachedConversationState(for: otherUserId) {
+                conversationMessages = Array(cached.messagePool.suffix(10))
+            } else {
+                conversationMessages = []
+            }
+        }
     }
     
     private func openConversationForSender(senderId: String, retryCount: Int = 0) {
@@ -597,6 +616,8 @@ struct MessagesView: View {
                     // Set the currently open conversation ID to prevent notifications for this conversation
             appState.currentlyOpenConversationSenderId = senderId
                     print("💬 Set currentlyOpenConversationSenderId to: \(senderId)")
+            
+            prepareConversationMessages(for: senderId)
                     
             // Store in Firestore so Cloud Function can check if conversation is open
             Task {
@@ -692,7 +713,7 @@ struct MessagesView: View {
         )
         
         selectedMessage = messageDisplay
-        conversationMessages = []
+        prepareConversationMessages(for: profile.userId)
         appState.currentlyOpenConversationSenderId = profile.userId
         
         Task {
@@ -727,6 +748,8 @@ struct MessagesView: View {
                             // Set the currently open conversation ID to prevent notifications for this conversation
                             self.appState.currentlyOpenConversationSenderId = senderId
                             print("💬 Set currentlyOpenConversationSenderId to: \(senderId)")
+                            
+                            self.prepareConversationMessages(for: senderId)
                             
                             // Store in Firestore so Cloud Function can check if conversation is open
                             Task {
@@ -807,13 +830,13 @@ struct ConversationRow: View {
                     Text(otherUserName)
                         .font(.headline)
                         .fontWeight(.semibold)
-                        .foregroundColor(.primary)
+                        .foregroundColor(SpectRoomTheme.text)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     
                     Text(previewText)
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -824,7 +847,7 @@ struct ConversationRow: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 16)
-            .background(Color(.secondarySystemGroupedBackground))
+            .background(SpectRoomTheme.card)
             .cornerRadius(12)
             
             if isBlockedConversation {
@@ -1006,6 +1029,7 @@ struct MessageConversationModal: View {
     @State private var expandedLongMessageIds: Set<String> = []
     @State private var showingOtherUserProfile = false
     @State private var otherUserProfile: ProfileCard?
+    @State private var resolvedPartnerName: String?
     
     private let conversationPageSize = 10
     private let conversationBottomAnchorID = "conversation-bottom-anchor"
@@ -1015,15 +1039,25 @@ struct MessageConversationModal: View {
     init(message: MessageDisplay, conversationMessages: Binding<[MessageDisplay]>) {
         self.message = message
         self._conversationMessages = conversationMessages
+        // Skip the loading flash when the parent already seeded cached messages.
+        self._isLoadingMessages = State(initialValue: conversationMessages.wrappedValue.isEmpty)
+        let photoURL = message.senderName == "You" ? message.recipientProfilePhotoURL : message.senderProfilePhotoURL
+        self._otherUserProfilePhotoURL = State(initialValue: photoURL)
+        let name = message.senderName == "You" ? message.recipientName : message.senderName
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isUnknown = trimmed.isEmpty
+            || trimmed.caseInsensitiveCompare("Unknown User") == .orderedSame
+            || trimmed.caseInsensitiveCompare("Unknown") == .orderedSame
+            || trimmed.caseInsensitiveCompare("Other User") == .orderedSame
+        self._resolvedPartnerName = State(initialValue: isUnknown ? nil : name)
         print("💬 MessageConversationModal INIT called with message: \(message.recipientName), content: \(message.content.prefix(20))...")
     }
     
     var conversationTitle: String {
-        if message.senderName == "You" {
-            return message.recipientName
-        } else {
-            return message.senderName
+        if let resolvedPartnerName, !isUnknownChatName(resolvedPartnerName) {
+            return resolvedPartnerName
         }
+        return message.senderName == "You" ? message.recipientName : message.senderName
     }
     
     private var otherUserId: String {
@@ -1031,7 +1065,40 @@ struct MessageConversationModal: View {
     }
     
     private var otherUserName: String {
-        message.senderName == "You" ? message.recipientName : message.senderName
+        conversationTitle
+    }
+    
+    private func conversationPartnerId(for conversation: MessageDisplay) -> String {
+        conversation.senderName == "You" ? conversation.recipientId : conversation.senderId
+    }
+    
+    private func isUnknownChatName(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty
+            || trimmed.caseInsensitiveCompare("Unknown User") == .orderedSame
+            || trimmed.caseInsensitiveCompare("Unknown") == .orderedSame
+            || trimmed.caseInsensitiveCompare("Other User") == .orderedSame
+    }
+    
+    private func bestKnownPartnerName() -> String? {
+        if let resolvedPartnerName, !isUnknownChatName(resolvedPartnerName) {
+            return resolvedPartnerName
+        }
+        if let profileName = otherUserProfile?.name, !isUnknownChatName(profileName) {
+            return profileName
+        }
+        if let matchName = appState.cachedMatches.first(where: { $0.otherUser.userId == otherUserId })?.otherUser.name,
+           !isUnknownChatName(matchName) {
+            return matchName
+        }
+        if let conversation = appState.cachedMessageConversations.first(where: { conversationPartnerId(for: $0) == otherUserId }) {
+            let name = conversation.senderName == "You" ? conversation.recipientName : conversation.senderName
+            if !isUnknownChatName(name) {
+                return name
+            }
+        }
+        let fromMessage = message.senderName == "You" ? message.recipientName : message.senderName
+        return isUnknownChatName(fromMessage) ? nil : fromMessage
     }
     
     @ViewBuilder
@@ -1073,17 +1140,21 @@ struct MessageConversationModal: View {
             conversationContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background {
-                    Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .ignoresSafeArea()
+                    ZStack {
+                        // Solid underlay prevents a blank flash while the image materializes.
+                        SpectRoomTheme.background
+                        Image(colorScheme == .dark ? "chatBackDark" : "chatBack")
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
+                    }
+                    .ignoresSafeArea()
                 }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+            .spectRoomNavigationChrome(colorScheme: colorScheme)
+            .toolbar {                ToolbarItem(placement: .topBarLeading) {
                     Button {
                         closeChat()
                     } label: {
@@ -1103,13 +1174,13 @@ struct MessageConversationModal: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(conversationTitle)
                                     .font(.headline)
-                                    .foregroundColor(.primary)
+                                    .foregroundColor(SpectRoomTheme.text)
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                                 
                                 Text("messages.tap.to.see.profile".localized)
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                             }
@@ -1137,6 +1208,18 @@ struct MessageConversationModal: View {
                     .opacity(isBlockedByRecipient ? 0.5 : 1)
                 }
             }
+        }
+        // Opaque panel that moves with the swipe so the messages list can show through the gap.
+        .background {
+            ZStack {
+                SpectRoomTheme.background
+                Image(colorScheme == .dark ? "chatBackDark" : "chatBack")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+            }
+            .ignoresSafeArea()
         }
         .offset(x: max(0, edgeSwipeOffset))
         .overlay(alignment: .leading) {
@@ -1168,7 +1251,9 @@ struct MessageConversationModal: View {
                                     edgeSwipeOffset = UIScreen.main.bounds.width
                                 }
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-                                    closeChat()
+                                    // Swipe already took the view off-screen; skip the
+                                    // fullScreenCover's default slide-down dismiss.
+                                    closeChat(animated: false)
                                 }
                             } else {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
@@ -1221,11 +1306,13 @@ struct MessageConversationModal: View {
             }
             
             prefetchOtherUserProfile()
+            resolveChatPartnerNameIfNeeded()
             loadConversationMessages()
             startAutoRefresh()
         }
         .onReceive(appState.newMessageReceivedPublisher) { newMessage in
             appendIncomingMessageIfNeeded(newMessage)
+            refreshPartnerNameFromIncomingMessageIfNeeded(newMessage)
         }
         .onDisappear {
             // Determine the other user's ID
@@ -1304,7 +1391,7 @@ struct MessageConversationModal: View {
         }
         .sheet(isPresented: $showingPreMessageOptions) {
             PreMessageOptionsModal(
-                profileName: message.senderName == "You" ? message.recipientName : message.senderName,
+                profileName: conversationTitle,
                 onSelect: { selectedMessage in
                     replyText = selectedMessage
                     showingPreMessageOptions = false
@@ -1359,12 +1446,13 @@ struct MessageConversationModal: View {
     private var conversationContent: some View {
         conversationMessagesArea
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !isLoadingMessages && !isBlockedByRecipient {
+                // Keep the composer mounted so opening does not jump when loading finishes.
+                if !isBlockedByRecipient {
                     MessageComposerBar(
                         text: $replyText,
                         isFocused: $isTextFieldFocused,
                         placeholder: "",
-                        isDisabled: isBlockedByRecipient,
+                        isDisabled: isBlockedByRecipient || isLoadingMessages,
                         isSending: isSendingReply,
                         isRecording: isRecording,
                         onSend: { sendReply() },
@@ -1378,6 +1466,8 @@ struct MessageConversationModal: View {
                             showingMicLongPressTip = true
                         }
                     )
+                    .opacity(isLoadingMessages ? 0.55 : 1)
+                    .allowsHitTesting(!isLoadingMessages)
                     .background {
                         Color(.systemGray2)
                             .ignoresSafeArea(edges: .bottom)
@@ -1398,14 +1488,14 @@ struct MessageConversationModal: View {
     
     private var conversationMessagesArea: some View {
         Group {
-            if isLoadingMessages {
+            if isLoadingMessages && conversationMessages.isEmpty {
                 VStack(spacing: 20) {
                     Spacer()
                     ProgressView()
                         .scaleEffect(1.5)
                     Text("messages.loading.conversation".localized)
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
                     Spacer()
                 }
             } else if conversationMessages.isEmpty {
@@ -1413,7 +1503,7 @@ struct MessageConversationModal: View {
                     Spacer()
                     Text("messages.no.messages.found".localized)
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
                     Spacer()
                 }
             } else {
@@ -1477,12 +1567,15 @@ struct MessageConversationModal: View {
                     .scrollContentBackground(.hidden)
                     .scrollIndicators(.hidden)
                     .scrollDismissesKeyboard(.interactively)
+                    // Land on the latest messages on the first frame (avoids top→bottom jump).
+                    .defaultScrollAnchor(.bottom)
                     .onAppear {
-                        scheduleScrollToBottom(proxy: proxy, force: true, isInitial: true)
+                        // One quiet pin after layout; no multi-delay animated chasing.
+                        scrollToLatestMessage(proxy: proxy, force: true, animated: false)
                     }
                     .onChange(of: isLoadingMessages) { _, isLoading in
                         guard !isLoading else { return }
-                        scheduleScrollToBottom(proxy: proxy, force: true, isInitial: true)
+                        scrollToLatestMessage(proxy: proxy, force: true, animated: false)
                     }
                     .onChange(of: isUploadingImage) { _, uploading in
                         if uploading {
@@ -1492,13 +1585,13 @@ struct MessageConversationModal: View {
                     }
                     .onChange(of: conversationMessages.count) { _ in
                         if shouldScrollToBottom {
-                            scheduleScrollToBottom(proxy: proxy, force: true, isInitial: true)
+                            scheduleScrollToBottom(proxy: proxy, force: true, isInitial: false)
                             shouldScrollToBottom = false
                         }
                     }
                     .onChange(of: conversationMessages.last?.id) { _, _ in
                         if shouldScrollToBottom {
-                            scheduleScrollToBottom(proxy: proxy, force: true, isInitial: true)
+                            scheduleScrollToBottom(proxy: proxy, force: true, isInitial: false)
                             shouldScrollToBottom = false
                         }
                     }
@@ -1515,9 +1608,8 @@ struct MessageConversationModal: View {
         }
     }
     
-    private func closeChat() {
+    private func closeChat(animated: Bool = true) {
         isTextFieldFocused = false
-        edgeSwipeOffset = 0
         isEdgeSwiping = false
         UIApplication.shared.sendAction(
             #selector(UIResponder.resignFirstResponder),
@@ -1525,7 +1617,18 @@ struct MessageConversationModal: View {
             from: nil,
             for: nil
         )
-        dismiss()
+        if animated {
+            edgeSwipeOffset = 0
+            dismiss()
+        } else {
+            // Keep the off-screen swipe offset so the cover doesn't snap back
+            // before the unanimated dismiss finishes.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                dismiss()
+            }
+        }
     }
     
     private func prefetchOtherUserProfile() {
@@ -1539,11 +1642,71 @@ struct MessageConversationModal: View {
                     if otherUserProfile == nil {
                         otherUserProfile = profile
                     }
+                    applyResolvedPartnerIdentity(
+                        name: profile.name,
+                        photoURL: profile.imageURL
+                    )
                 }
             } catch {
                 print("❌ Failed to prefetch chat profile for \(userId): \(error)")
             }
         }
+    }
+    
+    private func resolveChatPartnerNameIfNeeded() {
+        if let known = bestKnownPartnerName() {
+            resolvedPartnerName = known
+            return
+        }
+        
+        let userId = otherUserId
+        Task {
+            // Dedicated name lookup in case the full profile path is slow or incomplete.
+            if let name = try? await FirebaseAuthService.shared.fetchSenderName(for: userId),
+               !isUnknownChatName(name) {
+                await MainActor.run {
+                    applyResolvedPartnerIdentity(name: name, photoURL: otherUserProfilePhotoURL)
+                }
+                return
+            }
+            
+            if let profile = try? await FirebaseAuthService.shared.fetchUserProfile(for: userId) {
+                await MainActor.run {
+                    if otherUserProfile == nil {
+                        otherUserProfile = profile
+                    }
+                    applyResolvedPartnerIdentity(name: profile.name, photoURL: profile.imageURL)
+                }
+            }
+        }
+    }
+    
+    private func refreshPartnerNameFromIncomingMessageIfNeeded(_ newMessage: MessageDisplay) {
+        guard isUnknownChatName(conversationTitle) else { return }
+        guard conversationPartnerId(for: newMessage) == otherUserId
+                || newMessage.senderId == otherUserId
+                || newMessage.recipientId == otherUserId else { return }
+        
+        let candidate = newMessage.senderName == "You" ? newMessage.recipientName : newMessage.senderName
+        if !isUnknownChatName(candidate) {
+            applyResolvedPartnerIdentity(
+                name: candidate,
+                photoURL: newMessage.senderName == "You" ? newMessage.recipientProfilePhotoURL : newMessage.senderProfilePhotoURL
+            )
+        }
+    }
+    
+    private func applyResolvedPartnerIdentity(name: String, photoURL: String?) {
+        guard !isUnknownChatName(name) else { return }
+        resolvedPartnerName = name
+        if let photoURL, !photoURL.isEmpty, otherUserProfilePhotoURL == nil {
+            otherUserProfilePhotoURL = photoURL
+        }
+        appState.updateConversationPartnerDetails(
+            userId: otherUserId,
+            name: name,
+            photoURL: photoURL ?? otherUserProfilePhotoURL
+        )
     }
     
     private func openOtherUserProfile() {
@@ -1559,6 +1722,7 @@ struct MessageConversationModal: View {
                 let profile = try await FirebaseAuthService.shared.fetchUserProfile(for: userId)
                 await MainActor.run {
                     otherUserProfile = profile
+                    applyResolvedPartnerIdentity(name: profile.name, photoURL: profile.imageURL)
                     showingOtherUserProfile = true
                 }
             } catch {
@@ -1609,15 +1773,14 @@ struct MessageConversationModal: View {
         force: Bool = false,
         isInitial: Bool = false
     ) {
-        let delays: [TimeInterval] = isInitial
-            ? [0, 0.05, 0.15, 0.35, 0.6, 1.0]
-            : [0.05, 0.2]
+        // Keep initial open calm: a couple of instant pins beat many delayed animated jumps.
+        let delays: [TimeInterval] = isInitial ? [0, 0.08] : [0.05, 0.2]
         for delay in delays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 scrollToLatestMessage(
                     proxy: proxy,
                     force: force || shouldScrollToBottom,
-                    animated: !isInitial && delay > 0
+                    animated: !isInitial
                 )
             }
         }
@@ -1663,9 +1826,17 @@ struct MessageConversationModal: View {
     private func loadConversationMessages() {
         print("💬 MessageConversationModal: Loading conversation messages for: \(message.content)")
         
-        // Restore the full cached scroll state when available for instant UI.
+        // Restore cached scroll state synchronously so the first frame already has messages.
         if let cachedState = appState.getCachedConversationState(for: otherUserId) {
             print("💬 MessageConversationModal: Using cached conversation state (\(cachedState.visibleMessages.count) visible / \(cachedState.messagePool.count) total messages)")
+            applyConversationSnapshot(
+                pool: cachedState.messagePool,
+                visible: Array(cachedState.messagePool.suffix(conversationPageSize)),
+                hasMoreOlder: cachedState.messagePool.count > conversationPageSize
+                    || cachedState.hasMoreOlderMessages,
+                markLoaded: true,
+                pinToBottom: false
+            )
             
             Task {
                 if !hasMarkedAsRead {
@@ -1675,27 +1846,25 @@ struct MessageConversationModal: View {
                     }
                 }
                 
-                await MainActor.run {
-                    cachedMessagesPool = cachedState.messagePool
-                    // Always open at the latest messages so a new-message open lands on the tip.
-                    conversationMessages = Array(cachedState.messagePool.suffix(conversationPageSize))
-                    hasMoreOlderMessages = cachedState.messagePool.count > conversationPageSize
-                        || cachedState.hasMoreOlderMessages
-                    isLoadingMessages = false
-                    previousMessageCount = conversationMessages.count
-                    shouldScrollToBottom = true
-                    
-                    if currentUserProfilePhotoURL == nil || otherUserProfilePhotoURL == nil {
-                        Task {
-                            await fetchProfilePhotosIfNeeded(otherUserId: otherUserId)
-                        }
-                    }
+                if currentUserProfilePhotoURL == nil || otherUserProfilePhotoURL == nil {
+                    await fetchProfilePhotosIfNeeded(otherUserId: otherUserId)
                 }
                 
-                // Always merge a fresh recent page so a thin/stale cache can't hide history.
+                // Quiet background merge - only refresh UI when content actually changes.
                 await loadRecentConversationPageAndMerge(otherUserId: otherUserId)
             }
             return
+        }
+        
+        // Parent may have already seeded the binding with cached/empty state.
+        if !conversationMessages.isEmpty {
+            applyConversationSnapshot(
+                pool: conversationMessages,
+                visible: conversationMessages,
+                hasMoreOlder: false,
+                markLoaded: true,
+                pinToBottom: false
+            )
         }
         
         Task {
@@ -1717,22 +1886,26 @@ struct MessageConversationModal: View {
                 }
                 
                 await MainActor.run {
-                    conversationMessages = page.messages
-                    cachedMessagesPool = page.messages
-                    hasMoreOlderMessages = page.hasMoreOlder
-                    isLoadingMessages = false
-                    previousMessageCount = conversationMessages.count
-                    shouldScrollToBottom = true
+                    applyConversationSnapshot(
+                        pool: page.messages,
+                        visible: page.messages,
+                        hasMoreOlder: page.hasMoreOlder,
+                        markLoaded: true,
+                        pinToBottom: false
+                    )
                     persistConversationCache()
                 }
             } catch {
                 print("❌ MessageConversationModal: Error loading conversation messages: \(error)")
                 await MainActor.run {
-                    conversationMessages = [message].sorted { $0.createdAt < $1.createdAt }
-                    cachedMessagesPool = conversationMessages
-                    hasMoreOlderMessages = false
-                    isLoadingMessages = false
-                    shouldScrollToBottom = true
+                    let fallback = [message].sorted { $0.createdAt < $1.createdAt }
+                    applyConversationSnapshot(
+                        pool: fallback,
+                        visible: fallback,
+                        hasMoreOlder: false,
+                        markLoaded: true,
+                        pinToBottom: false
+                    )
                 }
             }
         }
@@ -1740,12 +1913,36 @@ struct MessageConversationModal: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
             if isLoadingMessages {
                 print("⚠️ MessageConversationModal: Loading timeout reached, showing fallback")
-                conversationMessages = [message].sorted { $0.createdAt < $1.createdAt }
-                cachedMessagesPool = conversationMessages
-                hasMoreOlderMessages = false
-                isLoadingMessages = false
-                shouldScrollToBottom = true
+                let fallback = [message].sorted { $0.createdAt < $1.createdAt }
+                applyConversationSnapshot(
+                    pool: fallback,
+                    visible: fallback,
+                    hasMoreOlder: false,
+                    markLoaded: true,
+                    pinToBottom: false
+                )
             }
+        }
+    }
+    
+    private func applyConversationSnapshot(
+        pool: [MessageDisplay],
+        visible: [MessageDisplay],
+        hasMoreOlder: Bool,
+        markLoaded: Bool,
+        pinToBottom: Bool = true
+    ) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            cachedMessagesPool = pool
+            conversationMessages = visible
+            hasMoreOlderMessages = hasMoreOlder
+            previousMessageCount = visible.count
+            if markLoaded {
+                isLoadingMessages = false
+            }
+            shouldScrollToBottom = pinToBottom
         }
     }
     
@@ -1759,13 +1956,30 @@ struct MessageConversationModal: View {
             )
             
             await MainActor.run {
-                cachedMessagesPool = (cachedMessagesPool + page.messages)
+                let mergedPool = (cachedMessagesPool + page.messages)
                     .deduplicatedConversationMessages()
-                conversationMessages = Array(cachedMessagesPool.suffix(conversationPageSize))
+                let newVisible = Array(mergedPool.suffix(conversationPageSize))
+                let oldKeys = conversationMessages.map(\.deduplicationKey)
+                let newKeys = newVisible.map(\.deduplicationKey)
+                
+                cachedMessagesPool = mergedPool
                 hasMoreOlderMessages = page.hasMoreOlder
-                    || cachedMessagesPool.count > conversationPageSize
-                previousMessageCount = conversationMessages.count
-                shouldScrollToBottom = true
+                    || mergedPool.count > conversationPageSize
+                
+                // Avoid rewriting the list (and re-scrolling) when nothing meaningful changed.
+                guard oldKeys != newKeys else {
+                    persistConversationCache()
+                    return
+                }
+                
+                applyConversationSnapshot(
+                    pool: mergedPool,
+                    visible: newVisible,
+                    hasMoreOlder: hasMoreOlderMessages,
+                    markLoaded: true,
+                    // Only nudge scroll if the tip of the chat actually changed.
+                    pinToBottom: newKeys.last != oldKeys.last
+                )
                 persistConversationCache()
             }
         } catch {
@@ -2406,7 +2620,7 @@ struct RecordingIndicatorSheet: View {
                         .font(.title3)
                         .fontWeight(.medium)
                         .monospacedDigit()
-                        .foregroundColor(.secondary)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
                     Spacer(minLength: 0)
                 }
                 .frame(height: 64)
@@ -2632,7 +2846,7 @@ struct VoiceMessagePlayerView: View {
                     if let timestampText {
                         Text(timestampText)
                             .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                     }
                 }
             }
@@ -2946,7 +3160,7 @@ private struct ChatDateSeparator: View {
                 .padding(.vertical, 6)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(Color(.systemBackground).opacity(0.82))
+                        .fill(SpectRoomTheme.card.opacity(0.82))
                 )
                 .shadow(color: Color.black.opacity(0.08), radius: 2, x: 0, y: 1)
             Spacer(minLength: 0)
@@ -3198,7 +3412,7 @@ struct MessageBubble: View {
                     
                     Text(bubbleTimeText)
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
                 }
             }
             .padding(.horizontal, 10)

@@ -15,10 +15,7 @@ struct AboutView: View {
         NavigationView {
             ZStack {
                 // Background
-                Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .ignoresSafeArea()
+                SpectRoomBackground()
                 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
@@ -26,16 +23,16 @@ struct AboutView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("About SpectRoom")
                                 .font(.system(size: 24, weight: .bold))
-                                .foregroundColor(.primary)
+                                .foregroundColor(SpectRoomTheme.text)
                                 .padding(.top, 70)
                             
                             Text("SpectRoom is a dating and connection app thoughtfully designed for autistic adults and the broader neurodivergent community.")
                                 .font(.body)
-                                .foregroundColor(.primary)
+                                .foregroundColor(SpectRoomTheme.text)
                             
                             Text("We believe that everyone deserves a space where communication styles are understood, sensory needs are respected, and individuality is celebrated - without judgment, pressure, or misunderstanding.")
                                 .font(.body)
-                                .foregroundColor(.primary)
+                                .foregroundColor(SpectRoomTheme.text)
                         }
                         .padding(.horizontal, 20)
                         .padding(.top, 20)
@@ -73,15 +70,15 @@ struct AboutView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("About Abashelari Productions")
                                 .font(.system(size: 24, weight: .bold))
-                                .foregroundColor(.primary)
+                                .foregroundColor(SpectRoomTheme.text)
                             
                             Text("Abashelari Productions is an independent technology and creative development studio based in Stockholm.")
                                 .font(.body)
-                                .foregroundColor(.primary)
+                                .foregroundColor(SpectRoomTheme.text)
                             
                             Text("We specialize in crafting thoughtful digital experiences with a focus on accessibility, education, and everyday empowerment. Our work spans mobile apps, interactive tools, and content designed to make life easier, more inclusive, and more enjoyable for users of all backgrounds.")
                                 .font(.body)
-                                .foregroundColor(.primary)
+                                .foregroundColor(SpectRoomTheme.text)
                         }
                         .padding(.horizontal, 20)
                         
@@ -107,6 +104,7 @@ struct AboutView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("About")
@@ -127,12 +125,12 @@ struct AboutView: View {
             if !title.isEmpty {
                 Text(title)
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.primary)
+                    .foregroundColor(SpectRoomTheme.text)
             }
             
             Text(content)
                 .font(.body)
-                .foregroundColor(.primary)
+                .foregroundColor(SpectRoomTheme.text)
         }
         .padding(.horizontal, 20)
     }

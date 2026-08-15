@@ -15,10 +15,7 @@ struct PrivacySafetyView: View {
         NavigationView {
             ZStack {
                 // Background
-                Image(colorScheme == .dark ? "ColorsDark" : "Colors")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .ignoresSafeArea()
+                SpectRoomBackground()
                 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
@@ -26,12 +23,12 @@ struct PrivacySafetyView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Privacy & Safety")
                                 .font(.system(size: 24, weight: .bold))
-                                .foregroundColor(.primary)
+                                .foregroundColor(SpectRoomTheme.text)
                                 .padding(.top, 70)
                             
                             Text("Your privacy, comfort, and safety are our highest priorities. Our app is designed to support neurodivergent individuals in a respectful, secure, and transparent way. The following principles explain how we protect your information and how you can stay safe while using our platform.")
                                 .font(.body)
-                                .foregroundColor(.primary)
+                                .foregroundColor(SpectRoomTheme.text)
                         }
                         .padding(.horizontal, 20)
                         .padding(.top, 20)
@@ -182,6 +179,7 @@ struct PrivacySafetyView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("Privacy & Safety")
@@ -201,11 +199,11 @@ struct PrivacySafetyView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.primary)
+                .foregroundColor(SpectRoomTheme.text)
             
             Text(content)
                 .font(.body)
-                .foregroundColor(.primary)
+                .foregroundColor(SpectRoomTheme.text)
         }
         .padding(.horizontal, 20)
     }

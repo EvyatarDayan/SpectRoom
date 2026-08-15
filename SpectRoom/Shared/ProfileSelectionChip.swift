@@ -35,7 +35,7 @@ struct ProfileSelectionChip: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(isSelected ? Color.blue.opacity(0.12) : Color(.systemGroupedBackground))
+                    .fill(isSelected ? Color.blue.opacity(0.12) : SpectRoomTheme.card)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)

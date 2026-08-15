@@ -21,7 +21,7 @@ struct MatchModalView: View {
     }
     
     var body: some View {
-        let modalBackgroundColor = colorScheme == .dark ? Color(.secondarySystemGroupedBackground) : Color(.systemGroupedBackground)
+        let modalBackgroundColor = SpectRoomTheme.card
         
         VStack(spacing: 20) {
             // User photos section

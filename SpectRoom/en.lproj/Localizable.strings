@@ -117,6 +117,19 @@
 "settings.authentication.section.title" = "Authentication";
 "settings.account.section.title" = "Account";
 "settings.authentication.signout.subtitle" = "Sign out your account";
+"settings.export.messages" = "Export Messages";
+"settings.export.messages.description" = "Export last 6 months messages";
+"settings.export.messages.file.title" = "SpectRoom Messages Export";
+"settings.export.messages.exported.at" = "Exported: %@";
+"settings.export.messages.account" = "Account: %@";
+"settings.export.messages.conversation.with" = "Conversation with %@";
+"settings.export.messages.you" = "You";
+"settings.export.messages.voice" = "[Voice Attachment]";
+"settings.export.messages.voice.duration" = "[Voice Attachment, %d:%02d]";
+"settings.export.messages.photo" = "[Photo Attachment]";
+"settings.export.messages.video" = "[Video Attachment]";
+"settings.export.messages.empty" = "You don't have any messages to export yet.";
+"settings.export.messages.error" = "Couldn't export your messages. Please try again.";
 "settings.delete.account.section.title" = "Delete account";
 "settings.delete.account.button" = "Delete Account";
 "settings.delete.account.subtitle" = "Permanently delete your account";
@@ -321,6 +334,7 @@
 "search.no.more.profiles.description" = "Check back later for new people!";
 "search.pass" = "Pass";
 "search.like" = "Like";
+"search.undo" = "Undo last swipe";
 "search.view.profile" = "View Profile";
 "search.new.message" = "New Message";
 "search.distance.km" = "%@ km away";

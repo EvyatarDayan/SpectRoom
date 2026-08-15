@@ -73,6 +73,9 @@ class AppStateManager: ObservableObject {
     @Published var conversationUnreadCounts: [String: Int] = [:]
     private var lastMessageId: String?
     private var lastPlayedMessageSoundId: String?
+    /// Skip the in-app chime briefly after opening a chat from a notification
+    /// (the message is already known; playing again feels like a duplicate).
+    private var suppressIncomingMessageSoundUntil: Date?
     
     private let firebaseAuth = FirebaseAuthService.shared
     private var cancellables = Set<AnyCancellable>()
@@ -494,6 +497,37 @@ class AppStateManager: ObservableObject {
             lastMatchesUpdate = Date()
         }
         return fetched
+    }
+    
+    func refreshCachedMatchEnergyLevels() async {
+        let matches = await MainActor.run { cachedMatches }
+        let userIds = matches.map(\.otherUser.userId)
+        guard !userIds.isEmpty else { return }
+        
+        let levels = await firebaseAuth.fetchEnergyLevels(for: userIds)
+        guard !levels.isEmpty else { return }
+        
+        await MainActor.run {
+            var didChange = false
+            cachedMatches = cachedMatches.map { match in
+                guard let level = levels[match.otherUser.userId],
+                      match.otherUser.energyLevel != level else {
+                    return match
+                }
+                didChange = true
+                var updatedUser = match.otherUser
+                updatedUser.energyLevel = level
+                return MatchDisplay(
+                    id: match.id,
+                    otherUser: updatedUser,
+                    matchedAt: match.matchedAt,
+                    lastMessageAt: match.lastMessageAt
+                )
+            }
+            if didChange {
+                print("💕 Updated energy levels for matches")
+            }
+        }
     }
     
     func updateMatchesCache(with match: MatchDisplay) {
@@ -1230,9 +1264,17 @@ class AppStateManager: ObservableObject {
                                     self?.resolvedPartnerName(for: senderId, preferred: senderName) ?? senderName
                                 )
                             }
+                            let notificationPreview: String
+                            if type == .voice {
+                                notificationPreview = "messages.preview.voice".localized
+                            } else if type == .image {
+                                notificationPreview = "messages.preview.photo".localized
+                            } else {
+                                notificationPreview = messageContent ?? content
+                            }
                             NotificationService.shared.sendNewMessageNotification(
                                 senderName: displayName,
-                                messageContent: messageContent ?? content,
+                                messageContent: notificationPreview,
                                 senderId: senderId,
                                 badgeCount: badgeCount
                             )
@@ -1249,6 +1291,13 @@ class AppStateManager: ObservableObject {
     
     func playIncomingMessageSoundIfNeeded(for messageDocId: String) {
         guard lastPlayedMessageSoundId != messageDocId else { return }
+        
+        if let until = suppressIncomingMessageSoundUntil, Date() < until {
+            // Consume the id so this same message does not chime after the window ends.
+            lastPlayedMessageSoundId = messageDocId
+            return
+        }
+        
         lastPlayedMessageSoundId = messageDocId
         
         if let settings = currentUser?.preferences.notificationSettings {
@@ -1278,6 +1327,9 @@ class AppStateManager: ObservableObject {
     func openConversationFromNotification(senderId: String) {
         let trimmed = senderId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        
+        // Avoid replaying the message sound when the chat surfaces that message.
+        suppressIncomingMessageSoundUntil = Date().addingTimeInterval(3.0)
         
         conversationToOpenSenderId = trimmed
         shouldOpenConversation = true
@@ -1556,6 +1608,16 @@ class AppStateManager: ObservableObject {
         lastMessageConversationsUpdate = nil
         cachedConversationStates = [:]
         print("💬 Message conversations cache cleared")
+    }
+    
+    func exportAllMessagesToFile() async throws -> URL? {
+        let export = try await firebaseAuth.fetchAllConversationsForExport()
+        guard !export.conversations.isEmpty else { return nil }
+        return try await MessagesExport.writeTextFile(
+            currentUserName: export.currentUserName,
+            currentUserId: export.currentUserId,
+            conversations: export.conversations
+        )
     }
     
     // MARK: - Individual Conversation Messages Cache

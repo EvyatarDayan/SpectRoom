@@ -42,7 +42,7 @@ struct LanguageSelectionModal: View {
                         
                         Text(language.name)
                             .font(.body)
-                            .foregroundColor(.primary)
+                            .foregroundColor(SpectRoomTheme.text)
                         
                         Spacer()
                         

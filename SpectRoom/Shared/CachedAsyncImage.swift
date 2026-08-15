@@ -159,10 +159,10 @@ struct ChatCachedImage: View {
                     VStack(spacing: 8) {
                         Image(systemName: "arrow.clockwise.circle")
                             .font(.system(size: 28, weight: .medium))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                         Text("messages.image.retry".localized)
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                     }
                     .frame(width: maxWidth, height: maxHeight)
                     .background(Color.gray.opacity(0.12))

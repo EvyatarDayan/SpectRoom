@@ -129,7 +129,7 @@ struct MandatoryProfileEditView: View {
             
             Text("Please complete your profile to start using SpectRoom")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(SpectRoomTheme.secondaryText)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
         }
@@ -228,7 +228,7 @@ struct MandatoryProfileEditView: View {
                     .foregroundColor(.blue)
                     .background(
                         Circle()
-                            .fill(Color(.systemBackground))
+                            .fill(SpectRoomTheme.card)
                             .frame(width: 32, height: 32)
                     )
                     .offset(x: 40, y: 40)
@@ -338,7 +338,7 @@ struct MandatoryProfileEditView: View {
                     
                     Text("First photo is your profile photo")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
                 }
                 Spacer()
                 Image(systemName: isPhotosValid ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -362,11 +362,11 @@ struct MandatoryProfileEditView: View {
             
             Text("No photos yet")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(SpectRoomTheme.secondaryText)
             
             Text("Add photos to show more of yourself")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(SpectRoomTheme.secondaryText)
                 .multilineTextAlignment(.center)
             
             Button(action: {
@@ -429,7 +429,7 @@ struct MandatoryProfileEditView: View {
             }) {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundColor(.red)
-                    .background(Color(.systemBackground))
+                    .background(SpectRoomTheme.card)
                     .clipShape(Circle())
             }
             .offset(x: 40, y: -40)
@@ -450,7 +450,7 @@ struct MandatoryProfileEditView: View {
             }) {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundColor(.red)
-                    .background(Color(.systemBackground))
+                    .background(SpectRoomTheme.card)
                     .clipShape(Circle())
             }
             .offset(x: 40, y: -40)
@@ -501,7 +501,7 @@ struct MandatoryProfileEditView: View {
                     .edgesIgnoringSafeArea(.all)
                 ProgressView("Saving...")
                     .padding()
-                    .background(Color(.systemBackground))
+                    .background(SpectRoomTheme.card)
                     .cornerRadius(10)
             }
         }

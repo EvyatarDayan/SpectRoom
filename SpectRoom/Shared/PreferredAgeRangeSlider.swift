@@ -83,7 +83,7 @@ struct PreferredAgeRangeSlider: View {
         onDrag: @escaping (Double) -> Void
     ) -> some View {
         Circle()
-            .fill(Color(.systemBackground))
+            .fill(SpectRoomTheme.card)
             .frame(width: thumbSize, height: thumbSize)
             .overlay(Circle().strokeBorder(accentColor, lineWidth: 3))
             .overlay(

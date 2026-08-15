@@ -107,11 +107,11 @@ struct ProfileMainPhotoCard: View {
                 VStack(spacing: 8) {
                     Image(systemName: placeholderSystemName)
                         .font(.system(size: 44, weight: .medium))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
                     if showsCameraBadge {
                         Text("profile.edit.add.photo".localized)
                             .font(.subheadline)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
                     }
                 }
             )
@@ -178,7 +178,7 @@ struct ProfileGalleryPhotosCard: View {
             if remoteToShow.isEmpty && localToShow.isEmpty && onAdd == nil {
                 Text(emptyMessage)
                     .font(.body)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
                     .italic()
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 8)
@@ -191,14 +191,14 @@ struct ProfileGalleryPhotosCard: View {
             if let footerText {
                 Text(footerText)
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: ProfilePhotoStyle.cardCorner, style: .continuous)
-                .fill(usesWhiteBackground ? Color(.systemBackground) : Color(.secondarySystemGroupedBackground))
+                .fill(usesWhiteBackground ? SpectRoomTheme.card : SpectRoomTheme.card)
         )
         .shadow(color: ProfilePhotoStyle.cardShadow, radius: 16, x: 0, y: 8)
     }
@@ -237,7 +237,7 @@ struct ProfileGalleryPhotosCard: View {
                     .frame(height: ProfilePhotoStyle.galleryPhotoSize)
                     .background(
                         RoundedRectangle(cornerRadius: ProfilePhotoStyle.photoCorner, style: .continuous)
-                            .fill(Color(.systemGroupedBackground))
+                            .fill(SpectRoomTheme.card)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: ProfilePhotoStyle.photoCorner, style: .continuous)
@@ -303,7 +303,7 @@ struct ProfileGalleryPhotosCard: View {
                             .fill(Color.gray.opacity(0.2))
                             .overlay(
                                 Image(systemName: "photo")
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
                             )
                     }
                 }

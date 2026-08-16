@@ -445,13 +445,14 @@ struct SearchView: View {
                                     }
                                 }
                             )
+                            .padding(.horizontal, 30)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.top, -120)
                         .padding(.bottom, 10)
                         .transition(
                             .opacity.combined(
-                                with: .scale(scale: 0.82, anchor: .topTrailing)
+                                with: .scale(scale: 0.82, anchor: .top)
                             )
                         )
                     }
@@ -479,13 +480,14 @@ struct SearchView: View {
                                     }
                                 }
                             )
+                            .padding(.horizontal, 30)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.top, -120)
                         .padding(.bottom, 10)
                         .transition(
                             .opacity.combined(
-                                with: .scale(scale: 0.82, anchor: .topLeading)
+                                with: .scale(scale: 0.82, anchor: .top)
                             )
                         )
                     }
@@ -2333,139 +2335,234 @@ struct FilterChip: View {
 private struct EnergyLevelPickerOverlay: View {
     let selectedLevel: Int
     let onSelect: (Int) -> Void
+    @Environment(\.colorScheme) private var colorScheme
     
-    private let cardWidth = UIScreen.main.bounds.width - 60
-    private let cardHeight: CGFloat = 500
+    private let contentPadding: CGFloat = 24
+    
+    private var isLight: Bool { colorScheme == .light }
+    private var panelBackground: Color { isLight ? Color.white : Color.black }
+    private var primaryText: Color { isLight ? Color.black : Color.white }
+    private var secondaryText: Color { isLight ? Color.black.opacity(0.55) : Color.white.opacity(0.8) }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("profile.my.energy.level".localized)
                 .font(.system(size: 24, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(primaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
             
             Text("profile.energy.level.subtitle".localized)
                 .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.white.opacity(0.8))
+                .foregroundColor(secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 8)
             
             VStack(spacing: 12) {
                 ForEach(EnergyLevelOption.allCases, id: \.rawValue) { option in
-                    let isSelected = EnergyLevelOption.resolved(from: selectedLevel) == option
-                    Button {
-                        onSelect(option.rawValue)
-                    } label: {
-                        HStack(alignment: .top, spacing: 12) {
-                            Text(option.emoji)
-                                .font(.system(size: 28))
-                                .frame(width: 36)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(option.title)
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(.white)
-                                    .multilineTextAlignment(.leading)
-                                Text(option.subtitle)
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.78))
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .multilineTextAlignment(.leading)
-                            }
-                            Spacer(minLength: 8)
-                            if isSelected {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(option.color)
-                                    .padding(.top, 4)
-                            }
-                        }
-                        .padding(16)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .fill(option.color.opacity(isSelected ? 0.28 : 0.12))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .strokeBorder(option.color.opacity(isSelected ? 0.9 : 0.35), lineWidth: isSelected ? 2 : 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    energyOptionRow(option)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(24)
-        .frame(width: cardWidth, height: cardHeight, alignment: .topLeading)
-        .background(Color.black)
+        .padding(contentPadding)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .background(panelBackground)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(isLight ? Color.black.opacity(0.06) : Color.clear, lineWidth: 1)
+        )
+    }
+    
+    private func energyOptionRow(_ option: EnergyLevelOption) -> some View {
+        let isSelected = EnergyLevelOption.resolved(from: selectedLevel) == option
+        let accent = option.color
+        let fill = isSelected
+            ? accent.opacity(isLight ? 0.18 : 0.28)
+            : (isLight ? Color.black.opacity(0.05) : Color.white.opacity(0.08))
+        let stroke = isSelected
+            ? accent.opacity(0.95)
+            : (isLight ? Color.black.opacity(0.14) : Color.white.opacity(0.18))
+        let titleColor = isSelected
+            ? primaryText
+            : primaryText.opacity(0.75)
+        let detailColor = isSelected
+            ? secondaryText
+            : secondaryText.opacity(0.85)
+        
+        return Button {
+            onSelect(option.rawValue)
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Text(option.emoji)
+                    .font(.system(size: 28))
+                    .frame(width: 36, height: 36)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(option.title)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(titleColor)
+                        .multilineTextAlignment(.leading)
+                    Text(option.subtitle)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(detailColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                }
+                
+                Spacer(minLength: 8)
+                
+                ZStack {
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(accent)
+                    }
+                }
+                .frame(width: 20, height: 20)
+                .padding(.top, 8)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(fill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(stroke, lineWidth: isSelected ? 2 : 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
 private struct SearchRadiusPickerOverlay: View {
     let selectedOption: DiscoverDistanceOption
     let onSelect: (DiscoverDistanceOption) -> Void
+    @Environment(\.colorScheme) private var colorScheme
     
-    private let cardWidth = UIScreen.main.bounds.width - 60
-    private let cardHeight: CGFloat = 500
+    private let contentPadding: CGFloat = 24
     private let accent = DiscoverDistanceOption.default.accentColor
+    
+    private var isLight: Bool { colorScheme == .light }
+    private var panelBackground: Color { isLight ? Color.white : Color.black }
+    private var primaryText: Color { isLight ? Color.black : Color.white }
+    private var secondaryText: Color { isLight ? Color.black.opacity(0.55) : Color.white.opacity(0.8) }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("settings.distance.limit".localized)
                 .font(.system(size: 24, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(primaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
             
             Text("search.radius.subtitle".localized)
                 .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.white.opacity(0.8))
+                .foregroundColor(secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 8)
             
             VStack(spacing: 12) {
                 ForEach(DiscoverDistanceOption.allCases) { option in
-                    let isSelected = option == selectedOption
-                    Button {
-                        onSelect(option)
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: option == .unlimited ? "globe" : "location.fill")
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundColor(accent)
-                                .frame(width: 36)
-                            Text(option.title)
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(.white)
-                            Spacer(minLength: 8)
-                            if isSelected {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(accent)
-                            }
-                        }
-                        .padding(16)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .fill(accent.opacity(isSelected ? 0.28 : 0.12))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .strokeBorder(accent.opacity(isSelected ? 0.9 : 0.35), lineWidth: isSelected ? 2 : 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    distanceOptionRow(option)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(24)
-        .frame(width: cardWidth, height: cardHeight, alignment: .topLeading)
-        .background(Color.black)
+        .padding(contentPadding)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .background(panelBackground)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(isLight ? Color.black.opacity(0.06) : Color.clear, lineWidth: 1)
+        )
+    }
+    
+    private func distanceOptionRow(_ option: DiscoverDistanceOption) -> some View {
+        let isSelected = option == selectedOption
+        let iconColor = isSelected ? accent : (isLight ? Color.black.opacity(0.45) : Color.white.opacity(0.45))
+        let fill = isSelected
+            ? accent.opacity(isLight ? 0.18 : 0.28)
+            : (isLight ? Color.black.opacity(0.05) : Color.white.opacity(0.08))
+        let stroke = isSelected
+            ? accent.opacity(0.95)
+            : (isLight ? Color.black.opacity(0.14) : Color.white.opacity(0.18))
+        
+        return Button {
+            onSelect(option)
+        } label: {
+            HStack(spacing: 12) {
+                Group {
+                    if option == .unlimited {
+                        Image("World")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 22, height: 22)
+                    } else {
+                        Image("Radius")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 22, height: 22)
+                    }
+                }
+                .foregroundColor(iconColor)
+                .frame(width: 36, height: 36)
+                Group {
+                    if option == .unlimited {
+                        Text(option.title)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(isSelected ? (isLight ? Color.black : Color.white) : primaryText.opacity(0.75))
+                    } else {
+                        Text(option.title)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(isSelected ? (isLight ? Color.black : Color.white) : primaryText.opacity(0.75))
+                            .frame(width: 64, alignment: .leading)
+                    }
+                }
+                if let barWidth = illustrationBarWidth(for: option) {
+                    Capsule(style: .continuous)
+                        .fill(iconColor)
+                        .frame(width: barWidth, height: 3)
+                }
+                Spacer(minLength: 8)
+                ZStack {
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(accent)
+                    }
+                }
+                .frame(width: 20, height: 20)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(fill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(stroke, lineWidth: isSelected ? 2 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+    
+    /// Tiny length cue next to each radius option (none for unlimited).
+    private func illustrationBarWidth(for option: DiscoverDistanceOption) -> CGFloat? {
+        switch option {
+        case .fiveKm: return 47
+        case .tenKm: return 64
+        case .twentyKm: return 80
+        case .fiftyKm: return 97
+        case .unlimited: return nil
+        }
     }
 }
 

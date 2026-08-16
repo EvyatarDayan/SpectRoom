@@ -445,7 +445,7 @@ struct SearchView: View {
                                     }
                                 }
                             )
-                            .padding(.horizontal, 30)
+                            .padding(.horizontal, DiscoverHomeDialogMetrics.horizontalInset)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.top, -120)
@@ -480,7 +480,6 @@ struct SearchView: View {
                                     }
                                 }
                             )
-                            .padding(.horizontal, 30)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.top, -120)
@@ -2332,12 +2331,43 @@ struct FilterChip: View {
     }
 }
 
+/// Shared Home picker chrome so energy + radius dialogs match in size and position.
+private enum DiscoverHomeDialogMetrics {
+    static let horizontalInset: CGFloat = 30
+    static let contentPadding: CGFloat = 24
+    static let sectionSpacing: CGFloat = 12
+    static let energyRowHeight: CGFloat = 112
+    static let energyRowCount = 3
+    static let distanceRowCount = 5
+    static let headerBlockHeight: CGFloat = 78
+    
+    /// Same width energy gets via `.padding(.horizontal, horizontalInset)`.
+    static var panelWidth: CGFloat {
+        UIScreen.main.bounds.width - (horizontalInset * 2)
+    }
+    
+    static var optionsStackHeight: CGFloat {
+        CGFloat(energyRowCount) * energyRowHeight
+            + CGFloat(energyRowCount - 1) * sectionSpacing
+    }
+    
+    static var distanceRowHeight: CGFloat {
+        let gaps = CGFloat(distanceRowCount - 1) * sectionSpacing
+        return (optionsStackHeight - gaps) / CGFloat(distanceRowCount)
+    }
+    
+    static var panelHeight: CGFloat {
+        contentPadding * 2
+            + headerBlockHeight
+            + sectionSpacing
+            + optionsStackHeight
+    }
+}
+
 private struct EnergyLevelPickerOverlay: View {
     let selectedLevel: Int
     let onSelect: (Int) -> Void
     @Environment(\.colorScheme) private var colorScheme
-    
-    private let contentPadding: CGFloat = 24
     
     private var isLight: Bool { colorScheme == .light }
     private var panelBackground: Color { isLight ? Color.white : Color.black }
@@ -2345,28 +2375,29 @@ private struct EnergyLevelPickerOverlay: View {
     private var secondaryText: Color { isLight ? Color.black.opacity(0.55) : Color.white.opacity(0.8) }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("profile.my.energy.level".localized)
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(primaryText)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: DiscoverHomeDialogMetrics.sectionSpacing) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("profile.my.energy.level".localized)
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(primaryText)
+                
+                Text("profile.energy.level.subtitle".localized)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, minHeight: DiscoverHomeDialogMetrics.headerBlockHeight, maxHeight: DiscoverHomeDialogMetrics.headerBlockHeight, alignment: .topLeading)
             
-            Text("profile.energy.level.subtitle".localized)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, 8)
-            
-            VStack(spacing: 12) {
+            VStack(spacing: DiscoverHomeDialogMetrics.sectionSpacing) {
                 ForEach(EnergyLevelOption.allCases, id: \.rawValue) { option in
                     energyOptionRow(option)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: DiscoverHomeDialogMetrics.optionsStackHeight, maxHeight: DiscoverHomeDialogMetrics.optionsStackHeight, alignment: .top)
         }
-        .padding(contentPadding)
-        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(DiscoverHomeDialogMetrics.contentPadding)
+        .frame(maxWidth: .infinity)
+        .frame(height: DiscoverHomeDialogMetrics.panelHeight)
         .background(panelBackground)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
@@ -2394,7 +2425,7 @@ private struct EnergyLevelPickerOverlay: View {
         return Button {
             onSelect(option.rawValue)
         } label: {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 Text(option.emoji)
                     .font(.system(size: 28))
                     .frame(width: 36, height: 36)
@@ -2407,11 +2438,10 @@ private struct EnergyLevelPickerOverlay: View {
                     Text(option.subtitle)
                         .font(.system(size: 15, weight: .medium))
                         .foregroundColor(detailColor)
-                        .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(.leading)
+                        .lineLimit(3)
                 }
-                
-                Spacer(minLength: 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 
                 ZStack {
                     if isSelected {
@@ -2421,10 +2451,14 @@ private struct EnergyLevelPickerOverlay: View {
                     }
                 }
                 .frame(width: 20, height: 20)
-                .padding(.top, 8)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .frame(
+                maxWidth: .infinity,
+                minHeight: DiscoverHomeDialogMetrics.energyRowHeight,
+                maxHeight: DiscoverHomeDialogMetrics.energyRowHeight,
+                alignment: .center
+            )
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(fill)
@@ -2443,7 +2477,6 @@ private struct SearchRadiusPickerOverlay: View {
     let onSelect: (DiscoverDistanceOption) -> Void
     @Environment(\.colorScheme) private var colorScheme
     
-    private let contentPadding: CGFloat = 24
     private let accent = DiscoverDistanceOption.default.accentColor
     
     private var isLight: Bool { colorScheme == .light }
@@ -2452,28 +2485,28 @@ private struct SearchRadiusPickerOverlay: View {
     private var secondaryText: Color { isLight ? Color.black.opacity(0.55) : Color.white.opacity(0.8) }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("settings.distance.limit".localized)
-                .font(.system(size: 24, weight: .bold))
-                .foregroundColor(primaryText)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: DiscoverHomeDialogMetrics.sectionSpacing) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("settings.distance.limit".localized)
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(primaryText)
+                
+                Text("search.radius.subtitle".localized)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, minHeight: DiscoverHomeDialogMetrics.headerBlockHeight, maxHeight: DiscoverHomeDialogMetrics.headerBlockHeight, alignment: .topLeading)
             
-            Text("search.radius.subtitle".localized)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, 8)
-            
-            VStack(spacing: 12) {
+            VStack(spacing: DiscoverHomeDialogMetrics.sectionSpacing) {
                 ForEach(DiscoverDistanceOption.allCases) { option in
                     distanceOptionRow(option)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: DiscoverHomeDialogMetrics.optionsStackHeight, maxHeight: DiscoverHomeDialogMetrics.optionsStackHeight, alignment: .top)
         }
-        .padding(contentPadding)
-        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(DiscoverHomeDialogMetrics.contentPadding)
+        .frame(width: DiscoverHomeDialogMetrics.panelWidth, height: DiscoverHomeDialogMetrics.panelHeight)
         .background(panelBackground)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
@@ -2495,7 +2528,7 @@ private struct SearchRadiusPickerOverlay: View {
         return Button {
             onSelect(option)
         } label: {
-            HStack(spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
                 Group {
                     if option == .unlimited {
                         Image("World")
@@ -2513,24 +2546,26 @@ private struct SearchRadiusPickerOverlay: View {
                 }
                 .foregroundColor(iconColor)
                 .frame(width: 36, height: 36)
-                Group {
-                    if option == .unlimited {
-                        Text(option.title)
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(isSelected ? (isLight ? Color.black : Color.white) : primaryText.opacity(0.75))
-                    } else {
-                        Text(option.title)
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(isSelected ? (isLight ? Color.black : Color.white) : primaryText.opacity(0.75))
-                            .frame(width: 64, alignment: .leading)
-                    }
+                
+                if option == .unlimited {
+                    Text(option.title)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(isSelected ? primaryText : primaryText.opacity(0.75))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text(option.title)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(isSelected ? primaryText : primaryText.opacity(0.75))
+                        .frame(width: 64, alignment: .leading)
+                    
+                    // Overlay keeps bar length from contributing to the row's minimum width.
+                    Color.clear
+                        .frame(maxWidth: .infinity)
+                        .overlay(alignment: .leading) {
+                            illustrationBar(for: option, color: iconColor)
+                        }
                 }
-                if let barWidth = illustrationBarWidth(for: option) {
-                    Capsule(style: .continuous)
-                        .fill(iconColor)
-                        .frame(width: barWidth, height: 3)
-                }
-                Spacer(minLength: 8)
+                
                 ZStack {
                     if isSelected {
                         Image(systemName: "checkmark")
@@ -2540,8 +2575,13 @@ private struct SearchRadiusPickerOverlay: View {
                 }
                 .frame(width: 20, height: 20)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .frame(
+                maxWidth: .infinity,
+                minHeight: DiscoverHomeDialogMetrics.distanceRowHeight,
+                maxHeight: DiscoverHomeDialogMetrics.distanceRowHeight,
+                alignment: .center
+            )
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(fill)
@@ -2552,6 +2592,15 @@ private struct SearchRadiusPickerOverlay: View {
             )
         }
         .buttonStyle(.plain)
+    }
+    
+    @ViewBuilder
+    private func illustrationBar(for option: DiscoverDistanceOption, color: Color) -> some View {
+        if let barWidth = illustrationBarWidth(for: option) {
+            Capsule(style: .continuous)
+                .fill(color)
+                .frame(width: barWidth, height: 3)
+        }
     }
     
     /// Tiny length cue next to each radius option (none for unlimited).

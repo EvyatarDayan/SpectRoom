@@ -3292,9 +3292,8 @@ private extension FirebaseAuthService {
     
     static func formatDistance(_ distanceKm: Double, forMatches: Bool = false) -> String {
         if distanceKm < 1.0 {
-            let meters = Int(distanceKm * 1000)
-            let key = forMatches ? "matches.distance.m" : "search.distance.m"
-            return String(format: key.localized, "\(meters)")
+            let key = forMatches ? "matches.distance.km" : "search.distance.km"
+            return String(format: key.localized, "1")
         }
 
         let roundedDistance = round(distanceKm * 10) / 10

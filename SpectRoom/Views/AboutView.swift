@@ -24,7 +24,7 @@ struct AboutView: View {
                             Text("About SpectRoom")
                                 .font(.system(size: 24, weight: .bold))
                                 .foregroundColor(SpectRoomTheme.text)
-                                .padding(.top, 70)
+                                .padding(.top, 16)
                             
                             Text("SpectRoom is a dating and connection app thoughtfully designed for autistic adults and the broader neurodivergent community.")
                                 .font(.body)

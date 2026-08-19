@@ -536,16 +536,7 @@ private struct BlockedUsersModal: View {
         NavigationView {
             Group {
                 if appState.blockedUsers.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "person.crop.circle.badge.xmark")
-                            .font(.system(size: 48))
-                            .foregroundColor(SpectRoomTheme.secondaryText)
-                        Text("settings.blocked.users.empty".localized)
-                            .font(.headline)
-                            .foregroundColor(SpectRoomTheme.secondaryText)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(SpectRoomTheme.card)
+                    emptyBlockedUsersView
                 } else {
                     List(appState.blockedUsers) { blocked in
                         BlockedUserRow(
@@ -590,6 +581,40 @@ private struct BlockedUsersModal: View {
     private func firstName(from fullName: String) -> String {
         let components = fullName.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
         return components.first.map(String.init) ?? fullName
+    }
+
+    private var emptyBlockedUsersView: some View {
+        VStack {
+            Spacer()
+            VStack(spacing: 12) {
+                Text("🚫")
+                    .font(.system(size: 48))
+                    .frame(width: 96, height: 96)
+                    .background(
+                        Circle()
+                            .fill(Color.red.opacity(0.12))
+                    )
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.red.opacity(0.18), lineWidth: 1)
+                    )
+                    .shadow(color: Color.red.opacity(0.14), radius: 12, y: 4)
+
+                Text("settings.blocked.users.empty".localized)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(SpectRoomTheme.text)
+                    .multilineTextAlignment(.center)
+
+                Text("settings.blocked.users.empty.description".localized)
+                    .font(.subheadline)
+                    .foregroundColor(SpectRoomTheme.text)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 32)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(SpectRoomBackground())
     }
 }
 

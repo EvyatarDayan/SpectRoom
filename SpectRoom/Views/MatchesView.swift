@@ -44,10 +44,12 @@ struct MatchesView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                matchesSearchBar
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
-                    .padding(.bottom, searchContentSpacing)
+                if !isLoading && !visibleMatches.isEmpty {
+                    matchesSearchBar
+                        .padding(.horizontal, 16)
+                        .padding(.top, 4)
+                        .padding(.bottom, searchContentSpacing)
+                }
                 
                 Group {
                     if isLoading {
@@ -372,23 +374,34 @@ private extension MatchesView {
     var emptyMatchesView: some View {
         VStack {
             Spacer()
-            VStack(spacing: 20) {
-                Image(systemName: "heart")
-                    .font(.system(size: 80))
-                    .foregroundColor(.gray.opacity(0.6))
+            VStack(spacing: 12) {
+                Text("💕")
+                    .font(.system(size: 48))
+                    .frame(width: 96, height: 96)
+                    .background(
+                        Circle()
+                            .fill(Color.pink.opacity(0.16))
+                    )
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.pink.opacity(0.22), lineWidth: 1)
+                    )
+                    .shadow(color: Color.pink.opacity(0.18), radius: 12, y: 4)
+                
                 Text("matches.empty".localized)
-                    .font(.title2)
-                    .fontWeight(.medium)
-                    .foregroundColor(SpectRoomTheme.secondaryText)
-                Text("matches.empty.description".localized)
-                    .font(.body)
-                    .foregroundColor(SpectRoomTheme.secondaryText)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(SpectRoomTheme.text)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                
+                Text("matches.empty.description".localized)
+                    .font(.subheadline)
+                    .foregroundColor(SpectRoomTheme.text)
+                    .multilineTextAlignment(.center)
+                
                 Button(action: {
                     selectedTab = 2
                 }) {
-                    Text("matches.start.swiping".localized)
+                    Text("messages.empty.no.matches.button".localized)
                         .font(.headline)
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
@@ -396,8 +409,10 @@ private extension MatchesView {
                         .background(Color.blue)
                         .cornerRadius(12)
                 }
+                .padding(.top, 8)
                 .padding(.horizontal, 30)
             }
+            .padding(.horizontal, 32)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -449,20 +464,30 @@ struct MatchGridCard: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: contentSpacing) {
+            ZStack(alignment: .bottom) {
+                Button(action: onTap) {
+                    profileImage
+                        .frame(width: photoSide, height: photoSide)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(photoBorderColor, lineWidth: 2)
+                        )
+                }
+                .buttonStyle(.plain)
+
+                messageButton
+                    .padding(.bottom, 10)
+            }
+
             Button(action: onTap) {
-                profileImage
-                    .frame(width: photoSide, height: photoSide)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(photoBorderColor, lineWidth: 2)
-                    )
+                infoColumn
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-
-            infoColumn
-                .frame(width: infoWidth, height: photoSide)
+            .frame(width: infoWidth, height: photoSide)
         }
         .padding(cardPadding)
         .frame(width: cardWidth, alignment: .leading)
@@ -478,50 +503,28 @@ struct MatchGridCard: View {
         }
     }
 
-    /// Three equal-height bands separated by two identical dividers;
-    /// each band centers its content vertically.
     private var infoColumn: some View {
-        let dividerHeight: CGFloat = 1
-        return GeometryReader { geo in
-            let slotHeight = (geo.size.height - dividerHeight * 2) / 3
-
+        GeometryReader { geo in
+            let midY = geo.size.height / 2
             VStack(spacing: 0) {
-                Button(action: onTap) {
-                    nameDistanceLabel
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .frame(width: geo.size.width, height: slotHeight)
-
-                thinDivider(height: dividerHeight)
-
-                Button(action: onTap) {
-                    energyLevelLabel
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .frame(width: geo.size.width, height: slotHeight)
-
-                thinDivider(height: dividerHeight)
-
-                messageButton
+                nameDistanceLabel
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    .frame(width: geo.size.width, height: slotHeight)
+                    .frame(height: midY)
+
+                Rectangle()
+                    .fill(Color(white: colorScheme == .dark ? 0.55 : 0.72).opacity(0.4))
+                    .frame(height: 1)
+                    .frame(maxWidth: .infinity)
+
+                energyLevelLabel
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .frame(height: geo.size.height - midY - 1)
             }
         }
     }
 
     private var isBlockedMatch: Bool {
         appState.isMessagingBlocked(with: profile.userId)
-    }
-
-    private func thinDivider(height: CGFloat) -> some View {
-        Rectangle()
-            .fill(Color(white: colorScheme == .dark ? 0.55 : 0.72))
-            .frame(height: height)
-            .frame(maxWidth: .infinity)
     }
 
     private var nameDistanceLabel: some View {
@@ -551,16 +554,16 @@ struct MatchGridCard: View {
         // optically centered; visible emoji sits slightly left of the text.
         return HStack(alignment: .center, spacing: 6) {
             Text(option.emoji)
-                .font(.system(size: 15))
+                .font(.system(size: 18))
                 .offset(x: 12)
             Text(title)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(option.color)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .frame(maxWidth: max(0, infoWidth - 40))
             Text(option.emoji)
-                .font(.system(size: 15))
+                .font(.system(size: 18))
                 .hidden()
                 .accessibilityHidden(true)
         }
@@ -580,9 +583,8 @@ struct MatchGridCard: View {
                     .minimumScaleFactor(0.8)
             }
             .foregroundColor(.white)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
             .background(
                 Capsule()
                     .fill(Color.blue)

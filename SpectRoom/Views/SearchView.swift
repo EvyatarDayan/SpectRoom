@@ -729,19 +729,13 @@ struct SearchView: View {
     // MARK: - Helper function to format distance string
     private func formatDistance(_ distanceKm: Double) -> String {
         if distanceKm < 1.0 {
-            // Less than 1 km, show in meters
-            let meters = Int(distanceKm * 1000)
-            return String(format: "search.distance.m".localized, "\(meters)")
-        } else {
-            // 1 km or more, show in kilometers (rounded to 1 decimal place)
-            let roundedDistance = round(distanceKm * 10) / 10
-            if roundedDistance == floor(roundedDistance) {
-                // If it's a whole number, show without decimal
-                return String(format: "search.distance.km".localized, "\(Int(roundedDistance))")
-            } else {
-                return String(format: "search.distance.km".localized, String(format: "%.1f", roundedDistance))
-            }
+            return String(format: "search.distance.km".localized, "1")
         }
+        let roundedDistance = round(distanceKm * 10) / 10
+        if roundedDistance == floor(roundedDistance) {
+            return String(format: "search.distance.km".localized, "\(Int(roundedDistance))")
+        }
+        return String(format: "search.distance.km".localized, String(format: "%.1f", roundedDistance))
     }
     
     // MARK: - Helper function to check if two users match based on age preferences
@@ -2340,6 +2334,7 @@ private enum DiscoverHomeDialogMetrics {
     static let energyRowCount = 3
     static let distanceRowCount = 5
     static let headerBlockHeight: CGFloat = 78
+    static let accent = Color(hex: "#64B5F6")
     
     /// Same width energy gets via `.padding(.horizontal, horizontalInset)`.
     static var panelWidth: CGFloat {
@@ -2369,6 +2364,7 @@ private struct EnergyLevelPickerOverlay: View {
     let onSelect: (Int) -> Void
     @Environment(\.colorScheme) private var colorScheme
     
+    private let accent = DiscoverHomeDialogMetrics.accent
     private var isLight: Bool { colorScheme == .light }
     private var panelBackground: Color { isLight ? Color.white : Color.black }
     private var primaryText: Color { isLight ? Color.black : Color.white }
@@ -2408,7 +2404,6 @@ private struct EnergyLevelPickerOverlay: View {
     
     private func energyOptionRow(_ option: EnergyLevelOption) -> some View {
         let isSelected = EnergyLevelOption.resolved(from: selectedLevel) == option
-        let accent = option.color
         let fill = isSelected
             ? accent.opacity(isLight ? 0.18 : 0.28)
             : (isLight ? Color.black.opacity(0.05) : Color.white.opacity(0.08))
@@ -2477,7 +2472,7 @@ private struct SearchRadiusPickerOverlay: View {
     let onSelect: (DiscoverDistanceOption) -> Void
     @Environment(\.colorScheme) private var colorScheme
     
-    private let accent = DiscoverDistanceOption.default.accentColor
+    private let accent = DiscoverHomeDialogMetrics.accent
     
     private var isLight: Bool { colorScheme == .light }
     private var panelBackground: Color { isLight ? Color.white : Color.black }
@@ -2597,9 +2592,21 @@ private struct SearchRadiusPickerOverlay: View {
     @ViewBuilder
     private func illustrationBar(for option: DiscoverDistanceOption, color: Color) -> some View {
         if let barWidth = illustrationBarWidth(for: option) {
-            Capsule(style: .continuous)
-                .fill(color)
-                .frame(width: barWidth, height: 3)
+            let tickHeight: CGFloat = 9
+            let tickWidth: CGFloat = 2
+            ZStack(alignment: .leading) {
+                Capsule(style: .continuous)
+                    .fill(color)
+                    .frame(width: barWidth, height: 3)
+                Capsule(style: .continuous)
+                    .fill(color)
+                    .frame(width: tickWidth, height: tickHeight)
+                Capsule(style: .continuous)
+                    .fill(color)
+                    .frame(width: tickWidth, height: tickHeight)
+                    .offset(x: barWidth - tickWidth)
+            }
+            .frame(width: barWidth, height: tickHeight, alignment: .center)
         }
     }
     
@@ -2624,6 +2631,10 @@ struct UserProfileModal: View {
     @State private var selectedPhotoIndex = 0
     @State private var refreshedProfile: ProfileCard?
     @State private var showingBlockConfirmation = false
+    @State private var showingReportReason = false
+    @State private var showingReportThankYou = false
+    @State private var pendingReportReason: ProfileReportReason?
+    @State private var pendingReportDetails: String?
     @State private var showingMatchDetails = false
     @State private var showingLookingForDetails = false
     
@@ -2789,20 +2800,44 @@ struct UserProfileModal: View {
                 .presentationBackground(.clear)
             }
         }
-        .alert(
-            String(format: "profile.block.confirm.title".localized, firstName(from: displayProfile.name)),
-            isPresented: $showingBlockConfirmation
-        ) {
-            Button("common.cancel".localized, role: .cancel) {}
-            Button("profile.block.confirm.action".localized, role: .destructive) {
-                appState.blockUser(userId: displayProfile.userId, name: displayProfile.name)
-                dismiss()
-            }
-        } message: {
-            Text("profile.block.confirm.message".localized)
-        }
         .overlay {
-            if showingMatchDetails {
+            if showingBlockConfirmation {
+                BlockConfirmationOverlay(
+                    firstName: firstName(from: displayProfile.name),
+                    onCancel: { showingBlockConfirmation = false },
+                    onBlock: {
+                        showingBlockConfirmation = false
+                        appState.blockUser(userId: displayProfile.userId, name: displayProfile.name)
+                        dismiss()
+                    },
+                    onBlockAndReport: {
+                        showingBlockConfirmation = false
+                        appState.blockUser(userId: displayProfile.userId, name: displayProfile.name)
+                        pendingReportReason = nil
+                        pendingReportDetails = nil
+                        showingReportReason = true
+                    }
+                )
+            } else if showingReportReason {
+                ReportReasonOverlay(
+                    firstName: firstName(from: displayProfile.name),
+                    onCancel: {
+                        showingReportReason = false
+                        dismiss()
+                    },
+                    onSubmit: { reason, details in
+                        pendingReportReason = reason
+                        pendingReportDetails = details
+                        showingReportReason = false
+                        showingReportThankYou = true
+                    }
+                )
+            } else if showingReportThankYou {
+                ReportThankYouOverlay {
+                    showingReportThankYou = false
+                    dismiss()
+                }
+            } else if showingMatchDetails {
                 MatchDetailsOverlay(
                     firstName: firstName(from: displayProfile.name),
                     breakdown: resolvedMatchBreakdown,
@@ -3355,6 +3390,410 @@ struct UserProfileModal: View {
     }
 }
 
+private enum ProfileReportReason: String, CaseIterable, Identifiable {
+    case inappropriateContent
+    case fakeProfileOrSpam
+    case harassmentOrBullying
+    case somethingElse
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .inappropriateContent: return "profile.report.reason.inappropriate.content".localized
+        case .fakeProfileOrSpam: return "profile.report.reason.fake.profile.spam".localized
+        case .harassmentOrBullying: return "profile.report.reason.harassment.bullying".localized
+        case .somethingElse: return "profile.report.reason.something.else".localized
+        }
+    }
+}
+
+private struct BlockConfirmationOverlay: View {
+    let firstName: String
+    let onCancel: () -> Void
+    let onBlock: () -> Void
+    let onBlockAndReport: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onCancel)
+
+            VStack(spacing: 0) {
+                VStack(spacing: 8) {
+                    Text(String(format: "profile.block.confirm.title".localized, firstName))
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(SpectRoomTheme.text)
+
+                    Text("profile.block.confirm.message".localized)
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 22)
+                .padding(.bottom, 18)
+
+                Divider()
+
+                Button(action: onBlock) {
+                    Text("profile.block.confirm.action".localized)
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.plain)
+
+                Divider()
+
+                Button(action: onBlockAndReport) {
+                    Text("profile.block.confirm.block.and.report".localized)
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.plain)
+
+                Divider()
+
+                Button(action: onCancel) {
+                    Text("common.cancel".localized)
+                        .font(.body.weight(.medium))
+                        .foregroundColor(SpectRoomTheme.text)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.plain)
+            }
+            .background(SpectRoomTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 36)
+        }
+    }
+}
+
+private struct ReportReasonOverlay: View {
+    let firstName: String
+    let onCancel: () -> Void
+    let onSubmit: (ProfileReportReason, String?) -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var isTextFieldFocused: Bool
+    @State private var selectedReason: ProfileReportReason?
+    @State private var somethingElseText = ""
+    @State private var didAttemptSubmit = false
+    @State private var showBlockedNotReportedConfirmation = false
+
+    private let somethingElseMinChars = 20
+    private let somethingElseMaxChars = 200
+
+    private var trimmedSomethingElseText: String {
+        somethingElseText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var showSomethingElseMinWarning: Bool {
+        selectedReason == .somethingElse
+            && didAttemptSubmit
+            && trimmedSomethingElseText.count < somethingElseMinChars
+    }
+
+    private var isSomethingElseActive: Bool {
+        selectedReason == .somethingElse
+    }
+
+    private var allReasons: [ProfileReportReason] {
+        ProfileReportReason.allCases
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    if showBlockedNotReportedConfirmation {
+                        onCancel()
+                    }
+                }
+
+            if showBlockedNotReportedConfirmation {
+                blockedNotReportedContent
+            } else {
+                reportFormContent
+            }
+        }
+    }
+
+    private var blockedNotReportedContent: some View {
+        VStack(spacing: 0) {
+            Text(String(format: "profile.report.blocked.not.reported".localized, firstName))
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .foregroundColor(SpectRoomTheme.text)
+                .padding(.horizontal, 20)
+                .padding(.top, 22)
+                .padding(.bottom, 18)
+
+            Divider()
+
+            Button(action: onCancel) {
+                Text("common.got.it".localized)
+                    .font(.body.weight(.semibold))
+                    .foregroundColor(.blue)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+            }
+            .buttonStyle(.plain)
+        }
+        .background(SpectRoomTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 24)
+    }
+
+    private var reportFormContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(String(format: "profile.report.blocked.notice".localized, firstName))
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(SpectRoomTheme.text)
+                        .multilineTextAlignment(.leading)
+
+                    Divider()
+
+                    Text(String(format: "profile.report.title".localized, firstName))
+                        .font(.headline)
+                        .foregroundColor(SpectRoomTheme.text)
+                        .multilineTextAlignment(.leading)
+
+                    Text(String(format: "profile.report.confidential".localized, firstName))
+                        .font(.subheadline)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(spacing: 10) {
+                    ForEach(allReasons) { reason in
+                        reportOptionButton(reason: reason, isSelected: selectedReason == reason) {
+                            selectReason(reason)
+                        }
+                    }
+
+                    textFieldSection
+                }
+
+                Button {
+                    submitReport()
+                } label: {
+                    Text("profile.report.submit".localized)
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.blue)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    showBlockedNotReportedConfirmation = true
+                } label: {
+                    Text("common.cancel".localized)
+                        .font(.body.weight(.medium))
+                        .foregroundColor(SpectRoomTheme.secondaryText)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(20)
+            .background(SpectRoomTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 24)
+    }
+
+    private var textFieldSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .topLeading) {
+                if somethingElseText.isEmpty {
+                    Text("profile.report.something.else.placeholder".localized)
+                        .font(.body)
+                        .foregroundColor(Color.gray.opacity(isSomethingElseActive ? 0.6 : 0.35))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 14)
+                        .allowsHitTesting(false)
+                }
+
+                TextEditor(text: $somethingElseText)
+                    .frame(height: 100)
+                    .padding(8)
+                    .scrollContentBackground(.hidden)
+                    .autocorrectionDisabled()
+                    .focused($isTextFieldFocused)
+                    .disabled(!isSomethingElseActive)
+                    .opacity(isSomethingElseActive ? 1 : 0.45)
+                    .onChange(of: somethingElseText) { _, newValue in
+                        if newValue.count > somethingElseMaxChars {
+                            somethingElseText = String(newValue.prefix(somethingElseMaxChars))
+                        }
+                    }
+            }
+            .background(isSomethingElseActive ? SpectRoomTheme.background : SpectRoomTheme.background.opacity(0.6))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(
+                        showSomethingElseMinWarning ? Color.red : Color.gray.opacity(isSomethingElseActive ? 0.25 : 0.15),
+                        lineWidth: showSomethingElseMinWarning ? 1.5 : 1
+                    )
+            )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                selectSomethingElseField()
+            }
+
+            HStack {
+                Text(showSomethingElseMinWarning ? "support.message.min.chars".localized : " ")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.red)
+                    .opacity(showSomethingElseMinWarning ? 1 : 0)
+                Spacer()
+                Text("\(somethingElseText.count) / \(somethingElseMaxChars)")
+                    .font(.system(size: 12))
+                    .foregroundColor(SpectRoomTheme.secondaryText)
+                    .opacity(isSomethingElseActive ? 1 : 0.45)
+            }
+            .padding(.top, 2)
+        }
+        .opacity(isSomethingElseActive ? 1 : 0.85)
+    }
+
+    private func submitReport() {
+        didAttemptSubmit = true
+        guard let selectedReason else { return }
+        if selectedReason == .somethingElse {
+            guard trimmedSomethingElseText.count >= somethingElseMinChars else { return }
+            onSubmit(selectedReason, trimmedSomethingElseText)
+            return
+        }
+        onSubmit(selectedReason, nil)
+    }
+
+    private func selectReason(_ reason: ProfileReportReason) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            selectedReason = reason
+            didAttemptSubmit = false
+            if reason == .somethingElse {
+                isTextFieldFocused = true
+            } else {
+                isTextFieldFocused = false
+            }
+        }
+    }
+
+    private func selectSomethingElseField() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            selectedReason = .somethingElse
+            isTextFieldFocused = true
+        }
+    }
+
+    @ViewBuilder
+    private func reportOptionButton(
+        reason: ProfileReportReason,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                reportIcon(for: reason)
+                    .frame(width: 24, height: 24)
+
+                Text(reason.label)
+                    .font(.body)
+                    .foregroundColor(SpectRoomTheme.text)
+                    .multilineTextAlignment(.leading)
+
+                Spacer(minLength: 0)
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(.blue)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(isSelected ? Color.blue.opacity(0.08) : SpectRoomTheme.background)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(isSelected ? Color.blue : SpectRoomTheme.subtleBorder(for: colorScheme), lineWidth: isSelected ? 1.5 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func reportIcon(for reason: ProfileReportReason) -> some View {
+        switch reason {
+        case .inappropriateContent:
+            Image(systemName: "photo.badge.exclamationmark")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundColor(.orange)
+        case .fakeProfileOrSpam:
+            Text("🤖")
+                .font(.system(size: 20))
+        case .harassmentOrBullying:
+            Text("🚫")
+                .font(.system(size: 20))
+        case .somethingElse:
+            Text("💬")
+                .font(.system(size: 20))
+        }
+    }
+}
+
+private struct ReportThankYouOverlay: View {
+    let onDismiss: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onDismiss)
+
+            VStack(spacing: 0) {
+                Text("profile.report.thank.you".localized)
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(SpectRoomTheme.text)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 22)
+                    .padding(.bottom, 18)
+
+                Divider()
+
+                Button(action: onDismiss) {
+                    Text("common.ok".localized)
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(.blue)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.plain)
+            }
+            .background(SpectRoomTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 36)
+        }
+    }
+}
+
 private struct MatchDetailsOverlay: View {
     let firstName: String
     let breakdown: ProfileCard.MatchBreakdown?
@@ -3364,20 +3803,26 @@ private struct MatchDetailsOverlay: View {
     let localizedLifestyle: String
     let localizedIdealFirstDate: String
     let onDismiss: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+    
+    private var isLight: Bool { colorScheme == .light }
+    private var panelBackground: Color { isLight ? Color.white : Color.black }
+    private var primaryText: Color { isLight ? Color.black : Color.white }
+    private var secondaryText: Color { isLight ? Color.black.opacity(0.55) : Color.white.opacity(0.7) }
     
     var body: some View {
         let matchPercentage = breakdown?.percentage ?? 0
-        let matchColor: Color = matchPercentage > 49 ? .green : .white.opacity(0.85)
+        let matchColor: Color = matchPercentage > 49 ? .green : primaryText.opacity(0.75)
         
         ZStack {
-            Color.black.opacity(0.6)
+            Color.black.opacity(isLight ? 0.35 : 0.6)
                 .ignoresSafeArea()
                 .onTapGesture(perform: onDismiss)
             
             VStack(alignment: .leading, spacing: 16) {
                 Text(String(format: "search.match.details.title".localized, firstName))
                     .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundColor(primaryText)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
@@ -3424,20 +3869,25 @@ private struct MatchDetailsOverlay: View {
                 
                 Button(action: onDismiss) {
                     Text("common.got.it".localized)
-                        .font(.headline)
-                        .foregroundColor(.black)
+                        .font(.body.weight(.medium))
+                        .foregroundColor(primaryText)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color.white)
-                        .cornerRadius(10)
+                        .padding(.vertical, 14)
+                        .background(Color(.systemGray5))
+                        .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 4)
             }
             .padding(24)
             .frame(maxWidth: 340)
-            .background(Color.black.opacity(0.85))
-            .cornerRadius(16)
+            .background(panelBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(isLight ? Color.black.opacity(0.06) : Color.clear, lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(isLight ? 0.12 : 0), radius: 16, x: 0, y: 8)
             .padding(.horizontal, 28)
         }
     }
@@ -3457,10 +3907,10 @@ private struct MatchDetailsOverlay: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.white.opacity(0.7))
+                .foregroundColor(secondaryText)
             Text(value)
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(primaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -3866,78 +4316,79 @@ struct PreMessageOptionsModal: View {
     let onSelect: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) var colorScheme
+    @State private var selectedCategory: QuickMessageCategory = .lowPressure
     @State private var isDragging = false
-    @State private var dragStartLocation: CGPoint = .zero
     
-    private let preMessages: [String] = [
-        "matches.pre.message.option1",
-        "matches.pre.message.option2",
-        "matches.pre.message.option3",
-        "matches.pre.message.option4",
-        "matches.pre.message.option5",
-        "matches.pre.message.option6",
-        "matches.pre.message.option7",
-        "matches.pre.message.option8",
-        "matches.pre.message.option9",
-        "matches.pre.message.option10",
-        "matches.pre.message.option11",
-        "matches.pre.message.option12"
-    ]
+    enum QuickMessageCategory: String, CaseIterable {
+        case lowPressure
+        case casual
+        case questions
+        
+        var title: String {
+            switch self {
+            case .lowPressure: return "quick.msg.category.low.pressure".localized
+            case .casual: return "quick.msg.category.casual".localized
+            case .questions: return "quick.msg.category.questions".localized
+            }
+        }
+        
+        var messages: [String] {
+            switch self {
+            case .lowPressure: return (1...8).map { "quick.msg.low.\($0)".localized }
+            case .casual: return (1...8).map { "quick.msg.casual.\($0)".localized }
+            case .questions: return (1...8).map { "quick.msg.question.\($0)".localized }
+            }
+        }
+    }
     
     var body: some View {
         NavigationView {
             ZStack {
-                // Background
                 SpectRoomBackground()
                 
-                ScrollView {
-                    VStack(spacing: 12) {
-                        ForEach(Array(preMessages.enumerated()), id: \.offset) { index, messageKey in
-                            Button(action: {
-                                // Only select if we're not dragging
-                                if !isDragging {
-                                    let message = messageKey.localized
+                VStack(spacing: 0) {
+                    categoryFilterBar
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, 8)
+                    
+                    ScrollView {
+                        VStack(spacing: 10) {
+                            ForEach(Array(selectedCategory.messages.enumerated()), id: \.offset) { _, message in
+                                Button {
+                                    guard !isDragging else { return }
                                     onSelect(message)
+                                } label: {
+                                    HStack(alignment: .center, spacing: 12) {
+                                        Text(message)
+                                            .font(.body)
+                                            .foregroundColor(SpectRoomTheme.text)
+                                            .multilineTextAlignment(.leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        Spacer()
+                                        Text("+")
+                                            .font(.system(size: 18, weight: .semibold))
+                                            .foregroundColor(SpectRoomTheme.secondaryText)
+                                    }
+                                    .padding()
+                                    .background(SpectRoomTheme.card)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 }
-                            }) {
-                                HStack(alignment: .top, spacing: 12) {
-                                    Text(messageKey.localized)
-                                        .font(.body)
-                                        .foregroundColor(SpectRoomTheme.text)
-                                        .multilineTextAlignment(.leading)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .lineLimit(nil)
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption)
-                                        .foregroundColor(SpectRoomTheme.secondaryText)
-                                        .padding(.top, 2)
-                                }
-                                .padding()
-                                .background(SpectRoomTheme.card)
-                                .cornerRadius(12)
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(PlainButtonStyle())
                         }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                        .padding(.bottom, 100)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 20)
-                    .padding(.bottom, 200)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 5)
+                            .onChanged { _ in isDragging = true }
+                            .onEnded { _ in
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { isDragging = false }
+                            }
+                    )
                 }
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 5)
-                        .onChanged { value in
-                            if !isDragging {
-                                isDragging = true
-                            }
-                        }
-                        .onEnded { _ in
-                            // Reset dragging state after a short delay to allow button action to check
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                isDragging = false
-                            }
-                        }
-                )
             }
             .navigationBarTitleDisplayMode(.inline)
             .spectRoomNavigationChrome(colorScheme: colorScheme)
@@ -3949,9 +4400,7 @@ struct PreMessageOptionsModal: View {
                         Text("matches.pre.message.subtitle".localized)
                             .font(.caption)
                             .foregroundColor(SpectRoomTheme.secondaryText)
-                            .padding(.bottom, -50)
                     }
-
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("common.close".localized) {
@@ -3959,7 +4408,34 @@ struct PreMessageOptionsModal: View {
                     }
                 }
             }
-            .padding(.top, 140)
+        }
+    }
+    
+    private var categoryFilterBar: some View {
+        HStack(spacing: 10) {
+            ForEach(QuickMessageCategory.allCases, id: \.rawValue) { category in
+                let isSelected = category == selectedCategory
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedCategory = category
+                    }
+                } label: {
+                    Text(category.title)
+                        .font(.system(size: 14, weight: isSelected ? .semibold : .medium))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .foregroundColor(isSelected ? Color.white : SpectRoomTheme.text)
+                    .background(
+                        Capsule()
+                            .fill(isSelected ? Color.blue : SpectRoomTheme.card)
+                    )
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(isSelected ? Color.clear : SpectRoomTheme.subtleBorder(for: colorScheme), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 }

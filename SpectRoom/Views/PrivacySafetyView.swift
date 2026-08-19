@@ -24,7 +24,7 @@ struct PrivacySafetyView: View {
                             Text("Privacy & Safety")
                                 .font(.system(size: 24, weight: .bold))
                                 .foregroundColor(SpectRoomTheme.text)
-                                .padding(.top, 70)
+                                .padding(.top, 16)
                             
                             Text("Your privacy, comfort, and safety are our highest priorities. Our app is designed to support neurodivergent individuals in a respectful, secure, and transparent way. The following principles explain how we protect your information and how you can stay safe while using our platform.")
                                 .font(.body)
@@ -167,7 +167,7 @@ struct PrivacySafetyView: View {
                             If you have any questions about privacy, need to report an issue, or want support:
                             
                             • In-app Support → Help & Safety
-                            • Or email us at: abashelariprod@gmail.com
+                            • Or email us at: spectroom.support@gmail.com
                             
                             We are here to help and respond as quickly as possible.
                             """

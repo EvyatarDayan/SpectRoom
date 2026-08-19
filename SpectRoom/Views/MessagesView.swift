@@ -44,13 +44,20 @@ struct MessagesView: View {
         return visibleConversations.filter { conversationMatchesSearch($0, query: query) }
     }
     
+    /// Matches that still count for this tab (excludes people either side has blocked).
+    private var visibleMatches: [MatchDisplay] {
+        appState.cachedMatches.filter { !appState.isHiddenByBlock($0.otherUser.userId) }
+    }
+    
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                messagesSearchBar
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
-                    .padding(.bottom, searchContentSpacing)
+                if !isLoading && !visibleConversations.isEmpty {
+                    messagesSearchBar
+                        .padding(.horizontal, 16)
+                        .padding(.top, 4)
+                        .padding(.bottom, searchContentSpacing)
+                }
                 
                 Group {
                     if isLoading {
@@ -391,26 +398,38 @@ struct MessagesView: View {
     }
     
     private var emptyConversationsView: some View {
-        VStack {
+        let hasMatches = !visibleMatches.isEmpty
+        
+        return VStack {
             Spacer()
-            VStack(spacing: 20) {
-                Image(systemName: "message")
-                    .font(.system(size: 80))
-                    .foregroundColor(.gray.opacity(0.6))
-                Text("messages.empty".localized)
-                    .font(.title2)
-                    .fontWeight(.medium)
-                    .foregroundColor(SpectRoomTheme.secondaryText)
-                Text("messages.empty.description".localized)
-                    .font(.body)
-                    .foregroundColor(SpectRoomTheme.secondaryText)
+            VStack(spacing: 12) {
+                Text("💬")
+                    .font(.system(size: 48))
+                    .frame(width: 96, height: 96)
+                    .background(
+                        Circle()
+                            .fill(Color.blue.opacity(0.14))
+                    )
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.blue.opacity(0.18), lineWidth: 1)
+                    )
+                    .shadow(color: Color.blue.opacity(0.16), radius: 12, y: 4)
+                
+                Text("messages.empty.has.matches.title".localized)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(SpectRoomTheme.text)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                
+                Text((hasMatches ? "messages.empty.has.matches.description" : "messages.empty.no.matches.description").localized)
+                    .font(.subheadline)
+                    .foregroundColor(SpectRoomTheme.text)
+                    .multilineTextAlignment(.center)
                 
                 Button(action: {
-                    selectedTab = 2 // Navigate to Discover tab
+                    selectedTab = hasMatches ? 1 : 2
                 }) {
-                    Text("messages.start.swiping".localized)
+                    Text((hasMatches ? "messages.empty.has.matches.button" : "messages.empty.no.matches.button").localized)
                         .font(.headline)
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
@@ -418,8 +437,10 @@ struct MessagesView: View {
                         .background(Color.blue)
                         .cornerRadius(12)
                 }
+                .padding(.top, 8)
                 .padding(.horizontal, 30)
             }
+            .padding(.horizontal, 32)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1527,13 +1548,8 @@ struct MessageConversationModal: View {
                     Spacer()
                 }
             } else if conversationMessages.isEmpty {
-                VStack(spacing: 20) {
-                    Spacer()
-                    Text("messages.no.messages.found".localized)
-                        .font(.subheadline)
-                        .foregroundColor(SpectRoomTheme.secondaryText)
-                    Spacer()
-                }
+                emptyConversationPrompt
+                    .padding(.horizontal, 32)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -1757,6 +1773,58 @@ struct MessageConversationModal: View {
                 print("❌ Failed to open chat profile for \(userId): \(error)")
             }
         }
+    }
+    
+    private var emptyConversationPrompt: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            
+            Text("💬")
+                .font(.system(size: 48))
+                .frame(width: 96, height: 96)
+                .background(
+                    Circle()
+                        .fill(Color.blue.opacity(0.14))
+                )
+                .overlay(
+                    Circle()
+                        .strokeBorder(Color.blue.opacity(0.18), lineWidth: 1)
+                )
+                .shadow(color: Color.blue.opacity(0.16), radius: 12, y: 4)
+            
+            Text(String(format: "messages.no.messages.found".localized, firstName(from: otherUserName)))
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(SpectRoomTheme.text)
+                .multilineTextAlignment(.center)
+            
+            emptyConversationBodyWithLink
+                .multilineTextAlignment(.center)
+            
+            Spacer()
+        }
+    }
+    
+    private var emptyConversationBodyWithLink: some View {
+        let prefix = "messages.no.messages.found.body".localized
+        let linkTitle = "messages.no.messages.found.quick.messages".localized
+        var bodyText = AttributedString(prefix)
+        bodyText.foregroundColor = UIColor(SpectRoomTheme.text)
+        
+        var linkText = AttributedString(linkTitle)
+        linkText.link = URL(string: "spectroom://quick-messages")
+        linkText.foregroundColor = isBlockedByRecipient ? UIColor.secondaryLabel : UIColor.systemBlue
+        linkText.underlineStyle = .single
+        
+        return Text(bodyText + linkText + AttributedString("."))
+            .font(.subheadline)
+            .environment(\.openURL, OpenURLAction { url in
+                guard url.scheme == "spectroom", url.host == "quick-messages" else {
+                    return .systemAction
+                }
+                guard !isBlockedByRecipient else { return .handled }
+                showingPreMessageOptions = true
+                return .handled
+            })
     }
     
     private func firstName(from fullName: String) -> String {

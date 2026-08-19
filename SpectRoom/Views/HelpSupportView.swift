@@ -6,137 +6,282 @@
 //
 
 import SwiftUI
-import MessageUI
+import FirebaseFirestore
 
 struct HelpSupportView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
-    @State private var showingContactForm = false
-    
+    @EnvironmentObject var appState: AppStateManager
+
+    enum Topic: String, CaseIterable, Identifiable {
+        case safety, bug, feedback, other
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .bug:      return "support.topic.bug".localized
+            case .safety:   return "support.topic.safety".localized
+            case .feedback: return "support.topic.feedback".localized
+            case .other:    return "support.topic.other".localized
+            }
+        }
+
+        var subjectPrefix: String {
+            switch self {
+            case .bug:      return "[Bug]"
+            case .safety:   return "[Safety]"
+            case .feedback: return "[Feedback]"
+            case .other:    return "[Other]"
+            }
+        }
+    }
+
+    @State private var selectedTopic: Topic = .safety
+    @State private var message: String = ""
+    @State private var isSending = false
+    @State private var didSendSuccessfully = false
+    @State private var showErrorAlert = false
+    @State private var errorMessage = ""
+    @State private var didAttemptSend = false
+
+    private var showMinWarning: Bool {
+        didAttemptSend && !didSendSuccessfully && message.trimmingCharacters(in: .whitespacesAndNewlines).count < 20
+    }
+
     var body: some View {
         NavigationView {
             ZStack {
-                // Background
                 SpectRoomBackground()
-                
-                ScrollView {
-                    VStack(spacing: 40) {
-                        Spacer().frame(height: 40)
-                        
-                        // Title
-                        Text("We'd love to hear from you!")
-                            .font(.system(size: 24, weight: .bold))
-                            .multilineTextAlignment(.center)
-                            .foregroundColor(SpectRoomTheme.text)
-                            .padding(.horizontal, 24)
-                            .padding(.top, 70)
-                        
-                        // Description
-                        Text("Whether you have questions, feedback, or just want to say hi, feel free to reach out.")
-                            .font(.body)
-                            .multilineTextAlignment(.center)
-                            .foregroundColor(SpectRoomTheme.secondaryText)
-                            .padding(.horizontal, 24)
-                        
-                        // Top divider
-                        Divider()
-                            .padding(.horizontal, 24)
-                            .padding(.top, 8)
-                        
-                        // Email / Website block
-                        VStack(alignment: .leading, spacing: 18) {
-                            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                Text("Email:")
-                                    .font(.system(size: 18))
-                                    .fontWeight(.semibold)
-                                Button(action: {
-                                    openMail(to: "abashelariprod@gmail.com")
-                                }) {
-                                    Text("abashelariprod@gmail.com")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(.blue)
+
+                VStack(alignment: .leading, spacing: 24) {
+                        VStack(spacing: 16) {
+                            Text("support.title".localized)
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundColor(SpectRoomTheme.text)
+                                .multilineTextAlignment(.center)
+
+                            Text("support.subtitle".localized)
+                                .font(.body)
+                                .foregroundColor(SpectRoomTheme.text.opacity(0.7))
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 16)
+
+                        // Topic chips
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("support.topic.label".localized)
+                                .font(.subheadline)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
+
+                            HStack(spacing: 10) {
+                                ForEach(Topic.allCases) { topic in
+                                    let isSelected = topic == selectedTopic
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            if didSendSuccessfully {
+                                                message = ""
+                                                didSendSuccessfully = false
+                                                didAttemptSend = false
+                                            }
+                                            selectedTopic = topic
+                                        }
+                                    } label: {
+                                        Text(topic.label)
+                                            .font(.system(size: 14, weight: isSelected ? .semibold : .medium))
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 10)
+                                        .foregroundColor(isSelected ? .white : SpectRoomTheme.text)
+                                        .background(
+                                            Capsule()
+                                                .fill(isSelected ? Color.blue : SpectRoomTheme.card)
+                                        )
+                                        .overlay(
+                                            Capsule()
+                                                .strokeBorder(isSelected ? Color.clear : SpectRoomTheme.subtleBorder(for: colorScheme), lineWidth: 1)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
-                            }
-                            
-                            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                Text("Website:")
-                                    .font(.system(size: 18))
-                                    .fontWeight(.semibold)
-                                Button(action: {
-                                    openWebsite("https://abashelari.com")
-                                }) {
-                                    Text("https://abashelari.com")
-                                        .font(.system(size: 18))
-                                        .foregroundColor(.blue)
-                                }
-                                .buttonStyle(.plain)
                             }
                         }
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 18)
-                        
-                        // Bottom divider
-                        Divider()
-                            .padding(.horizontal, 24)
-                        
-                        // OR separator
-                        Text("OR")
-                            .font(.subheadline)
-                            .foregroundColor(SpectRoomTheme.secondaryText)
-                            .padding(.top, 6)
-                            .padding(.bottom, 6)
-                        
-                        // Push the button section down
-//                        Spacer(minLength: 0)
-                        
-                        // Contact button (placeholder - design to be supplied)
-                        Button(action: {
-                             showingContactForm = true
-                        }) {
-                            Text("Contact form")
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.green)
-                                .cornerRadius(18)
+
+                        // Message field
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("support.message.label".localized)
+                                .font(.subheadline)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
+
+                            ZStack(alignment: .topLeading) {
+                                if message.isEmpty {
+                                    Text("support.message.placeholder".localized)
+                                        .foregroundColor(Color.gray.opacity(0.6))
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 14)
+                                }
+                                TextEditor(text: $message)
+                                    .frame(height: 140)
+                                    .padding(8)
+                                    .scrollContentBackground(.hidden)
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.sentences)
+                                    .disabled(didSendSuccessfully)
+                                    .opacity(didSendSuccessfully ? 0.5 : 1)
+                                    .onChange(of: message) { _, newValue in
+                                        if newValue.count > 500 {
+                                            message = String(newValue.prefix(500))
+                                        }
+                                    }
+                            }
+                            .background(SpectRoomTheme.card)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(
+                                        showMinWarning ? Color.red : Color.gray.opacity(0.25),
+                                        lineWidth: showMinWarning ? 1.5 : 1
+                                    )
+                            )
+
+                            HStack {
+                                Text(showMinWarning ? "support.message.min.chars".localized : " ")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(.red)
+                                    .opacity(showMinWarning ? 1 : 0)
+                                Spacer()
+                                Text("\(message.count) / 500")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
+                            }
+                            .padding(.top, 2)
                         }
-                        .padding(.horizontal, 24)
-                        
-                        // Response note
-                        Text("We aim to respond within 24 hours. Thank you for getting in touch!")
-                            .font(.body)
-                            .fontWeight(.semibold)
-                            .multilineTextAlignment(.center)
-                            .foregroundColor(SpectRoomTheme.text)
-                            .padding(.horizontal, 24)
-                        
-                        Spacer().frame(height: 24)
-                    }
-                    // Ensure spacer can push content toward the bottom of the screen
-                    .frame(minHeight: UIScreen.main.bounds.height * 0.9, alignment: .top)
+
+                        // Send button
+                        Button(action: send) {
+                            Group {
+                                if isSending {
+                                    ProgressView().tint(.white)
+                                } else {
+                                    Text(didSendSuccessfully ? "support.button.sent".localized : "support.button.send".localized)
+                                        .font(.headline)
+                                        .foregroundColor(.white)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(didSendSuccessfully ? Color.green : Color.blue)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .disabled(isSending || didSendSuccessfully)
+
+                        // OR divider
+                        HStack(spacing: 12) {
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(height: 1)
+                            Text("support.or".localized)
+                                .font(.caption)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(height: 1)
+                        }
+                        .padding(.vertical, 4)
+
+                        // Email row
+                        Button {
+                            openMail(to: "spectroom.support@gmail.com")
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("✉️")
+                                        .font(.system(size: 18))
+                                    Text("support.email.label".localized)
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(SpectRoomTheme.text)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundColor(SpectRoomTheme.secondaryText)
+                                }
+                                Text("spectroom.support@gmail.com")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.blue)
+                                    .padding(.leading, 30)
+                            }
+                            .padding(14)
+                            .background(SpectRoomTheme.card)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(Color.gray.opacity(0.15), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                    Spacer()
                 }
+                .padding(.horizontal, 20)
             }
             .navigationBarTitleDisplayMode(.inline)
             .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Help and support")
+                    Text("support.nav.title".localized)
                         .font(.system(size: 20, weight: .bold))
                 }
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close") {
-                        dismiss()
-                    }
+                    Button("common.close".localized) { dismiss() }
                 }
             }
         }
-        .sheet(isPresented: $showingContactForm) {
-            ContactFormView()
+        .alert("Error", isPresented: $showErrorAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
         }
         .presentationDetents([.large])
+    }
+}
+
+// MARK: - Actions
+private extension HelpSupportView {
+    func send() {
+        didAttemptSend = true
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 20 else { return }
+
+        isSending = true
+
+        let userId = appState.currentUser?.firebaseDocumentId ?? appState.currentUser?.id.uuidString ?? "unknown"
+        let userName = appState.currentUser?.name ?? "Unknown"
+        let userEmail = appState.currentUser?.email ?? ""
+
+        let data: [String: Any] = [
+            "userId": userId,
+            "userName": userName,
+            "userEmail": userEmail,
+            "topic": selectedTopic.label,
+            "message": trimmed,
+            "status": "new",
+            "createdAt": FieldValue.serverTimestamp()
+        ]
+
+        Firestore.firestore().collection("supportMessages").addDocument(data: data) { error in
+            isSending = false
+            if let error {
+                errorMessage = error.localizedDescription
+                showErrorAlert = true
+            } else {
+                didSendSuccessfully = true
+            }
+        }
+    }
+
+    func openMail(to address: String) {
+        if let url = URL(string: "mailto:\(address)") {
+            UIApplication.shared.open(url)
+        }
     }
 }
 
@@ -144,298 +289,4 @@ struct HelpSupportView: View {
     HelpSupportView()
         .environmentObject(AppStateManager.shared)
 }
-
-// MARK: - Helpers
-private extension HelpSupportView {
-    func openMail(to address: String) {
-        let mailto = "mailto:\(address)"
-        if let url = URL(string: mailto) {
-            UIApplication.shared.open(url)
-        }
-    }
-    
-    func openWebsite(_ urlString: String) {
-        if let url = URL(string: urlString) {
-            UIApplication.shared.open(url)
-        }
-    }
-}
-
-// MARK: - Contact Form
-struct ContactFormView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
-    @EnvironmentObject var appState: AppStateManager
-    
-    @State private var fullName: String = ""
-    @State private var email: String = ""
-    @State private var subject: String = ""
-    @State private var message: String = ""
-    @State private var isSending = false
-    @State private var showSentAlert = false
-    @State private var showValidationAlert = false
-    @State private var validationMessage = ""
-    @State private var showMailComposer = false
-    @State private var mailComposerResultMessage: String?
-    
-    var body: some View {
-        NavigationView {
-            ZStack {
-                SpectRoomBackground()
-                
-                ScrollView {
-                    VStack(spacing: 16) {
-                        formField(title: "Full name", text: $fullName)
-                            .textInputAutocapitalization(.words)
-                            .padding(.top, 100)
-                        
-                        formField(title: "Email", text: $email)
-                            .keyboardType(.emailAddress)
-                            .textInputAutocapitalization(.never)
-                        
-                        formField(title: "Subject", text: $subject)
-                        
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Message")
-                                .font(.subheadline)
-                                .foregroundColor(SpectRoomTheme.secondaryText)
-                            ZStack(alignment: .topLeading) {
-                                TextEditor(text: $message)
-                                    .frame(minHeight: 140)
-                                    .padding(10)
-                                    .background(SpectRoomTheme.card)
-                                    .cornerRadius(12)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(Color.gray.opacity(0.25), lineWidth: 1)
-                                    )
-                            }
-                        }
-                        
-                        Button(action: send) {
-                            if isSending {
-                                ProgressView().tint(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color.blue)
-                                    .cornerRadius(14)
-                            } else {
-                                Text("Send")
-                                    .font(.headline)
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color.blue)
-                                    .cornerRadius(14)
-                            }
-                        }
-                        .disabled(isSending)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 20)
-                }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .spectRoomNavigationChrome(colorScheme: colorScheme)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Contact form")
-                        .font(.system(size: 20, weight: .bold))
-                }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close") { dismiss() }
-                }
-            }
-        }
-        .onAppear(perform: populateFromUser)
-        .alert("Message sent!", isPresented: $showSentAlert) {
-            Button("OK") { dismiss() }
-        } message: {
-            Text("Thank you. We'll get back to you soon.")
-        }
-        .alert(validationMessage, isPresented: $showValidationAlert) {
-            Button("OK", role: .cancel) { }
-        }
-        .sheet(isPresented: $showMailComposer) {
-            MailComposerView(
-                recipients: ["abashelariprod@gmail.com"],
-                subject: subject,
-                body:
-"""
-Full name: \(fullName)
-Email: \(email)
-
-Message:
-\(message)
-"""
-            ) { result in
-                isSending = false
-                switch result {
-                case .sent:
-                    showSentAlert = true
-                case .failed(let errorDescription):
-                    mailComposerResultMessage = errorDescription ?? "Failed to send email."
-                default:
-                    break
-                }
-            }
-        }
-        .alert("Email", isPresented: Binding(
-            get: { mailComposerResultMessage != nil },
-            set: { if !$0 { mailComposerResultMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(mailComposerResultMessage ?? "")
-        }
-    }
-    
-    private func populateFromUser() {
-        if let user = appState.currentUser {
-            if fullName.isEmpty { fullName = user.name }
-            if email.isEmpty { email = user.email }
-        }
-    }
-    
-    private func send() {
-        // Validate inputs
-        let trimmedName = fullName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedSubject = subject.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        guard !trimmedName.isEmpty else {
-            validationMessage = "Enter your full name"
-            showValidationAlert = true
-            return
-        }
-        guard isValidEmail(trimmedEmail) else {
-            validationMessage = "Email is incorrect"
-            showValidationAlert = true
-            return
-        }
-        guard !trimmedSubject.isEmpty else {
-            validationMessage = "Add subject"
-            showValidationAlert = true
-            return
-        }
-        guard !trimmedMessage.isEmpty else {
-            validationMessage = "Add message"
-            showValidationAlert = true
-            return
-        }
-        
-        // Open email composer with prefilled fields
-        isSending = true
-        // Prefer in-app mail composer when available
-        if MFMailComposeViewController.canSendMail() {
-            fullName = trimmedName
-            email = trimmedEmail
-            subject = trimmedSubject
-            message = trimmedMessage
-            showMailComposer = true
-        } else {
-            // Fallback to mailto:
-            let subjectEncoded = trimmedSubject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-            let body = """
-            Full name: \(trimmedName)
-            Email: \(trimmedEmail)
-            
-            Message:
-            \(trimmedMessage)
-            """
-            let bodyEncoded = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-            if let url = URL(string: "mailto:evya120@yopmail.com?subject=\(subjectEncoded)&body=\(bodyEncoded)") {
-                UIApplication.shared.open(url) { _ in
-                    isSending = false
-                    showSentAlert = true
-                }
-            } else {
-                isSending = false
-                mailComposerResultMessage = "Unable to open email client on this device."
-            }
-        }
-    }
-    
-    private func isValidEmail(_ string: String) -> Bool {
-        let pattern = "[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64}"
-        return NSPredicate(format: "SELF MATCHES %@", pattern).evaluate(with: string)
-    }
-    
-    @ViewBuilder
-    private func formField(title: String, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.subheadline)
-                .foregroundColor(SpectRoomTheme.secondaryText)
-            TextField(title, text: text)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
-                .background(SpectRoomTheme.card)
-                .cornerRadius(12)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.gray.opacity(0.25), lineWidth: 1)
-                )
-        }
-    }
-}
-
-// MARK: - Mail Composer Wrapper
-struct MailComposerView: UIViewControllerRepresentable {
-    enum Result {
-        case sent
-        case saved
-        case cancelled
-        case failed(String?)
-    }
-    
-    let recipients: [String]
-    let subject: String
-    let body: String
-    let onFinish: (Result) -> Void
-    
-    func makeUIViewController(context: Context) -> MFMailComposeViewController {
-        let vc = MFMailComposeViewController()
-        vc.setToRecipients(recipients)
-        vc.setSubject(subject)
-        vc.setMessageBody(body, isHTML: false)
-        vc.mailComposeDelegate = context.coordinator
-        return vc
-    }
-    
-    func updateUIViewController(_ uiViewController: MFMailComposeViewController, context: Context) {}
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onFinish: onFinish)
-    }
-    
-    final class Coordinator: NSObject, MFMailComposeViewControllerDelegate {
-        let onFinish: (Result) -> Void
-        init(onFinish: @escaping (Result) -> Void) {
-            self.onFinish = onFinish
-        }
-        
-        func mailComposeController(_ controller: MFMailComposeViewController, didFinishWith result: MFMailComposeResult, error: Error?) {
-            defer { controller.dismiss(animated: true) }
-            if let error {
-                onFinish(.failed(error.localizedDescription))
-                return
-            }
-            switch result {
-            case .sent:
-                onFinish(.sent)
-            case .saved:
-                onFinish(.saved)
-            case .cancelled:
-                onFinish(.cancelled)
-            case .failed:
-                onFinish(.failed(nil))
-            @unknown default:
-                onFinish(.cancelled)
-            }
-        }
-    }
-}
-
 

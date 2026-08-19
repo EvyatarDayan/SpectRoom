@@ -28,6 +28,7 @@ enum SpectRoomTheme {
 struct SpectRoomBackground: View {
     var body: some View {
         SpectRoomTheme.background
+            .ignoresSafeArea()
     }
 }
 

@@ -19,7 +19,9 @@ struct SettingsView: View {
     @AppStorage("selectedLanguage") private var selectedLanguageCode: String = "en"
     @State private var showingLanguageModal = false
     @State private var showingBlockedUsers = false
+    @State private var showingReportedProfiles = false
     @State private var showingPrivacySafety = false
+    @State private var reportedProfilesCount = 0
     @State private var showingHelpSupport = false
     @State private var showingAbout = false
     @State private var showingDeleteAccountConfirmation = false
@@ -32,6 +34,7 @@ struct SettingsView: View {
     @State private var exportFileURL: URL?
     @State private var showingExportEmptyAlert = false
     @State private var showingExportErrorAlert = false
+    @State private var showingSignOutConfirmation = false
     
     var body: some View {
         NavigationView {
@@ -190,6 +193,37 @@ struct SettingsView: View {
                                 .font(.caption)
                         }
                     }
+
+                    Button(action: {
+                        showingReportedProfiles = true
+                    }) {
+                        HStack {
+                            Image(systemName: "exclamationmark.bubble.fill")
+                                .foregroundColor(.blue)
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(
+                                    String(
+                                        format: "settings.reported.profiles.button.title.count".localized,
+                                        reportedProfilesCount
+                                    )
+                                )
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                                    .foregroundColor(SpectRoomTheme.text)
+                                Text("settings.reported.profiles.button.subtitle".localized)
+                                    .font(.caption)
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(SpectRoomTheme.secondaryText)
+                                .font(.caption)
+                        }
+                    }
                 }
                 
                 // Account & Data
@@ -224,7 +258,7 @@ struct SettingsView: View {
                     .disabled(isExportingMessages)
                     
                     Button(action: {
-                        appState.signOut()
+                        showingSignOutConfirmation = true
                     }) {
                         HStack {
                             Image(systemName: "rectangle.portrait.and.arrow.right.fill")
@@ -370,6 +404,11 @@ struct SettingsView: View {
                 BlockedUsersModal()
                     .environmentObject(appState)
             }
+            .sheet(isPresented: $showingReportedProfiles, onDismiss: {
+                Task { await refreshReportedProfilesCount() }
+            }) {
+                ReportedProfilesModal()
+            }
             .sheet(isPresented: $showingHelpSupport) {
                 HelpSupportView()
             }
@@ -384,6 +423,7 @@ struct SettingsView: View {
             }
             .onAppear {
                 checkNotificationPermission()
+                Task { await refreshReportedProfilesCount() }
             }
             .alert("settings.notification.permission".localized, isPresented: $showingPermissionAlert) {
                 Button("settings.settings.button".localized) {
@@ -424,7 +464,15 @@ struct SettingsView: View {
                 Text("settings.export.messages.error".localized)
             }
             .overlay {
-                if showingDeleteAccountConfirmation {
+                if showingSignOutConfirmation {
+                    SignOutConfirmationOverlay(
+                        onCancel: { showingSignOutConfirmation = false },
+                        onConfirm: {
+                            showingSignOutConfirmation = false
+                            appState.signOut()
+                        }
+                    )
+                } else if showingDeleteAccountConfirmation {
                     DeleteAccountConfirmationDialog(
                         step: $deleteConfirmationStep,
                         confirmationText: $deleteConfirmationText,
@@ -481,6 +529,17 @@ struct SettingsView: View {
         Language.allLanguages.first(where: { $0.code == selectedLanguageCode })?.name ?? "English"
     }
     
+    private func refreshReportedProfilesCount() async {
+        do {
+            let reports = try await FirebaseAuthService.shared.fetchMyReports()
+            await MainActor.run {
+                reportedProfilesCount = reports.count
+            }
+        } catch {
+            print("⚠️ Failed to load reported profiles count: \(error.localizedDescription)")
+        }
+    }
+
     private func checkNotificationPermission() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             DispatchQueue.main.async {
@@ -546,8 +605,13 @@ private struct BlockedUsersModal: View {
                                 showingUnblockConfirmation = true
                             }
                         )
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                     }
-                    .listStyle(InsetGroupedListStyle())
+                    .listStyle(PlainListStyle())
+                    .scrollContentBackground(.hidden)
+                    .background(SpectRoomBackground())
                 }
             }
             .navigationTitle("settings.blocked.users.modal.title".localized)
@@ -618,6 +682,415 @@ private struct BlockedUsersModal: View {
     }
 }
 
+private struct ReportedProfilesModal: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var reports: [UserReport] = []
+    @State private var isLoading = true
+    @State private var selectedReport: UserReport?
+
+    var body: some View {
+        NavigationView {
+            Group {
+                if isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(SpectRoomBackground())
+                } else if reports.isEmpty {
+                    emptyReportedProfilesView
+                } else {
+                    List(reports) { report in
+                        Button {
+                            selectedReport = report
+                        } label: {
+                            ReportedProfileRow(report: report)
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    }
+                    .listStyle(PlainListStyle())
+                    .scrollContentBackground(.hidden)
+                    .background(SpectRoomBackground())
+                }
+            }
+            .navigationTitle("settings.reported.profiles.modal.title".localized)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("common.done".localized) {
+                        dismiss()
+                    }
+                }
+            }
+            .overlay {
+                if let selectedReport {
+                    ReportDetailsOverlay(
+                        report: selectedReport,
+                        onDismiss: { self.selectedReport = nil }
+                    )
+                }
+            }
+            .task {
+                await loadReports()
+            }
+        }
+    }
+
+    private func loadReports() async {
+        isLoading = true
+        do {
+            reports = try await FirebaseAuthService.shared.fetchMyReports()
+        } catch {
+            print("⚠️ Failed to load reported profiles: \(error.localizedDescription)")
+            reports = []
+        }
+        isLoading = false
+    }
+
+    private var emptyReportedProfilesView: some View {
+        VStack {
+            Spacer()
+            VStack(spacing: 12) {
+                Text("🚩")
+                    .font(.system(size: 48))
+                    .frame(width: 96, height: 96)
+                    .background(
+                        Circle()
+                            .fill(Color.orange.opacity(0.12))
+                    )
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.orange.opacity(0.18), lineWidth: 1)
+                    )
+                    .shadow(color: Color.orange.opacity(0.14), radius: 12, y: 4)
+
+                Text("settings.reported.profiles.empty".localized)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(SpectRoomTheme.text)
+                    .multilineTextAlignment(.center)
+
+                Text("settings.reported.profiles.empty.description".localized)
+                    .font(.subheadline)
+                    .foregroundColor(SpectRoomTheme.text)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 32)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(SpectRoomBackground())
+    }
+}
+
+private struct ReportedProfileRow: View {
+    let report: UserReport
+
+    var body: some View {
+        HStack(spacing: 12) {
+            profilePhoto
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(report.reportedName)
+                    .font(.headline)
+                    .foregroundColor(SpectRoomTheme.text)
+                Text(dateText)
+                    .font(.caption)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundColor(SpectRoomTheme.secondaryText)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
+        .background(SpectRoomTheme.card)
+        .cornerRadius(12)
+        .contentShape(Rectangle())
+    }
+
+    private var dateText: String {
+        if let createdAt = report.createdAt {
+            return String(
+                format: "settings.reported.profiles.since".localized,
+                createdAt.formatted(date: .abbreviated, time: .shortened)
+            )
+        }
+        return "settings.reported.profiles.no.date".localized
+    }
+
+    private var profilePhoto: some View {
+        Group {
+            if let photoURL = report.primaryPhotoURL, let url = URL(string: photoURL) {
+                CachedAsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    initialsPlaceholder
+                }
+            } else {
+                initialsPlaceholder
+            }
+        }
+        .frame(width: 44, height: 44)
+        .clipShape(Circle())
+    }
+
+    private var initialsPlaceholder: some View {
+        Circle()
+            .fill(Color.blue.opacity(0.2))
+            .overlay(
+                Text(String(report.reportedName.prefix(1)).uppercased())
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.blue)
+            )
+    }
+}
+
+private struct ReportDetailsOverlay: View {
+    let report: UserReport
+    let onDismiss: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var isLight: Bool { colorScheme == .light }
+    private var panelBackground: Color { isLight ? Color.white : Color.black }
+    private var primaryText: Color { isLight ? Color.black : Color.white }
+    private var secondaryText: Color { isLight ? Color.black.opacity(0.55) : Color.white.opacity(0.7) }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.80)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onDismiss)
+
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 12) {
+                    profilePhoto
+
+                    Text(headlineText)
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(primaryText)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    detailRow(
+                        title: "settings.reported.profiles.detail.category".localized,
+                        value: report.category
+                    )
+
+                    if let details = report.details?.trimmingCharacters(in: .whitespacesAndNewlines), !details.isEmpty {
+                        detailsRow(
+                            details,
+                            title: isSomethingElseReason
+                                ? "settings.reported.profiles.detail.category".localized
+                                : "settings.reported.profiles.detail.details".localized
+                        )
+                    }
+
+                    detailRow(
+                        title: "settings.reported.profiles.detail.status".localized,
+                        value: localizedStatus(report.status)
+                    )
+                }
+
+                Button(action: onDismiss) {
+                    Text("common.got.it".localized)
+                        .font(.body.weight(.medium))
+                        .foregroundColor(primaryText)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color(.systemGray5))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+            }
+            .padding(24)
+            .frame(maxWidth: 340)
+            .background(panelBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(isLight ? Color.black.opacity(0.06) : Color.clear, lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(isLight ? 0.12 : 0), radius: 16, x: 0, y: 8)
+            .padding(.horizontal, 28)
+        }
+    }
+
+    private var headlineText: String {
+        if let createdAt = report.createdAt {
+            let formattedDate = createdAt.formatted(
+                Date.FormatStyle()
+                    .day()
+                    .month(.abbreviated)
+                    .year()
+                    .hour()
+                    .minute()
+            )
+            return String(
+                format: "settings.reported.profiles.detail.headline".localized,
+                report.reportedName,
+                formattedDate
+            )
+        }
+        return String(
+            format: "settings.reported.profiles.detail.headline.no.date".localized,
+            report.reportedName
+        )
+    }
+
+    private func localizedStatus(_ status: String) -> String {
+        switch status.lowercased() {
+        case "pending":
+            return "settings.reported.profiles.status.pending".localized
+        case "reviewed":
+            return "settings.reported.profiles.status.reviewed".localized
+        case "dismissed":
+            return "settings.reported.profiles.status.dismissed".localized
+        case "actioned":
+            return "settings.reported.profiles.status.actioned".localized
+        default:
+            return status.capitalized
+        }
+    }
+
+    private var isSomethingElseReason: Bool {
+        report.category.caseInsensitiveCompare("Something else") == .orderedSame
+    }
+
+    private func detailRow(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(secondaryText)
+            Text(value)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func detailsRow(_ details: String, title: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(secondaryText)
+
+            ScrollView {
+                Text(details)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(primaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxHeight: detailsMaxHeight)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Approx. height for 4 lines of 16pt semibold text + spacing.
+    private var detailsMaxHeight: CGFloat { 88 }
+
+    private var profilePhoto: some View {
+        Group {
+            if let photoURL = report.primaryPhotoURL, let url = URL(string: photoURL) {
+                CachedAsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    initialsPlaceholder
+                }
+            } else {
+                initialsPlaceholder
+            }
+        }
+        .frame(width: 52, height: 52)
+        .clipShape(Circle())
+    }
+
+    private var initialsPlaceholder: some View {
+        Circle()
+            .fill(Color.blue.opacity(0.2))
+            .overlay(
+                Text(String(report.reportedName.prefix(1)).uppercased())
+                    .font(.title3.weight(.semibold))
+                    .foregroundColor(.blue)
+            )
+    }
+}
+
+private struct SignOutConfirmationOverlay: View {
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onCancel)
+
+            VStack(spacing: 16) {
+                Text("settings.sign.out.confirm.title".localized)
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(SpectRoomTheme.text)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 22)
+
+                HStack(spacing: 12) {
+                    Button(action: onCancel) {
+                        Text("common.cancel".localized)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(SpectRoomTheme.text)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(SpectRoomTheme.background)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(SpectRoomTheme.subtleBorder(for: colorScheme), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: onConfirm) {
+                        Text("settings.sign.out.confirm.yes".localized)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(Color.blue.opacity(0.1))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(Color.blue.opacity(0.35), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+            }
+            .background(SpectRoomTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 36)
+        }
+    }
+}
+
 private struct UnblockConfirmationOverlay: View {
     let firstName: String
     let onCancel: () -> Void
@@ -629,12 +1102,13 @@ private struct UnblockConfirmationOverlay: View {
                 .ignoresSafeArea()
                 .onTapGesture(perform: onCancel)
             
-            VStack(spacing: 0) {
+            VStack(spacing: 16) {
                 VStack(spacing: 8) {
                     Text("settings.blocked.users.unblock.confirm.title".localized(with: firstName))
                         .font(.headline)
                         .multilineTextAlignment(.center)
                         .foregroundColor(SpectRoomTheme.text)
+                        .padding(.bottom, 4)
                     
                     Text("settings.blocked.users.unblock.confirm.message".localized(with: firstName))
                         .font(.subheadline)
@@ -643,37 +1117,41 @@ private struct UnblockConfirmationOverlay: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 22)
-                .padding(.bottom, 18)
+                .padding(.top, 20)
                 
-                Divider()
-                
-                HStack(spacing: 0) {
-                    Button(action: onCancel) {
-                        Text("common.cancel".localized)
-                            .font(.body.weight(.medium))
-                            .foregroundColor(SpectRoomTheme.text)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Divider()
-                        .frame(height: 48)
-                    
-                    Button(action: onConfirm) {
-                        Text("settings.blocked.users.unblock.action".localized)
-                            .font(.body.weight(.semibold))
-                            .foregroundColor(.green)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                    }
-                    .buttonStyle(.plain)
+                Button(action: onConfirm) {
+                    Text("settings.blocked.users.unblock.action".localized)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.green)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.green.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.green.opacity(0.35), lineWidth: 1)
+                        )
                 }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
             }
             .background(SpectRoomTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .padding(.horizontal, 48)
+            .overlay(alignment: .topTrailing) {
+                Button(action: onCancel) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(SpectRoomTheme.secondaryText)
+                        .frame(width: 32, height: 32)
+                        .background(SpectRoomTheme.background)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(12)
+            }
+            .padding(.horizontal, 36)
         }
     }
 }
@@ -691,6 +1169,7 @@ private struct BlockedUserRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(blocked.name)
                     .font(.headline)
+                    .foregroundColor(SpectRoomTheme.text)
                 Text(dateText(for: blocked))
                     .font(.caption)
                     .foregroundColor(SpectRoomTheme.secondaryText)
@@ -703,7 +1182,10 @@ private struct BlockedUserRow: View {
                 .foregroundColor(.green)
                 .buttonStyle(.plain)
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
+        .background(SpectRoomTheme.card)
+        .cornerRadius(12)
         .task(id: blocked.id) {
             await loadPhoto()
         }

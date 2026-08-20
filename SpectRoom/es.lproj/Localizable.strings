@@ -103,6 +103,8 @@
 "settings.about.spectroom" = "Acerca de SpectRoom";
 "settings.about.description" = "Versión de la app e información";
 "settings.sign.out" = "Cerrar Sesión";
+"settings.sign.out.confirm.title" = "¿Estás seguro?";
+"settings.sign.out.confirm.yes" = "Sí";
 "settings.development" = "Desarrollo";
 "settings.reset.user.data" = "Restablecer datos del usuario";
 "settings.reset.user.data.description" = "Limpiar coincidencias, deslizamientos, etc.";
@@ -122,6 +124,24 @@
 "settings.blocked.users.unblock.action" = "Desbloquear";
 "settings.blocked.users.unblock.confirm.title" = "¿Desbloquear a %@?";
 "settings.blocked.users.unblock.confirm.message" = "Esto permitirá que %@ vea tu perfil y cualquier comunicación anterior";
+"settings.reported.profiles.button.title.count" = "Perfiles reportados (%d)";
+"settings.reported.profiles.button.subtitle" = "Ver todos los perfiles reportados";
+"settings.reported.profiles.modal.title" = "Perfiles reportados";
+"settings.reported.profiles.empty" = "No hay perfiles reportados";
+"settings.reported.profiles.empty.description" = "Cuando reportes a alguien, aparecerá aquí. Para reportar, abre el perfil, toca Bloquear y elige Bloquear y reportar.";
+"settings.reported.profiles.since" = "Reportado %@";
+"settings.reported.profiles.no.date" = "Reportado";
+"settings.reported.profiles.detail.title" = "Detalles del reporte";
+"settings.reported.profiles.detail.headline" = "%@ fue reportado el %@";
+"settings.reported.profiles.detail.headline.no.date" = "%@ fue reportado";
+"settings.reported.profiles.detail.category" = "Motivo del reporte";
+"settings.reported.profiles.detail.details" = "Detalles";
+"settings.reported.profiles.detail.status" = "Estado";
+"settings.reported.profiles.detail.bio" = "Bio en el momento del reporte";
+"settings.reported.profiles.status.pending" = "Pendiente";
+"settings.reported.profiles.status.reviewed" = "Revisado";
+"settings.reported.profiles.status.dismissed" = "Descartado";
+"settings.reported.profiles.status.actioned" = "Acción tomada";
 
 "settings.authentication.section.title" = "Autenticación";
 "settings.account.section.title" = "Cuenta";
@@ -224,8 +244,8 @@
 "profile.report.reason.fake.profile.spam" = "Perfil falso o spam";
 "profile.report.reason.harassment.bullying" = "Acoso o bullying";
 "profile.report.reason.something.else" = "Algo más";
-"profile.report.something.else.placeholder" = "Cuéntanos más (opcional)";
-"profile.report.submit" = "Enviar";
+"profile.report.something.else.placeholder" = "Cuéntanos más...";
+"profile.report.submit" = "Reportar";
 "profile.report.thank.you" = "¡Gracias por mantener segura nuestra comunidad!";
 "profile.actions.title" = "Acciones";
 "profile.unlike.title" = "Dejar de gustar este perfil";

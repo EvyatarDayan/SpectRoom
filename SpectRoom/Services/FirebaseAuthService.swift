@@ -857,6 +857,165 @@ class FirebaseAuthService: ObservableObject {
             }
         }
     }
+
+    /// Writes a user report to the top-level `reports` collection with an evidence snapshot.
+    func submitUserReport(
+        reportedUserId: String,
+        category: String,
+        details: String?,
+        reportedProfile: ProfileCard
+    ) async throws {
+        guard let reporterUserId = auth.currentUser?.uid else {
+            throw NSError(
+                domain: "FirebaseAuthService",
+                code: 401,
+                userInfo: [NSLocalizedDescriptionKey: "User not authenticated"]
+            )
+        }
+
+        async let messagesTask = fetchConversationMessagesPage(with: reportedUserId, limit: 10)
+        async let reportedUserDocTask = db.collection("users").document(reportedUserId).getDocument()
+
+        let recentMessages: [MessageDisplay]
+        do {
+            recentMessages = try await messagesTask.messages
+        } catch {
+            print("⚠️ Report snapshot: could not load messages — \(error.localizedDescription)")
+            recentMessages = []
+        }
+
+        var bio = reportedProfile.bio
+        var name = reportedProfile.name
+        var photoURLs: [String] = []
+        if let imageURL = reportedProfile.imageURL, !imageURL.isEmpty {
+            photoURLs.append(imageURL)
+        }
+        for url in reportedProfile.photos where !url.isEmpty && !photoURLs.contains(url) {
+            photoURLs.append(url)
+        }
+
+        if let snapshot = try? await reportedUserDocTask, let userData = snapshot.data() {
+            if let freshBio = userData["bio"] as? String {
+                bio = freshBio
+            }
+            if let freshName = userData["name"] as? String, !freshName.isEmpty {
+                name = freshName
+            }
+            if let profilePhotoURL = userData["profilePhotoURL"] as? String, !profilePhotoURL.isEmpty {
+                photoURLs.removeAll { $0 == profilePhotoURL }
+                photoURLs.insert(profilePhotoURL, at: 0)
+            }
+            if let photos = userData["photos"] as? [String] {
+                for url in photos where !url.isEmpty && !photoURLs.contains(url) {
+                    photoURLs.append(url)
+                }
+            }
+        }
+
+        let messageSnapshots: [[String: Any]] = recentMessages.map { message in
+            var entry: [String: Any] = [
+                "message_id": message.id,
+                "sender_id": message.senderId,
+                "recipient_id": message.recipientId,
+                "content": message.content,
+                "type": message.messageType.rawValue,
+                "created_at": Timestamp(date: message.createdAt)
+            ]
+            if let voiceDuration = message.voiceDuration {
+                entry["voice_duration"] = voiceDuration
+            }
+            return entry
+        }
+
+        let contextSnapshot: [String: Any] = [
+            "name": name,
+            "bio": bio,
+            "profile_photo_urls": photoURLs,
+            "messages": messageSnapshots
+        ]
+
+        let reportRef = db.collection("reports").document()
+        var data: [String: Any] = [
+            "report_id": reportRef.documentID,
+            "reporter_user_id": reporterUserId,
+            "reported_user_id": reportedUserId,
+            "category": category,
+            "context_snapshot": contextSnapshot,
+            "status": "pending",
+            "created_at": FieldValue.serverTimestamp()
+        ]
+        if let details = details?.trimmingCharacters(in: .whitespacesAndNewlines), !details.isEmpty {
+            data["details"] = details
+        } else {
+            data["details"] = NSNull()
+        }
+
+        try await reportRef.setData(data)
+        print("✅ Report submitted: \(reportRef.documentID)")
+    }
+
+    /// Reports submitted by the current user, newest first.
+    func fetchMyReports() async throws -> [UserReport] {
+        guard let reporterUserId = auth.currentUser?.uid else {
+            throw NSError(
+                domain: "FirebaseAuthService",
+                code: 401,
+                userInfo: [NSLocalizedDescriptionKey: "User not authenticated"]
+            )
+        }
+
+        let snapshot = try await db.collection("reports")
+            .whereField("reporter_user_id", isEqualTo: reporterUserId)
+            .getDocuments()
+
+        let reports = snapshot.documents.compactMap { document -> UserReport? in
+            Self.parseUserReport(documentID: document.documentID, data: document.data())
+        }
+
+        return reports.sorted {
+            ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast)
+        }
+    }
+
+    private static func parseUserReport(documentID: String, data: [String: Any]) -> UserReport? {
+        let reportId = data["report_id"] as? String ?? documentID
+        guard
+            let reporterUserId = data["reporter_user_id"] as? String,
+            let reportedUserId = data["reported_user_id"] as? String,
+            let category = data["category"] as? String
+        else {
+            return nil
+        }
+
+        let details = data["details"] as? String
+        let status = data["status"] as? String ?? "pending"
+        let createdAt: Date?
+        if let timestamp = data["created_at"] as? Timestamp {
+            createdAt = timestamp.dateValue()
+        } else if let interval = data["created_at"] as? TimeInterval {
+            createdAt = Date(timeIntervalSince1970: interval)
+        } else {
+            createdAt = nil
+        }
+
+        let snapshot = data["context_snapshot"] as? [String: Any] ?? [:]
+        let reportedName = (snapshot["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bio = snapshot["bio"] as? String ?? ""
+        let photoURLs = snapshot["profile_photo_urls"] as? [String] ?? []
+
+        return UserReport(
+            id: reportId,
+            reporterUserId: reporterUserId,
+            reportedUserId: reportedUserId,
+            reportedName: (reportedName?.isEmpty == false) ? reportedName! : "Unknown",
+            category: category,
+            details: details,
+            status: status,
+            createdAt: createdAt,
+            bio: bio,
+            profilePhotoURLs: photoURLs
+        )
+    }
     
     func unblockUser(userId: String) async throws {
         guard let currentUserId = auth.currentUser?.uid else {

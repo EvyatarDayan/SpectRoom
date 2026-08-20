@@ -103,6 +103,8 @@
 "settings.about.spectroom" = "Om SpectRoom";
 "settings.about.description" = "Appversion och information";
 "settings.sign.out" = "Logga Ut";
+"settings.sign.out.confirm.title" = "Är du säker?";
+"settings.sign.out.confirm.yes" = "Ja";
 "settings.development" = "Utveckling";
 "settings.reset.user.data" = "Återställ användardata";
 "settings.reset.user.data.description" = "Rensa matchningar, swipe etc.";
@@ -122,6 +124,24 @@
 "settings.blocked.users.unblock.action" = "Avblockera";
 "settings.blocked.users.unblock.confirm.title" = "Avblockera %@?";
 "settings.blocked.users.unblock.confirm.message" = "Detta gör att %@ kan se din profil och tidigare kommunikation";
+"settings.reported.profiles.button.title.count" = "Rapporterade profiler (%d)";
+"settings.reported.profiles.button.subtitle" = "Visa alla rapporterade profiler";
+"settings.reported.profiles.modal.title" = "Rapporterade profiler";
+"settings.reported.profiles.empty" = "Inga rapporterade profiler";
+"settings.reported.profiles.empty.description" = "När du rapporterar någon visas personen här. För att rapportera, öppna profilen, tryck på Blockera och välj Blockera och rapportera.";
+"settings.reported.profiles.since" = "Rapporterad %@";
+"settings.reported.profiles.no.date" = "Rapporterad";
+"settings.reported.profiles.detail.title" = "Rapportdetaljer";
+"settings.reported.profiles.detail.headline" = "%@ rapporterades %@";
+"settings.reported.profiles.detail.headline.no.date" = "%@ rapporterades";
+"settings.reported.profiles.detail.category" = "Rapporteringsorsak";
+"settings.reported.profiles.detail.details" = "Detaljer";
+"settings.reported.profiles.detail.status" = "Status";
+"settings.reported.profiles.detail.bio" = "Bio vid rapporteringstillfället";
+"settings.reported.profiles.status.pending" = "Väntande";
+"settings.reported.profiles.status.reviewed" = "Granskad";
+"settings.reported.profiles.status.dismissed" = "Avvisad";
+"settings.reported.profiles.status.actioned" = "Åtgärdad";
 
 "settings.authentication.section.title" = "Autentisering";
 "settings.account.section.title" = "Konto";
@@ -224,8 +244,8 @@
 "profile.report.reason.fake.profile.spam" = "Fejkprofil eller spam";
 "profile.report.reason.harassment.bullying" = "Trakasserier eller mobbning";
 "profile.report.reason.something.else" = "Något annat";
-"profile.report.something.else.placeholder" = "Berätta mer (valfritt)";
-"profile.report.submit" = "Skicka";
+"profile.report.something.else.placeholder" = "Berätta mer...";
+"profile.report.submit" = "Rapportera";
 "profile.report.thank.you" = "Tack för att du håller vår community säker!";
 "profile.actions.title" = "Åtgärder";
 "profile.unlike.title" = "Sluta gilla denna profil";

@@ -2806,8 +2806,10 @@ struct UserProfileModal: View {
                     firstName: firstName(from: displayProfile.name),
                     onCancel: { showingBlockConfirmation = false },
                     onBlock: {
-                        showingBlockConfirmation = false
                         appState.blockUser(userId: displayProfile.userId, name: displayProfile.name)
+                    },
+                    onBlockComplete: {
+                        showingBlockConfirmation = false
                         dismiss()
                     },
                     onBlockAndReport: {
@@ -2830,6 +2832,19 @@ struct UserProfileModal: View {
                         pendingReportDetails = details
                         showingReportReason = false
                         showingReportThankYou = true
+                        let reportedProfile = displayProfile
+                        Task {
+                            do {
+                                try await FirebaseAuthService.shared.submitUserReport(
+                                    reportedUserId: reportedProfile.userId,
+                                    category: reason.storageCategory,
+                                    details: details,
+                                    reportedProfile: reportedProfile
+                                )
+                            } catch {
+                                print("⚠️ Failed to submit report: \(error.localizedDescription)")
+                            }
+                        }
                     }
                 )
             } else if showingReportThankYou {
@@ -3406,74 +3421,155 @@ private enum ProfileReportReason: String, CaseIterable, Identifiable {
         case .somethingElse: return "profile.report.reason.something.else".localized
         }
     }
+
+    /// Stable English value stored in Firestore (not localized).
+    var storageCategory: String {
+        switch self {
+        case .inappropriateContent: return "Inappropriate Content"
+        case .fakeProfileOrSpam: return "Fake profile or Spam"
+        case .harassmentOrBullying: return "Harassment or Bullying"
+        case .somethingElse: return "Something else"
+        }
+    }
 }
 
 private struct BlockConfirmationOverlay: View {
     let firstName: String
     let onCancel: () -> Void
     let onBlock: () -> Void
+    let onBlockComplete: () -> Void
     let onBlockAndReport: () -> Void
+
+    @State private var showingBlockedSuccess = false
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.35)
+            Color.black.opacity(0.80)
                 .ignoresSafeArea()
-                .onTapGesture(perform: onCancel)
-
-            VStack(spacing: 0) {
-                VStack(spacing: 8) {
-                    Text(String(format: "profile.block.confirm.title".localized, firstName))
-                        .font(.headline)
-                        .multilineTextAlignment(.center)
-                        .foregroundColor(SpectRoomTheme.text)
-
-                    Text("profile.block.confirm.message".localized)
-                        .font(.subheadline)
-                        .multilineTextAlignment(.center)
-                        .foregroundColor(SpectRoomTheme.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
+                .onTapGesture {
+                    if showingBlockedSuccess {
+                        onBlockComplete()
+                    } else {
+                        onCancel()
+                    }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 22)
-                .padding(.bottom, 18)
 
-                Divider()
-
-                Button(action: onBlock) {
-                    Text("profile.block.confirm.action".localized)
-                        .font(.body.weight(.semibold))
-                        .foregroundColor(.red)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                }
-                .buttonStyle(.plain)
-
-                Divider()
-
-                Button(action: onBlockAndReport) {
-                    Text("profile.block.confirm.block.and.report".localized)
-                        .font(.body.weight(.semibold))
-                        .foregroundColor(.red)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                }
-                .buttonStyle(.plain)
-
-                Divider()
-
-                Button(action: onCancel) {
-                    Text("common.cancel".localized)
-                        .font(.body.weight(.medium))
-                        .foregroundColor(SpectRoomTheme.text)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                }
-                .buttonStyle(.plain)
+            if showingBlockedSuccess {
+                blockedSuccessContent
+            } else {
+                confirmationContent
             }
-            .background(SpectRoomTheme.card)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .padding(.horizontal, 36)
         }
+    }
+
+    private var confirmationContent: some View {
+        VStack(spacing: 16) {
+            VStack(spacing: 8) {
+                Text(String(format: "profile.block.confirm.title".localized, firstName))
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(SpectRoomTheme.text)
+                    .padding(.bottom, 4)
+
+                Text("profile.block.confirm.message".localized)
+                    .font(.subheadline)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(SpectRoomTheme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+
+            HStack(spacing: 12) {
+                destructiveOutlineButton(
+                    title: "profile.block.confirm.block.and.report".localized,
+                    lineLimit: 2,
+                    action: onBlockAndReport
+                )
+
+                destructiveOutlineButton(
+                    title: "profile.block.confirm.action".localized,
+                    lineLimit: 1,
+                    action: {
+                        onBlock()
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showingBlockedSuccess = true
+                        }
+                    }
+                )
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+        }
+        .background(SpectRoomTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(alignment: .topTrailing) {
+            Button(action: onCancel) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(SpectRoomTheme.secondaryText)
+                    .frame(width: 32, height: 32)
+                    .background(SpectRoomTheme.background)
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(12)
+        }
+        .padding(.horizontal, 36)
+    }
+
+    private var blockedSuccessContent: some View {
+        VStack(spacing: 20) {
+            Text(String(format: "profile.report.blocked.notice".localized, firstName))
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .foregroundColor(.red)
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+
+            Button(action: onBlockComplete) {
+                Text("common.got.it".localized)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.blue)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.blue.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.blue.opacity(0.35), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .containerRelativeFrame(.horizontal) { width, _ in width * 0.4 }
+            .padding(.bottom, 20)
+        }
+        .frame(maxWidth: .infinity)
+        .background(SpectRoomTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 36)
+    }
+
+    @ViewBuilder
+    private func destructiveOutlineButton(title: String, lineLimit: Int, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.red)
+                .multilineTextAlignment(.center)
+                .lineLimit(lineLimit)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(Color.red.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.red.opacity(0.35), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -3484,7 +3580,7 @@ private struct ReportReasonOverlay: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var isTextFieldFocused: Bool
-    @State private var selectedReason: ProfileReportReason?
+    @State private var selectedReason: ProfileReportReason? = .inappropriateContent
     @State private var somethingElseText = ""
     @State private var didAttemptSubmit = false
     @State private var showBlockedNotReportedConfirmation = false
@@ -3512,7 +3608,7 @@ private struct ReportReasonOverlay: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.35)
+            Color.black.opacity(0.80)
                 .ignoresSafeArea()
                 .onTapGesture {
                     if showBlockedNotReportedConfirmation {
@@ -3559,8 +3655,9 @@ private struct ReportReasonOverlay: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(String(format: "profile.report.blocked.notice".localized, firstName))
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(SpectRoomTheme.text)
+                        .foregroundColor(.red)
                         .multilineTextAlignment(.leading)
+                        .padding(.bottom, 4)
 
                     Divider()
 
@@ -3586,29 +3683,43 @@ private struct ReportReasonOverlay: View {
                     textFieldSection
                 }
 
-                Button {
-                    submitReport()
-                } label: {
-                    Text("profile.report.submit".localized)
-                        .font(.body.weight(.semibold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.blue)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-                .buttonStyle(.plain)
+                HStack(spacing: 12) {
+                    Button {
+                        showBlockedNotReportedConfirmation = true
+                    } label: {
+                        Text("common.cancel".localized)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(SpectRoomTheme.text)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(SpectRoomTheme.background)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(SpectRoomTheme.subtleBorder(for: colorScheme), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
 
-                Button {
-                    showBlockedNotReportedConfirmation = true
-                } label: {
-                    Text("common.cancel".localized)
-                        .font(.body.weight(.medium))
-                        .foregroundColor(SpectRoomTheme.secondaryText)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
+                    Button {
+                        submitReport()
+                    } label: {
+                        Text("profile.report.submit".localized)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.red)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(Color.red.opacity(0.1))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(Color.red.opacity(0.35), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             .padding(20)
             .background(SpectRoomTheme.card)
@@ -3763,30 +3874,37 @@ private struct ReportThankYouOverlay: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.35)
+            Color.black.opacity(0.80)
                 .ignoresSafeArea()
                 .onTapGesture(perform: onDismiss)
 
-            VStack(spacing: 0) {
+            VStack(spacing: 20) {
                 Text("profile.report.thank.you".localized)
                     .font(.headline)
                     .multilineTextAlignment(.center)
                     .foregroundColor(SpectRoomTheme.text)
                     .padding(.horizontal, 20)
-                    .padding(.top, 22)
-                    .padding(.bottom, 18)
-
-                Divider()
+                    .padding(.top, 24)
 
                 Button(action: onDismiss) {
                     Text("common.ok".localized)
-                        .font(.body.weight(.semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundColor(.blue)
+                        .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
+                        .background(Color.blue.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.blue.opacity(0.35), lineWidth: 1)
+                        )
                 }
                 .buttonStyle(.plain)
+                .containerRelativeFrame(.horizontal) { width, _ in width * 0.4 }
+                .padding(.bottom, 20)
             }
+            .frame(maxWidth: .infinity)
             .background(SpectRoomTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .padding(.horizontal, 36)

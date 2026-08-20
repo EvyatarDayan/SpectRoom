@@ -103,6 +103,8 @@
 "settings.about.spectroom" = "About SpectRoom";
 "settings.about.description" = "App version and information";
 "settings.sign.out" = "Sign Out";
+"settings.sign.out.confirm.title" = "Are you sure?";
+"settings.sign.out.confirm.yes" = "Yes";
 "settings.development" = "Development";
 "settings.reset.user.data" = "Reset user data";
 "settings.reset.user.data.description" = "Clear match, swipe etc.";
@@ -122,6 +124,24 @@
 "settings.blocked.users.unblock.action" = "Unblock";
 "settings.blocked.users.unblock.confirm.title" = "Unblock %@?";
 "settings.blocked.users.unblock.confirm.message" = "This will allow %@ to see your profile and any previous communication";
+"settings.reported.profiles.button.title.count" = "Reported Profiles (%d)";
+"settings.reported.profiles.button.subtitle" = "See all reported profiles";
+"settings.reported.profiles.modal.title" = "Reported profiles";
+"settings.reported.profiles.empty" = "No reported profiles";
+"settings.reported.profiles.empty.description" = "When you report someone, they will appear here. To report someone, open their profile, tap Block, then choose Block & Report.";
+"settings.reported.profiles.since" = "Reported %@";
+"settings.reported.profiles.no.date" = "Reported";
+"settings.reported.profiles.detail.title" = "Report details";
+"settings.reported.profiles.detail.headline" = "%@ was reported on %@";
+"settings.reported.profiles.detail.headline.no.date" = "%@ was reported";
+"settings.reported.profiles.detail.category" = "Report reason";
+"settings.reported.profiles.detail.details" = "Details";
+"settings.reported.profiles.detail.status" = "Status";
+"settings.reported.profiles.detail.bio" = "Bio at time of report";
+"settings.reported.profiles.status.pending" = "Pending";
+"settings.reported.profiles.status.reviewed" = "Reviewed";
+"settings.reported.profiles.status.dismissed" = "Dismissed";
+"settings.reported.profiles.status.actioned" = "Actioned";
 
 "settings.authentication.section.title" = "Authentication";
 "settings.account.section.title" = "Account";
@@ -219,8 +239,8 @@
 "profile.report.reason.fake.profile.spam" = "Fake profile or Spam";
 "profile.report.reason.harassment.bullying" = "Harassment or Bullying";
 "profile.report.reason.something.else" = "Something else";
-"profile.report.something.else.placeholder" = "Tell us more (optional)";
-"profile.report.submit" = "Submit";
+"profile.report.something.else.placeholder" = "Tell us more...";
+"profile.report.submit" = "Report";
 "profile.report.thank.you" = "Thanks for keeping our community safe!";
 "profile.actions.title" = "Actions";
 "profile.unlike.title" = "Unlike this profile";

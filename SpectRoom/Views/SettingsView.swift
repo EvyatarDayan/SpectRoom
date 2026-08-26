@@ -311,7 +311,7 @@ struct SettingsView: View {
                     }
                     .disabled(isDeletingAccount)
                 }
-                
+
                 // Support & About
                 Section("settings.section.support.about".localized) {
                     HStack {
@@ -495,12 +495,6 @@ struct SettingsView: View {
                                         deleteAccountErrorMessage = nil
                                         deleteConfirmationStep = .success
                                     }
-                                    try? await Task.sleep(nanoseconds: 5_000_000_000)
-                                    await MainActor.run {
-                                        showingDeleteAccountConfirmation = false
-                                        deleteConfirmationStep = .sure
-                                        appState.signOut()
-                                    }
                                 } catch let error as SpectRoomAuthError {
                                     await MainActor.run {
                                         isDeletingAccount = false
@@ -514,6 +508,13 @@ struct SettingsView: View {
                                     }
                                 }
                             }
+                        },
+                        onSuccessAcknowledged: {
+                            showingDeleteAccountConfirmation = false
+                            deleteConfirmationStep = .sure
+                            deleteConfirmationText = ""
+                            deleteAccountErrorMessage = nil
+                            appState.signOut()
                         }
                     )
                 }
@@ -888,11 +889,9 @@ private struct ReportDetailsOverlay: View {
                     )
 
                     if let details = report.details?.trimmingCharacters(in: .whitespacesAndNewlines), !details.isEmpty {
-                        detailsRow(
-                            details,
-                            title: isSomethingElseReason
-                                ? "settings.reported.profiles.detail.category".localized
-                                : "settings.reported.profiles.detail.details".localized
+                        detailRow(
+                            title: "settings.reported.profiles.detail.details".localized,
+                            value: details
                         )
                     }
 
@@ -964,10 +963,6 @@ private struct ReportDetailsOverlay: View {
         }
     }
 
-    private var isSomethingElseReason: Bool {
-        report.category.caseInsensitiveCompare("Something else") == .orderedSame
-    }
-
     private func detailRow(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
@@ -980,27 +975,6 @@ private struct ReportDetailsOverlay: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
-
-    private func detailsRow(_ details: String, title: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(secondaryText)
-
-            ScrollView {
-                Text(details)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(primaryText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxHeight: detailsMaxHeight)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// Approx. height for 4 lines of 16pt semibold text + spacing.
-    private var detailsMaxHeight: CGFloat { 88 }
 
     private var profilePhoto: some View {
         Group {
@@ -1252,6 +1226,7 @@ private struct DeleteAccountConfirmationDialog: View {
     @Binding var errorMessage: String?
     let onCancel: () -> Void
     let onConfirmDeletion: (String) -> Void
+    let onSuccessAcknowledged: () -> Void
     
     private var canConfirmPasswordStep: Bool {
         !confirmationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isDeleting
@@ -1268,19 +1243,18 @@ private struct DeleteAccountConfirmationDialog: View {
                 }
             
             VStack(spacing: 0) {
-                if step == .success {
-                    Text("settings.delete.account.success.message".localized)
-                        .font(.system(size: 22, weight: .bold))
-                        .multilineTextAlignment(.center)
-                        .padding(.vertical, 28)
-                        .padding(.horizontal, 22)
-                } else {
-                    Text("settings.delete.account.confirm.title".localized)
-                        .font(.headline)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 20)
-                        .padding(.horizontal, 20)
-                    
+                Text(
+                    step == .success
+                        ? "settings.delete.account.success.message".localized
+                        : "settings.delete.account.confirm.title".localized
+                )
+                    .font(step == .success ? .system(size: 20, weight: .bold) : .headline)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 20)
+                    .padding(.bottom, step == .success ? 8 : 0)
+                    .padding(.horizontal, 20)
+                
+                if step != .success {
                     Group {
                         if step == .sure {
                             Text("settings.delete.account.confirm.message".localized)
@@ -1319,51 +1293,68 @@ private struct DeleteAccountConfirmationDialog: View {
                             .padding(.horizontal, 20)
                         }
                     }
-                    
-                    Divider()
-                        .padding(.top, 18)
-                    
-                    if step == .sure {
-                        HStack(spacing: 0) {
-                            Button("settings.cancel".localized, action: onCancel)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                            
-                            Divider()
-                                .frame(height: 44)
-                            
-                            Button("settings.delete.account.confirm.yes".localized) {
-                                step = .enterPassword
-                                confirmationText = ""
-                                errorMessage = nil
-                            }
+                }
+                
+                Divider()
+                    .padding(.top, 18)
+                
+                if step == .sure {
+                    HStack(spacing: 0) {
+                        Button("settings.cancel".localized, action: onCancel)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                        
+                        Divider()
+                            .frame(height: 44)
+                        
+                        Button("settings.delete.account.confirm.yes".localized) {
+                            step = .enterPassword
+                            confirmationText = ""
+                            errorMessage = nil
+                        }
+                        .fontWeight(.semibold)
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                    }
+                } else if step == .enterPassword {
+                    HStack(spacing: 0) {
+                        Button("settings.cancel".localized) {
+                            guard !isDeleting else { return }
+                            onCancel()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .disabled(isDeleting)
+                        
+                        Divider()
+                            .frame(height: 44)
+                        
+                        Button("settings.delete.account.confirm.ok".localized) {
+                            onConfirmDeletion(confirmationText)
+                        }
+                        .fontWeight(.semibold)
+                        .foregroundColor(canConfirmPasswordStep ? .red : .secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .disabled(!canConfirmPasswordStep)
+                    }
+                } else {
+                    HStack(spacing: 0) {
+                        Button("settings.cancel".localized) {}
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .disabled(true)
+                            .foregroundColor(.secondary)
+                        
+                        Divider()
+                            .frame(height: 44)
+                        
+                        Button("settings.delete.account.confirm.ok".localized, action: onSuccessAcknowledged)
                             .fontWeight(.semibold)
                             .foregroundColor(.red)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
-                        }
-                    } else {
-                        HStack(spacing: 0) {
-                            Button("settings.cancel".localized) {
-                                guard !isDeleting else { return }
-                                onCancel()
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .disabled(isDeleting)
-                            
-                            Divider()
-                                .frame(height: 44)
-                            
-                            Button("settings.delete.account.confirm.ok".localized) {
-                                onConfirmDeletion(confirmationText)
-                            }
-                            .fontWeight(.semibold)
-                            .foregroundColor(canConfirmPasswordStep ? .red : .secondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .disabled(!canConfirmPasswordStep)
-                        }
                     }
                 }
             }
@@ -1381,18 +1372,6 @@ private extension View {
         scaleEffect(0.8, anchor: .trailing)
             .frame(width: 46, height: 28, alignment: .trailing)
     }
-}
-
-private struct ActivityShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
-    
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        controller.popoverPresentationController?.sourceView = UIView()
-        return controller
-    }
-    
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 #Preview {

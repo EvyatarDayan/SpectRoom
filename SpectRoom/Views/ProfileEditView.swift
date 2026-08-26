@@ -1791,7 +1791,7 @@ struct ProfileEditView: View {
                 
                 print("🔍 ProfileEditView - Saving preferred age to Firebase: \(Int(preferredAgeMin))-\(Int(preferredAgeMax))")
                 
-                let userData: Dictionary<String, Any> = [
+                var userData: Dictionary<String, Any> = [
                     "name": name,
                     "age": ageInt,
                     "dateOfBirth": dateOfBirth.timeIntervalSince1970, // Save actual date of birth
@@ -1822,6 +1822,12 @@ struct ProfileEditView: View {
                     "profilePhotoURL": appState.currentUser?.profilePhotoURL ?? NSNull(),
                     "photos": appState.currentUser?.photos ?? []
                 ]
+                let profileEmail = (FirebaseAuthService.shared.auth.currentUser?.email ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                if !profileEmail.isEmpty {
+                    userData["email"] = profileEmail
+                }
                 
                 try await FirebaseAuthService.shared.updateUserData(userData)
                 

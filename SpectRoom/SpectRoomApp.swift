@@ -7,57 +7,33 @@
 
 import SwiftUI
 import FirebaseCore
+import FirebaseAuth
 import FirebaseMessaging
 import Combine
 import UserNotifications
 
+
+/// Presents Help & Support from a moderation popup with a stable, unique sheet identity.
+private struct ModerationSupportPresentation: Identifiable {
+    let id = UUID()
+    let topic: HelpSupportView.Topic
+}
+
 @main
 struct SpectRoomApp: App {
+    /// Must stay above other wrappers so Firebase configures before Auth/Firestore are touched.
+    private let firebaseReady: Bool = FirebaseBootstrap.configureIfNeeded()
+
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var appState = AppStateManager.shared
     @AppStorage("isDarkMode") private var isDarkMode = false
     @AppStorage("selectedLanguage") private var selectedLanguage: String = "en"
-    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @State private var languageChanged = false
+    @State private var moderationSupport: ModerationSupportPresentation? = nil
     
     init() {
-        // Configure Firebase - try to load from bundle first, then fallback to file path
-        var options: FirebaseOptions?
-        var configurationSource: String?
-        
-        // First, try to load from app bundle (if file is added to Xcode project)
-        if let bundlePath = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
-           let bundleOptions = FirebaseOptions(contentsOfFile: bundlePath) {
-            options = bundleOptions
-            configurationSource = "main bundle"
-        }
-        // Fallback: try to load from project directory
-        else if let projectPath = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist", inDirectory: nil),
-                 let projectOptions = FirebaseOptions(contentsOfFile: projectPath) {
-            options = projectOptions
-            configurationSource = "project directory"
-        }
-        // Last resort: try absolute path
-        else {
-            let absolutePath = "/Users/evyatardayan/Desktop/My projects/swift/SpectRoom/SpectRoom/GoogleService-Info.plist"
-            if FileManager.default.fileExists(atPath: absolutePath),
-               let absoluteOptions = FirebaseOptions(contentsOfFile: absolutePath) {
-                options = absoluteOptions
-                configurationSource = "absolute path"
-            }
-        }
-        
-        if let options = options {
-            FirebaseApp.configure(options: options)
-            print("✅ Firebase configured with project: \(options.projectID) (source: \(configurationSource ?? "unknown"))")
-        } else {
-            // If all else fails, try default configuration (might work if file is in bundle)
-            FirebaseApp.configure()
-            if let app = FirebaseApp.app() {
-                print("✅ Firebase configured with default options: \(app.options.projectID)")
-            } else {
-                assertionFailure("❌ Firebase configuration failed. Ensure GoogleService-Info.plist is included in the target.")
-            }
-        }
+        _ = firebaseReady
+        FirebaseBootstrap.configureIfNeeded()
     }
     
     var body: some Scene {
@@ -80,8 +56,14 @@ struct SpectRoomApp: App {
             if !appState.hasResolvedAuthState && !appState.isAuthenticated {
                 // Wait for Firebase to restore session before showing welcome/sign-in
                 LaunchAuthPlaceholderView()
+            } else if appState.pendingMfaSignIn {
+                MfaVerificationView(kind: .signIn)
+                    .environmentObject(appState)
             } else if appState.isAuthenticated {
-                if appState.hasCompletedInitialProfile {
+                if appState.needsMfaEnrollment {
+                    MfaVerificationView(kind: .enroll)
+                        .environmentObject(appState)
+                } else if appState.hasCompletedInitialProfile {
                     ContentView()
                         .environmentObject(appState)
                 } else if appState.isNewSignup {
@@ -104,21 +86,83 @@ struct SpectRoomApp: App {
             }
         }
         .preferredColorScheme(isDarkMode ? .dark : .light)
+        .onOpenURL { url in
+            _ = Auth.auth().canHandle(url)
+        }
+        .overlay {
+            if let notice = appState.pendingModerationNotice {
+                SystemWarningOverlay(
+                    title: notice.title,
+                    message: notice.message,
+                    acceptLabel: notice.acceptLabel,
+                    requiresCheckbox: notice.requiresCheckbox,
+                    secondaryLinkTitle: notice.showsContactSupport ? notice.contactSupportLabel : nil,
+                    onSecondaryLink: notice.showsContactSupport
+                        ? {
+                            let topic: HelpSupportView.Topic
+                            switch notice.kind {
+                            case .banAcknowledgement, .loginBanned:
+                                topic = .accountBan
+                            default:
+                                topic = .accountFreeze
+                            }
+                            moderationSupport = ModerationSupportPresentation(topic: topic)
+                        }
+                        : nil
+                ) {
+                    appState.dismissModerationNotice()
+                }
+                .zIndex(999)
+            }
+        }
+        .sheet(item: $moderationSupport) { presentation in
+            HelpSupportView(
+                initialTopic: presentation.topic,
+                lockedTopic: presentation.topic,
+                maxMessageLength: 200,
+                onMessageSent: {
+                    moderationSupport = nil
+                    appState.dismissModerationNotice()
+                }
+            )
+            .id(presentation.id)
+            .environmentObject(appState)
+        }
         .onAppear {
             // Set online status when app first appears and user is authenticated
             if appState.isAuthenticated {
+                appState.startListeningForModerationStatus()
                 Task {
                     await appState.updateAppStateInFirestore(isActive: true)
+                    await appState.refreshPendingModerationNotice()
+                }
+            }
+        }
+        .onChange(of: appState.isAuthenticated) { _, isAuthenticated in
+            if isAuthenticated {
+                appState.startListeningForModerationStatus()
+                Task {
+                    await appState.refreshPendingModerationNotice()
+                }
+            }
+        }
+        .onChange(of: appState.hasResolvedUserProfile) { _, resolved in
+            if resolved, appState.isAuthenticated {
+                appState.startListeningForModerationStatus()
+                Task {
+                    await appState.refreshPendingModerationNotice()
                 }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             // Update online status and preload photos when app becomes active
             if appState.isAuthenticated {
+                appState.startListeningForModerationStatus()
                 Task {
                     await appState.updateAppStateInFirestore(isActive: true)
                     await FirebaseAuthService.shared.syncPhotosFromStorage()
                     appState.refreshUnreadMessageCount()
+                    await appState.refreshPendingModerationNotice()
                 }
             }
         }
@@ -159,24 +203,29 @@ private struct LaunchAuthPlaceholderView: View {
 
 // MARK: - AppDelegate for handling push notifications
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
-    
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        // Configure before Messaging/Auth are used from this delegate.
+        FirebaseBootstrap.configureIfNeeded()
+
         // Set UNUserNotificationCenter delegate
         UNUserNotificationCenter.current().delegate = self
         
         // Set Firebase Messaging delegate
         Messaging.messaging().delegate = self
-        
-        // Request notification permission
+
+        // Phone / MFA silent verification needs APNs registration even if the user
+        // declines alert permission. Visible notification prompts stay separate.
         if !ProcessInfo.processInfo.arguments.contains("-KeyboardComposerVisualTest") {
+            application.registerForRemoteNotifications()
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
                 if granted {
-                    DispatchQueue.main.async {
-                        application.registerForRemoteNotifications()
-                    }
                     print("✅ Notification permission granted on app launch")
                 } else {
                     print("❌ Notification permission denied on app launch")
+                }
+                if let error {
+                    print("⚠️ Notification permission error: \(error.localizedDescription)")
                 }
             }
         }
@@ -186,8 +235,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     
     // Handle APNs token registration
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        print("📱 APNs token received")
-        // Pass token to Firebase Messaging
+        print("📱 APNs token received (\(deviceToken.count) bytes)")
+        // FCM only. Do NOT call Auth.setAPNSToken — it fatally crashes in this
+        // Firebase Auth / SwiftUI setup (nil kAuthGlobalWorkQueue / tokenManager).
+        // Phone MFA uses reCAPTCHA via URL scheme + canHandleNotification / canHandle(url).
         Messaging.messaging().apnsToken = deviceToken
     }
     
@@ -201,9 +252,21 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
+        if Auth.auth().canHandleNotification(userInfo) {
+            completionHandler(.noData)
+            return
+        }
         Messaging.messaging().appDidReceiveMessage(userInfo)
         syncBadgeCount(from: userInfo)
         completionHandler(.newData)
+    }
+
+    func application(
+        _ app: UIApplication,
+        open url: URL,
+        options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+    ) -> Bool {
+        Auth.auth().canHandle(url)
     }
     
     private func syncBadgeCount(from userInfo: [AnyHashable: Any]) {
@@ -271,14 +334,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     
     // Handle notification when app is in foreground
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        syncBadgeCount(from: notification.request.content.userInfo)
+        let userInfo = notification.request.content.userInfo
+        syncBadgeCount(from: userInfo)
+        refreshModerationNoticeIfNeeded(from: userInfo)
         
-        if NotificationService.shouldSuppressForegroundMatchNotification(userInfo: notification.request.content.userInfo) {
+        if NotificationService.shouldSuppressForegroundMatchNotification(userInfo: userInfo) {
             completionHandler([])
             return
         }
         
-        if NotificationService.shouldSuppressForegroundMessageNotification(userInfo: notification.request.content.userInfo) {
+        if NotificationService.shouldSuppressForegroundMessageNotification(userInfo: userInfo) {
             completionHandler([])
             return
         }
@@ -290,6 +355,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
         syncBadgeCount(from: userInfo)
+        refreshModerationNoticeIfNeeded(from: userInfo)
         print("📱 Notification tapped, userInfo: \(userInfo)")
         
         let type = NotificationService.notificationString(userInfo, key: "type")
@@ -307,10 +373,29 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             } else {
                 print("⚠️ Message notification tap missing senderId")
             }
+        case "moderation_warning", "moderation_freeze", "moderation_freeze_extended", "moderation_unfreeze", "moderation_ban", "moderation_unban":
+            print("📱 User opened moderation notification: \(type ?? "")")
+            Task { @MainActor in
+                AppStateManager.shared.startListeningForModerationStatus()
+                await AppStateManager.shared.refreshPendingModerationNotice()
+            }
         default:
             print("⚠️ Unknown or missing notification type on tap: \(type ?? "nil")")
         }
         
         completionHandler()
+    }
+
+    private func refreshModerationNoticeIfNeeded(from userInfo: [AnyHashable: Any]) {
+        let type = NotificationService.notificationString(userInfo, key: "type")
+        switch type {
+        case "moderation_warning", "moderation_freeze", "moderation_freeze_extended", "moderation_ban", "moderation_unban":
+            Task { @MainActor in
+                AppStateManager.shared.startListeningForModerationStatus()
+                await AppStateManager.shared.refreshPendingModerationNotice()
+            }
+        default:
+            break
+        }
     }
 }

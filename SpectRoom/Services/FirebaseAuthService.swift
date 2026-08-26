@@ -17,26 +17,30 @@ class FirebaseAuthService: ObservableObject {
     
     @Published var currentUser: SpectRoomUser?
     /// Restored synchronously from Firebase's persisted session so launch UI does not flash logged-out screens.
-    @Published var isAuthenticated: Bool
+    @Published var isAuthenticated = false
     /// Becomes true after Firebase emits the first auth-state callback.
     @Published var hasResolvedAuthState = false
     /// Becomes true after the first Firestore profile load attempt finishes for the current session.
     @Published var hasResolvedUserProfile = false
     
-    let auth = Auth.auth()
-    private let db = Firestore.firestore()
+    /// Lazily resolved so we never call `Auth.auth()` before `FirebaseApp.configure()`.
+    var auth: Auth { Auth.auth() }
+    private var db: Firestore { Firestore.firestore() }
     private var matchesListener: ListenerRegistration?
     private var blockedByListener: ListenerRegistration?
+    private var moderationListener: ListenerRegistration?
     private var authStateListenerHandle: AuthStateDidChangeListenerHandle?
     /// Keeps the app on the login screen while we verify the account isn't soft-deleted.
-    private var isVerifyingSignIn = false
+    var isVerifyingSignIn = false
     
     private init() {
+        FirebaseBootstrap.configureIfNeeded()
+
         // Firebase restores the session from the keychain synchronously when available.
-        isAuthenticated = auth.currentUser != nil
+        isAuthenticated = Auth.auth().currentUser != nil
         
         // Listen for authentication state changes
-        authStateListenerHandle = auth.addStateDidChangeListener { [weak self] _, firebaseUser in
+        authStateListenerHandle = Auth.auth().addStateDidChangeListener { [weak self] _, firebaseUser in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.hasResolvedAuthState = true
@@ -62,7 +66,7 @@ class FirebaseAuthService: ObservableObject {
     }
     
     // Update FCM token when user logs in
-    private func updateFCMTokenIfNeeded() async {
+    func updateFCMTokenIfNeeded() async {
         guard let userId = auth.currentUser?.uid else { return }
         
         // Get FCM token from Messaging
@@ -88,20 +92,29 @@ class FirebaseAuthService: ObservableObject {
     
     // MARK: - Authentication Methods
     
-    func signUp(email: String, password: String, name: String, age: Int) async throws {
+    func signUp(email: String, password: String, name: String, age: Int, phoneE164: String) async throws {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         
-        if try await isEmailPendingDeletion(normalizedEmail) {
-            throw SpectRoomAuthError.emailPendingDeletion
+        let pendingDeletion = try await pendingDeletionInfo(for: normalizedEmail)
+        if pendingDeletion.isPending {
+            throw SpectRoomAuthError.emailPendingDeletion(
+                email: normalizedEmail,
+                deletedAt: pendingDeletion.deletedAt
+            )
         }
         
         do {
             _ = try await auth.createUser(withEmail: normalizedEmail, password: password)
         } catch {
             // Soft-deleted Auth users still occupy the email until hard delete.
-            if isEmailAlreadyInUseError(error),
-               (try? await isEmailPendingDeletion(normalizedEmail)) == true {
-                throw SpectRoomAuthError.emailPendingDeletion
+            if isEmailAlreadyInUseError(error) {
+                let pending = try? await pendingDeletionInfo(for: normalizedEmail)
+                if pending?.isPending == true {
+                    throw SpectRoomAuthError.emailPendingDeletion(
+                        email: normalizedEmail,
+                        deletedAt: pending?.deletedAt
+                    )
+                }
             }
             throw error
         }
@@ -115,24 +128,87 @@ class FirebaseAuthService: ObservableObject {
         }
         
         // Don't create user document automatically - let user complete profile first
+        // Stub the Firestore user doc as incomplete so Admin can find abandoned signups.
+        if let uid = auth.currentUser?.uid {
+            var stub: [String: Any] = [
+                UserProfileStatus.firestoreKey: UserProfileStatus.incomplete.rawValue,
+                "createdAt": Date().timeIntervalSince1970,
+                "isOnline": false,
+                "mfaEnrolled": false
+            ]
+            if !normalizedEmail.isEmpty {
+                stub["email"] = normalizedEmail
+            }
+            if !trimmedName.isEmpty {
+                stub["name"] = trimmedName
+            }
+            if age >= 18 {
+                stub["age"] = age
+            }
+            let trimmedPhone = phoneE164.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedPhone.isEmpty {
+                stub["phoneE164"] = trimmedPhone
+            }
+            try await db.collection("users").document(uid).setData(stub, merge: true)
+        }
+
+        if let user = auth.currentUser, !user.isEmailVerified {
+            do {
+                try await sendBrandedEmailVerification()
+                print("✅ Branded verification email sent for MFA enrollment prerequisite")
+            } catch {
+                print("⚠️ Failed to send verification email: \(error.localizedDescription)")
+            }
+        }
+
         print("✅ User account created: \(auth.currentUser?.uid ?? "unknown")")
         print("📝 User can now complete their profile through the app")
     }
+
+    /// Sends the branded SpectRoom verify-email message (same design as welcome mail).
+    func sendBrandedEmailVerification() async throws {
+        guard auth.currentUser != nil else {
+            throw SpectRoomAuthError.notAuthenticated
+        }
+        _ = try await Functions.functions(region: "us-central1")
+            .httpsCallable("sendSpectRoomEmailVerificationEmail")
+            .call([:])
+    }
     
-    /// Returns true when this email belongs to a soft-deleted account still within the 14-day window.
-    private func isEmailPendingDeletion(_ normalizedEmail: String) async throws -> Bool {
+    /// Returns whether this email belongs to a soft-deleted account still within the 14-day window.
+    private func pendingDeletionInfo(for normalizedEmail: String) async throws -> (isPending: Bool, deletedAt: Date?) {
         let result = try await Functions.functions(region: "us-central1")
             .httpsCallable("checkEmailPendingDeletion")
             .call(["email": normalizedEmail])
         
         guard let data = result.data as? [String: Any] else {
             print("⚠️ checkEmailPendingDeletion returned unexpected payload: \(String(describing: result.data))")
-            return false
+            return (false, nil)
         }
         
         let pending = boolValue(from: data, key: "pendingDeletion")
+        let deletedAt = parseUnixDate(from: data["deletedAt"])
+            ?? parseUnixDate(from: data["scheduledHardDeleteAt"]).map {
+                $0.addingTimeInterval(-14 * 24 * 60 * 60)
+            }
         print("🔍 Email pending deletion check for \(normalizedEmail): \(pending)")
-        return pending
+        return (pending, deletedAt)
+    }
+    
+    private func parseUnixDate(from value: Any?) -> Date? {
+        if let number = value as? NSNumber {
+            return Date(timeIntervalSince1970: number.doubleValue)
+        }
+        if let interval = value as? Double, interval > 0 {
+            return Date(timeIntervalSince1970: interval)
+        }
+        if let interval = value as? Int, interval > 0 {
+            return Date(timeIntervalSince1970: TimeInterval(interval))
+        }
+        if let timestamp = value as? Timestamp {
+            return timestamp.dateValue()
+        }
+        return nil
     }
     
     private func boolValue(from data: [String: Any], key: String) -> Bool {
@@ -162,16 +238,38 @@ class FirebaseAuthService: ObservableObject {
         do {
             _ = try await auth.signIn(withEmail: email, password: password)
             
-            if let userData = try await fetchUserData(),
-               userData["isDeleted"] as? Bool == true {
-                try auth.signOut()
-                await MainActor.run {
-                    self.isVerifyingSignIn = false
-                    self.isAuthenticated = false
-                    self.currentUser = nil
-                    self.hasResolvedUserProfile = true
+            if let userData = try await fetchUserData() {
+                if userData["isDeleted"] as? Bool == true {
+                    try auth.signOut()
+                    await MainActor.run {
+                        self.isVerifyingSignIn = false
+                        self.isAuthenticated = false
+                        self.currentUser = nil
+                        self.hasResolvedUserProfile = true
+                    }
+                    throw SpectRoomAuthError.accountPendingDeletion
                 }
-                throw SpectRoomAuthError.accountPendingDeletion
+                if userData["isBanned"] as? Bool == true {
+                    try auth.signOut()
+                    await MainActor.run {
+                        self.isVerifyingSignIn = false
+                        self.isAuthenticated = false
+                        self.currentUser = nil
+                        self.hasResolvedUserProfile = true
+                    }
+                    throw SpectRoomAuthError.accountBanned
+                }
+                if let freezeUntil = Self.parseDiscoverFreezeUntil(from: userData),
+                   freezeUntil > Date() {
+                    try auth.signOut()
+                    await MainActor.run {
+                        self.isVerifyingSignIn = false
+                        self.isAuthenticated = false
+                        self.currentUser = nil
+                        self.hasResolvedUserProfile = true
+                    }
+                    throw SpectRoomAuthError.accountFrozen(until: freezeUntil)
+                }
             }
             
             let userId = auth.currentUser?.uid
@@ -201,7 +299,16 @@ class FirebaseAuthService: ObservableObject {
     }
     
     func resetPassword(email: String) async throws {
-        try await auth.sendPasswordReset(withEmail: email)
+        let normalized = email
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard normalized.contains("@") else {
+            throw SpectRoomAuthError.notAuthenticated
+        }
+
+        _ = try await Functions.functions(region: "us-central1")
+            .httpsCallable("sendSpectRoomPasswordResetEmail")
+            .call(["email": normalized])
     }
     
     /// Soft-deletes the account. Hard deletion runs via Cloud Function after 14 days
@@ -229,12 +336,17 @@ class FirebaseAuthService: ObservableObject {
         ], merge: true)
         
         if !normalizedEmail.isEmpty {
-            try await db.collection("deletedEmails").document(normalizedEmail).setData([
-                "uid": user.uid,
-                "email": normalizedEmail,
-                "deletedAt": now,
-                "scheduledHardDeleteAt": hardDeleteAt
-            ])
+            do {
+                try await db.collection("deletedEmails").document(normalizedEmail).setData([
+                    "uid": user.uid,
+                    "email": normalizedEmail,
+                    "deletedAt": now,
+                    "scheduledHardDeleteAt": hardDeleteAt
+                ])
+            } catch {
+                // Soft-delete already succeeded; registry is best-effort for signup blocking.
+                print("⚠️ deletedEmails registry write failed: \(error.localizedDescription)")
+            }
         }
         
         print("🗑️ Account marked for deletion: \(user.uid), hard delete after \(hardDeleteAt)")
@@ -261,14 +373,19 @@ class FirebaseAuthService: ObservableObject {
     
     // MARK: - User Data Methods
     
-    func fetchUserData() async throws -> [String: Any]? {
+    func fetchUserData(preferServer: Bool = false) async throws -> [String: Any]? {
         guard let user = auth.currentUser else { return nil }
-        
-        let document = try await db.collection("users").document(user.uid).getDocument()
+
+        let document: DocumentSnapshot
+        if preferServer {
+            document = try await db.collection("users").document(user.uid).getDocument(source: .server)
+        } else {
+            document = try await db.collection("users").document(user.uid).getDocument()
+        }
         return document.data()
     }
     
-    private func loadUserData(for userID: String) async {
+    func loadUserData(for userID: String) async {
         defer {
             Task { @MainActor in
                 self.hasResolvedUserProfile = true
@@ -283,6 +400,12 @@ class FirebaseAuthService: ObservableObject {
                     await MainActor.run {
                         self.currentUser = nil
                     }
+                    return
+                }
+
+                if userData["isBanned"] as? Bool == true {
+                    // Keep session briefly so the ban acknowledgement popup can show.
+                    print("🚫 Account \(userID) is banned — waiting for acknowledgement")
                     return
                 }
                 
@@ -348,6 +471,13 @@ class FirebaseAuthService: ObservableObject {
                 let authEmail = (auth.currentUser?.email ?? "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let resolvedEmail = firestoreEmail.isEmpty ? authEmail : firestoreEmail
+
+                // Backfill missing email on the user doc so admin search-by-email works.
+                if firestoreEmail.isEmpty, !authEmail.isEmpty {
+                    Task {
+                        try? await self.updateUserData(["email": authEmail.lowercased()])
+                    }
+                }
                 
                 let firestoreName = (userData["name"] as? String ?? "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -435,6 +565,9 @@ class FirebaseAuthService: ObservableObject {
                 await MainActor.run {
                     self.currentUser = resolvedUser
                 }
+
+                // Backfill / refresh profileStatus for admin incomplete-account filters.
+                await syncProfileStatus(for: userID)
                 
                 // Preload photos from Firebase Storage to improve user experience
                 print("🔄 Preloading photos from Firebase Storage...")
@@ -459,9 +592,44 @@ class FirebaseAuthService: ObservableObject {
     
     func updateUserData(_ data: [String: Any]) async throws {
         guard let user = auth.currentUser else { return }
-        
+
+        // Keep `email` on the user doc so Admin → All profiles can search by it.
+        // Profile saves often omit email; Auth is the source of truth.
+        var payload = data
+        if payload["email"] == nil,
+           let authEmail = user.email?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+           !authEmail.isEmpty {
+            payload["email"] = authEmail
+        }
+
         // Use setData with merge to create document if it doesn't exist
-        try await db.collection("users").document(user.uid).setData(data, merge: true)
+        try await db.collection("users").document(user.uid).setData(payload, merge: true)
+
+        if UserProfileStatus.updateTouchesProfileFields(payload) {
+            await syncProfileStatus(for: user.uid)
+        }
+    }
+
+    /// Recomputes and writes `profileStatus` (`incomplete` / `complete`) from the user doc.
+    func syncProfileStatus(for userId: String? = nil) async {
+        let uid = userId ?? auth.currentUser?.uid
+        guard let uid else { return }
+
+        do {
+            let snapshot = try await db.collection("users").document(uid).getDocument()
+            let data = snapshot.data() ?? [:]
+            let status = UserProfileStatus.evaluate(from: data)
+            let current = data[UserProfileStatus.firestoreKey] as? String
+            guard current != status.rawValue else { return }
+            try await db.collection("users").document(uid).setData([
+                UserProfileStatus.firestoreKey: status.rawValue
+            ], merge: true)
+            print("✅ profileStatus synced to \(status.rawValue) for \(uid)")
+        } catch {
+            print("⚠️ Failed syncing profileStatus for \(uid): \(error.localizedDescription)")
+        }
     }
     
     // MARK: - Force Refresh User Data
@@ -620,6 +788,15 @@ class FirebaseAuthService: ObservableObject {
         }
         
         if userData["isDeleted"] as? Bool == true {
+            return nil
+        }
+
+        if userData["isBanned"] as? Bool == true {
+            return nil
+        }
+
+        if let freezeUntil = Self.parseDiscoverFreezeUntil(from: userData),
+           freezeUntil > Date() {
             return nil
         }
         
@@ -977,6 +1154,1401 @@ class FirebaseAuthService: ObservableObject {
         }
     }
 
+    /// All reports for admin review, newest first.
+    func fetchAllReportsForAdmin() async throws -> [UserReport] {
+        try requireAdmin()
+
+        let snapshot = try await db.collection("reports").getDocuments()
+        let reports = snapshot.documents.compactMap { document -> UserReport? in
+            Self.parseUserReport(documentID: document.documentID, data: document.data())
+        }
+        return reports.sorted {
+            ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast)
+        }
+    }
+
+    func dismissReport(reportId: String) async throws {
+        try requireAdmin()
+        try await applyReportModeration(
+            reportId: reportId,
+            status: "dismissed",
+            action: .dismiss
+        )
+    }
+
+    func issueWarningForReport(
+        reportId: String,
+        reportedUserId: String,
+        message: String? = nil
+    ) async throws {
+        try await issueWarningToUser(
+            userId: reportedUserId,
+            message: message,
+            reportId: reportId
+        )
+        try await applyReportModeration(
+            reportId: reportId,
+            status: "actioned",
+            action: .warning
+        )
+    }
+
+    /// In-app warning from admin screens (report optional).
+    func issueWarningToUser(
+        userId: String,
+        message: String? = nil,
+        reportId: String? = nil
+    ) async throws {
+        try requireAdmin()
+
+        let trimmed = message?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let warningMessage = (trimmed?.isEmpty == false)
+            ? trimmed!
+            : "admin.warning.default.message".localized
+
+        let resolvedReportId = (reportId?.trimmingCharacters(in: .whitespacesAndNewlines))
+            .flatMap { $0.isEmpty ? nil : $0 }
+            ?? "admin-profile-\(userId)-\(Int(Date().timeIntervalSince1970))"
+
+        // Unique notice_id so push + client listeners treat each warning as new.
+        let noticeId = "\(resolvedReportId)-\(Int(Date().timeIntervalSince1970))"
+        try await db.collection("users").document(userId).setData([
+            "pendingSystemWarning": [
+                "message": warningMessage,
+                "report_id": resolvedReportId,
+                "notice_id": noticeId,
+                "created_at": Date().timeIntervalSince1970,
+                "acknowledged": false
+            ]
+        ], merge: true)
+    }
+
+    func freezeUserForReport(
+        reportId: String,
+        reportedUserId: String,
+        duration: ModerationFreezeDuration
+    ) async throws {
+        try await freezeUserAccount(
+            userId: reportedUserId,
+            duration: duration,
+            reportId: reportId,
+            markReportActioned: true
+        )
+    }
+
+    /// Freeze (or re-freeze) a user from admin screens.
+    func freezeUserAccount(
+        userId: String,
+        duration: ModerationFreezeDuration,
+        reportId: String?,
+        markReportActioned: Bool
+    ) async throws {
+        try requireAdmin()
+
+        let freezeUntil = Date().addingTimeInterval(TimeInterval(duration.rawValue * 3600))
+        let resolvedReportId = (reportId?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap {
+            $0.isEmpty ? nil : $0
+        } ?? "admin-freeze-\(userId)-\(Int(Date().timeIntervalSince1970))"
+
+        let userSnapshot = try await db.collection("users").document(userId).getDocument()
+        let userData = userSnapshot.data() ?? [:]
+
+        try await db.collection("users").document(userId).setData([
+            "discoverFrozenUntil": Timestamp(date: freezeUntil),
+            "discoverFreezeHours": duration.rawValue,
+            "discoverFrozenReportId": resolvedReportId,
+            "pendingAccountUnfreeze": FieldValue.delete(),
+            "pendingAccountFreeze": [
+                "report_id": resolvedReportId,
+                "kind": "new",
+                "freeze_until": freezeUntil.timeIntervalSince1970,
+                "hours": duration.rawValue,
+                "created_at": Date().timeIntervalSince1970,
+                "acknowledged": false,
+                "message": String(
+                    format: "Your account has been temporarily frozen for %d hours. Try to login after %@.",
+                    duration.rawValue,
+                    ModerationNotice.formattedUnlockDate(freezeUntil)
+                )
+            ]
+        ], merge: true)
+
+        try await closeActiveFreezeHistory(userId: userId, status: .lifted)
+        do {
+            try await createFreezeHistoryRecord(
+                userId: userId,
+                userData: userData,
+                freezeUntil: freezeUntil,
+                freezeHours: duration.rawValue,
+                reportId: resolvedReportId,
+                status: .active
+            )
+        } catch {
+            print("⚠️ Unable to write freeze history record: \(error.localizedDescription)")
+        }
+
+        if markReportActioned, let reportId, !reportId.isEmpty,
+           !reportId.hasPrefix("admin-freeze-"),
+           !reportId.hasPrefix("admin-extend-") {
+            try await applyReportModeration(
+                reportId: reportId,
+                status: "actioned",
+                action: .freeze,
+                extraFields: [
+                    "freeze_hours": duration.rawValue,
+                    "freeze_until": Timestamp(date: freezeUntil)
+                ]
+            )
+        }
+    }
+
+    func banUserForReport(reportId: String, reportedUserId: String) async throws {
+        try await banUserPermanently(userId: reportedUserId, reportId: reportId)
+    }
+
+    /// Permanent ban from admin screens (report optional).
+    func banUserPermanently(userId: String, reportId: String?) async throws {
+        try requireAdmin()
+        guard let adminUserId = auth.currentUser?.uid else {
+            throw SpectRoomAuthError.notAuthenticated
+        }
+
+        let userRef = db.collection("users").document(userId)
+        let snapshot = try await userRef.getDocument()
+        let userData = snapshot.data() ?? [:]
+
+        var payload: [String: Any] = [
+            "isBanned": true,
+            "bannedAt": FieldValue.serverTimestamp(),
+            "isOnline": false,
+            "discoverFrozenUntil": FieldValue.delete(),
+            "discoverFreezeHours": FieldValue.delete(),
+            "discoverFrozenReportId": FieldValue.delete(),
+            "pendingAccountFreeze": FieldValue.delete(),
+            "pendingAccountUnfreeze": FieldValue.delete(),
+            "pendingAccountUnban": FieldValue.delete(),
+            "pendingAccountBan": [
+                "notice_id": "ban-\(userId)-\(Int(Date().timeIntervalSince1970))",
+                "created_at": Date().timeIntervalSince1970,
+                "acknowledged": false,
+                "banned_by": adminUserId,
+                "message": "Your SpectRoom account has been permanently banned."
+            ]
+        ]
+        let resolvedReportId = reportId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let resolvedReportId, !resolvedReportId.isEmpty {
+            payload["bannedReportId"] = resolvedReportId
+        } else {
+            payload["bannedReportId"] = FieldValue.delete()
+        }
+        // Hide from History while actively banned; lastBanLiftedAt is rewritten on next lift.
+        payload["lastBanLiftedAt"] = FieldValue.delete()
+
+        try await userRef.setData(payload, merge: true)
+        try await closeActiveFreezeHistory(userId: userId, status: .banned)
+        try await closeActiveBanHistory(userId: userId, status: .lifted)
+        // Best-effort separate collection (may fail until Firestore rules allow moderationBans).
+        try? await createBanHistoryRecord(
+            userId: userId,
+            userData: userData,
+            reportId: resolvedReportId,
+            status: .active
+        )
+
+        if let resolvedReportId, !resolvedReportId.isEmpty,
+           !resolvedReportId.hasPrefix("admin-freeze-"),
+           !resolvedReportId.hasPrefix("admin-extend-"),
+           !resolvedReportId.hasPrefix("admin-ban-") {
+            try await applyReportModeration(
+                reportId: resolvedReportId,
+                status: "actioned",
+                action: .ban
+            )
+        }
+    }
+
+    /// Active bans for the admin banned-profiles screen.
+    func fetchBannedProfilesForAdmin() async throws -> [BannedProfile] {
+        try requireAdmin()
+
+        let snapshot = try await db.collection("users")
+            .whereField("isBanned", isEqualTo: true)
+            .getDocuments()
+
+        let profiles = snapshot.documents.compactMap { document -> BannedProfile? in
+            Self.parseBannedProfile(documentID: document.documentID, data: document.data())
+        }
+        return profiles.sorted {
+            ($0.bannedAt ?? .distantPast) > ($1.bannedAt ?? .distantPast)
+        }
+    }
+
+    /// Past bans that were lifted by admin.
+    /// Primary source: fields on the user document (works with existing admin user-update rules).
+    /// Secondary: `moderationBans` collection when rules allow it.
+    func fetchBanHistoryForAdmin() async throws -> [BannedProfile] {
+        try requireAdmin()
+
+        try? await reconcileOrphanedBanHistory()
+
+        var profilesByUserId: [String: BannedProfile] = [:]
+
+        // 1) User documents marked as previously banned / ban lifted.
+        do {
+            let snapshot = try await db.collection("users")
+                .whereField("lastBanLiftedAt", isGreaterThan: Timestamp(date: Date(timeIntervalSince1970: 0)))
+                .getDocuments()
+
+            for document in snapshot.documents {
+                let data = document.data()
+                guard data["isBanned"] as? Bool != true,
+                      let profile = Self.parseLiftedBanFromUser(documentID: document.documentID, data: data)
+                else { continue }
+                profilesByUserId[profile.userId] = profile
+            }
+        } catch {
+            print("⚠️ Unable to load user-based ban history: \(error.localizedDescription)")
+        }
+
+        // 2) Optional moderationBans collection.
+        do {
+            let snapshot = try await db.collection("moderationBans").getDocuments()
+            for document in snapshot.documents {
+                guard let profile = Self.parseBanHistoryProfile(
+                    documentID: document.documentID,
+                    data: document.data()
+                ), profile.isHistoryItem else { continue }
+
+                if let existing = profilesByUserId[profile.userId] {
+                    let existingEnded = existing.endedAt ?? .distantPast
+                    let newEnded = profile.endedAt ?? .distantPast
+                    if newEnded >= existingEnded {
+                        profilesByUserId[profile.userId] = profile
+                    }
+                } else {
+                    profilesByUserId[profile.userId] = profile
+                }
+            }
+        } catch {
+            print("⚠️ Unable to load moderationBans history: \(error.localizedDescription)")
+        }
+
+        return profilesByUserId.values.sorted {
+            ($0.endedAt ?? $0.bannedAt ?? .distantPast) > ($1.endedAt ?? $1.bannedAt ?? .distantPast)
+        }
+    }
+
+    func removeAccountBan(userId: String) async throws {
+        try requireAdmin()
+        guard let adminUserId = auth.currentUser?.uid else {
+            throw SpectRoomAuthError.notAuthenticated
+        }
+
+        let userRef = db.collection("users").document(userId)
+        let snapshot = try await userRef.getDocument()
+        let userData = snapshot.data() ?? [:]
+        let bannedAt = (userData["bannedAt"] as? Timestamp)?.dateValue() ?? Date()
+        let reportId = userData["bannedReportId"] as? String
+
+        // Best-effort collection update (ignored if rules block it).
+        let closedCount = (try? await closeActiveBanHistory(userId: userId, status: .lifted)) ?? 0
+        if closedCount == 0 {
+            try? await createBanHistoryRecord(
+                userId: userId,
+                userData: userData,
+                reportId: reportId,
+                status: .lifted
+            )
+        }
+
+        // Authoritative history for the History tab — written on the user doc.
+        let noticeId = "unban-\(userId)-\(Int(Date().timeIntervalSince1970))"
+        var payload: [String: Any] = [
+            "isBanned": FieldValue.delete(),
+            "bannedAt": FieldValue.delete(),
+            "bannedReportId": FieldValue.delete(),
+            "pendingAccountBan": FieldValue.delete(),
+            "lastBanLiftedAt": FieldValue.serverTimestamp(),
+            "lastBannedAt": Timestamp(date: bannedAt),
+            "pendingAccountUnban": [
+                "notice_id": noticeId,
+                "created_at": Date().timeIntervalSince1970,
+                "acknowledged": false,
+                // Lets the push function skip delivery when this device token is the admin's.
+                "lifted_by": adminUserId,
+                "message": "Your SpectRoom account ban has been lifted. You can log in again."
+            ]
+        ]
+        if let reportId, !reportId.isEmpty {
+            payload["lastBannedReportId"] = reportId
+        } else {
+            payload["lastBannedReportId"] = FieldValue.delete()
+        }
+
+        try await userRef.setData(payload, merge: true)
+    }
+
+    // MARK: - Freeze list / history
+
+    /// Active freezes for the admin frozen-profiles screen.
+    func fetchFrozenProfilesForAdmin() async throws -> [FrozenProfile] {
+        try requireAdmin()
+
+        // Best-effort: don't block the active list if history collection rules/indexes are missing.
+        try? await expireStaleFreezeHistoryRecords()
+
+        let now = Timestamp(date: Date())
+        let snapshot = try await db.collection("users")
+            .whereField("discoverFrozenUntil", isGreaterThan: now)
+            .getDocuments()
+
+        let profiles = snapshot.documents.compactMap { document -> FrozenProfile? in
+            Self.parseFrozenProfile(documentID: document.documentID, data: document.data())
+        }
+        return profiles.sorted { $0.frozenUntil < $1.frozenUntil }
+    }
+
+    /// Past freezes (expired or lifted by admin). Banned entries are included for context.
+    func fetchFreezeHistoryForAdmin() async throws -> [FrozenProfile] {
+        try requireAdmin()
+        try? await expireStaleFreezeHistoryRecords()
+
+        var profiles: [FrozenProfile] = []
+
+        do {
+            let snapshot = try await db.collection("moderationFreezes").getDocuments()
+            profiles = snapshot.documents.compactMap { document -> FrozenProfile? in
+                Self.parseFreezeHistoryProfile(documentID: document.documentID, data: document.data())
+            }
+            .filter { $0.isHistoryItem }
+        } catch {
+            print("⚠️ Unable to load moderationFreezes history: \(error.localizedDescription)")
+        }
+
+        // Legacy: users whose freeze field is still present but already expired.
+        do {
+            let expiredUsers = try await db.collection("users")
+                .whereField("discoverFrozenUntil", isLessThanOrEqualTo: Timestamp(date: Date()))
+                .getDocuments()
+
+            let historyUserIds = Set(profiles.map(\.userId))
+            for document in expiredUsers.documents {
+                let data = document.data()
+                guard data["isBanned"] as? Bool != true,
+                      let profile = Self.parseFrozenProfile(
+                        documentID: document.documentID,
+                        data: data,
+                        forceStatus: .expired
+                      ),
+                      !historyUserIds.contains(profile.userId)
+                else { continue }
+                profiles.append(profile)
+            }
+        } catch {
+            print("⚠️ Unable to load legacy expired freezes: \(error.localizedDescription)")
+        }
+
+        return profiles.sorted {
+            ($0.endedAt ?? $0.frozenUntil) > ($1.endedAt ?? $1.frozenUntil)
+        }
+    }
+
+    func removeAccountFreeze(userId: String) async throws {
+        try requireAdmin()
+
+        let userRef = db.collection("users").document(userId)
+        let snapshot = try await userRef.getDocument()
+        let userData = snapshot.data() ?? [:]
+
+        // Ensure history exists even for freezes created before history tracking.
+        do {
+            let activeHistory = try await activeFreezeHistoryDocuments(userId: userId)
+            if activeHistory.isEmpty,
+               let until = Self.parseDiscoverFreezeUntil(from: userData),
+               until > Date() || userData["discoverFreezeHours"] != nil {
+                try await createFreezeHistoryRecord(
+                    userId: userId,
+                    userData: userData,
+                    freezeUntil: until,
+                    freezeHours: userData["discoverFreezeHours"] as? Int ?? 24,
+                    reportId: userData["discoverFrozenReportId"] as? String,
+                    status: .active
+                )
+            }
+        } catch {
+            print("⚠️ Unable to backfill freeze history before lift: \(error.localizedDescription)")
+        }
+
+        try await closeActiveFreezeHistory(userId: userId, status: .lifted)
+
+        let noticeId = "unfreeze-\(userId)-\(Int(Date().timeIntervalSince1970))"
+        try await userRef.setData([
+            "discoverFrozenUntil": FieldValue.delete(),
+            "discoverFreezeHours": FieldValue.delete(),
+            "discoverFrozenReportId": FieldValue.delete(),
+            "pendingAccountFreeze": FieldValue.delete(),
+            "pendingAccountUnfreeze": [
+                "notice_id": noticeId,
+                "created_at": Date().timeIntervalSince1970,
+                "message": "Your SpectRoom account freeze has been lifted. You can log in again."
+            ]
+        ], merge: true)
+    }
+
+    /// Extends an existing freeze by adding hours on top of the current unlock time.
+    func extendAccountFreeze(
+        userId: String,
+        reportId: String?,
+        duration: ModerationFreezeDuration
+    ) async throws {
+        try requireAdmin()
+
+        let userRef = db.collection("users").document(userId)
+        let snapshot = try await userRef.getDocument()
+        let data = snapshot.data() ?? [:]
+        let currentUntil = Self.parseDiscoverFreezeUntil(from: data)
+        let base = max(currentUntil ?? Date(), Date())
+        let freezeUntil = base.addingTimeInterval(TimeInterval(duration.rawValue * 3600))
+        let totalHours = max(
+            Int(ceil(freezeUntil.timeIntervalSinceNow / 3600)),
+            duration.rawValue
+        )
+        let resolvedReportId = reportId
+            ?? (data["discoverFrozenReportId"] as? String)
+            ?? "admin-extend-\(userId)"
+
+        // Unique report_id so the freeze push Cloud Function fires again on extend.
+        let noticeReportId = "\(resolvedReportId)-ext-\(Int(Date().timeIntervalSince1970))"
+        let unlockLabel = ModerationNotice.formattedUnlockDate(freezeUntil)
+
+        try await userRef.setData([
+            "discoverFrozenUntil": Timestamp(date: freezeUntil),
+            "discoverFreezeHours": totalHours,
+            "discoverFrozenReportId": resolvedReportId,
+            "pendingAccountUnfreeze": FieldValue.delete(),
+            "pendingAccountFreeze": [
+                "report_id": noticeReportId,
+                "kind": "extended",
+                "freeze_until": freezeUntil.timeIntervalSince1970,
+                "hours": totalHours,
+                "created_at": Date().timeIntervalSince1970,
+                "acknowledged": false,
+                "message": String(
+                    format: "Your account freeze has been extended. Try to login after %@.",
+                    unlockLabel
+                )
+            ]
+        ], merge: true)
+
+        try await updateActiveFreezeHistory(
+            userId: userId,
+            freezeUntil: freezeUntil,
+            freezeHours: totalHours,
+            reportId: resolvedReportId,
+            userData: data
+        )
+    }
+
+    // MARK: - Freeze history helpers
+
+    private func createFreezeHistoryRecord(
+        userId: String,
+        userData: [String: Any],
+        freezeUntil: Date,
+        freezeHours: Int,
+        reportId: String?,
+        status: FreezeRecordStatus
+    ) async throws {
+        let snapshot = Self.freezeUserSnapshot(from: userData)
+        var payload: [String: Any] = [
+            "userId": userId,
+            "userName": snapshot.name,
+            "userEmail": snapshot.email as Any,
+            "userAge": snapshot.age as Any,
+            "photoURL": snapshot.photoURL as Any,
+            "freezeHours": freezeHours,
+            "frozenUntil": Timestamp(date: freezeUntil),
+            "reportId": reportId as Any,
+            "status": status.rawValue,
+            "createdAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        if status != .active {
+            payload["endedAt"] = FieldValue.serverTimestamp()
+        }
+        try await db.collection("moderationFreezes").addDocument(data: payload)
+    }
+
+    private func activeFreezeHistoryDocuments(userId: String) async throws -> [QueryDocumentSnapshot] {
+        let snapshot = try await db.collection("moderationFreezes")
+            .whereField("userId", isEqualTo: userId)
+            .whereField("status", isEqualTo: FreezeRecordStatus.active.rawValue)
+            .getDocuments()
+        return snapshot.documents
+    }
+
+    private func closeActiveFreezeHistory(userId: String, status: FreezeRecordStatus) async throws {
+        do {
+            let documents = try await activeFreezeHistoryDocuments(userId: userId)
+            for document in documents {
+                try await document.reference.setData([
+                    "status": status.rawValue,
+                    "endedAt": FieldValue.serverTimestamp(),
+                    "updatedAt": FieldValue.serverTimestamp()
+                ], merge: true)
+            }
+        } catch {
+            print("⚠️ Unable to close freeze history for \(userId): \(error.localizedDescription)")
+        }
+    }
+
+    private func updateActiveFreezeHistory(
+        userId: String,
+        freezeUntil: Date,
+        freezeHours: Int,
+        reportId: String?,
+        userData: [String: Any]
+    ) async throws {
+        do {
+            let documents = try await activeFreezeHistoryDocuments(userId: userId)
+            if documents.isEmpty {
+                try await createFreezeHistoryRecord(
+                    userId: userId,
+                    userData: userData,
+                    freezeUntil: freezeUntil,
+                    freezeHours: freezeHours,
+                    reportId: reportId,
+                    status: .active
+                )
+                return
+            }
+            for document in documents {
+                try await document.reference.setData([
+                    "frozenUntil": Timestamp(date: freezeUntil),
+                    "freezeHours": freezeHours,
+                    "reportId": reportId as Any,
+                    "updatedAt": FieldValue.serverTimestamp()
+                ], merge: true)
+            }
+        } catch {
+            print("⚠️ Unable to update freeze history for \(userId): \(error.localizedDescription)")
+        }
+    }
+
+    private func expireStaleFreezeHistoryRecords() async throws {
+        do {
+            let now = Timestamp(date: Date())
+            let snapshot = try await db.collection("moderationFreezes")
+                .whereField("status", isEqualTo: FreezeRecordStatus.active.rawValue)
+                .whereField("frozenUntil", isLessThanOrEqualTo: now)
+                .getDocuments()
+
+            for document in snapshot.documents {
+                try await document.reference.setData([
+                    "status": FreezeRecordStatus.expired.rawValue,
+                    "endedAt": FieldValue.serverTimestamp(),
+                    "updatedAt": FieldValue.serverTimestamp()
+                ], merge: true)
+            }
+        } catch {
+            print("⚠️ Unable to expire stale freeze history: \(error.localizedDescription)")
+        }
+    }
+
+    private struct FreezeUserSnapshot {
+        let name: String
+        let email: String?
+        let age: Int?
+        let photoURL: String?
+    }
+
+    private static func freezeUserSnapshot(from data: [String: Any]) -> FreezeUserSnapshot {
+        let name = (data["name"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedName = (name?.isEmpty == false) ? name! : "Unknown"
+        var photoURL = data["profilePhotoURL"] as? String
+        if photoURL == nil || photoURL?.isEmpty == true, let photos = data["photos"] as? [String] {
+            photoURL = photos.first(where: { !$0.isEmpty })
+        }
+        return FreezeUserSnapshot(
+            name: resolvedName,
+            email: data["email"] as? String,
+            age: data["age"] as? Int,
+            photoURL: photoURL
+        )
+    }
+
+    private static func parseFrozenProfile(
+        documentID: String,
+        data: [String: Any],
+        forceStatus: FreezeRecordStatus? = nil
+    ) -> FrozenProfile? {
+        if forceStatus == nil, data["isBanned"] as? Bool == true { return nil }
+        guard let frozenUntil = parseDiscoverFreezeUntil(from: data) else {
+            return nil
+        }
+        if forceStatus == nil, frozenUntil <= Date() {
+            return nil
+        }
+
+        let snapshot = freezeUserSnapshot(from: data)
+        let hours = data["discoverFreezeHours"] as? Int
+            ?? (data["pendingAccountFreeze"] as? [String: Any])?["hours"] as? Int
+            ?? 24
+        let reportId = data["discoverFrozenReportId"] as? String
+            ?? (data["pendingAccountFreeze"] as? [String: Any])?["report_id"] as? String
+        let status = forceStatus ?? .active
+
+        return FrozenProfile(
+            id: documentID,
+            userId: documentID,
+            historyRecordId: nil,
+            name: snapshot.name,
+            age: snapshot.age,
+            email: snapshot.email,
+            photoURL: snapshot.photoURL,
+            frozenUntil: frozenUntil,
+            freezeHours: hours,
+            reportId: reportId,
+            status: status,
+            createdAt: nil,
+            endedAt: forceStatus == nil ? nil : frozenUntil
+        )
+    }
+
+    private static func parseFreezeHistoryProfile(documentID: String, data: [String: Any]) -> FrozenProfile? {
+        guard let userId = data["userId"] as? String,
+              let statusRaw = data["status"] as? String,
+              let status = FreezeRecordStatus(rawValue: statusRaw)
+        else {
+            return nil
+        }
+
+        let frozenUntil: Date
+        if let timestamp = data["frozenUntil"] as? Timestamp {
+            frozenUntil = timestamp.dateValue()
+        } else if let interval = data["frozenUntil"] as? TimeInterval {
+            frozenUntil = Date(timeIntervalSince1970: interval)
+        } else {
+            return nil
+        }
+
+        let createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
+        let endedAt = (data["endedAt"] as? Timestamp)?.dateValue()
+        let name = (data["userName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedName = (name?.isEmpty == false) ? name! : "Unknown"
+
+        // Treat leftover "active" past-due rows as expired for display.
+        let resolvedStatus: FreezeRecordStatus = {
+            if status == .active, frozenUntil <= Date() { return .expired }
+            return status
+        }()
+
+        return FrozenProfile(
+            id: documentID,
+            userId: userId,
+            historyRecordId: documentID,
+            name: resolvedName,
+            age: data["userAge"] as? Int,
+            email: data["userEmail"] as? String,
+            photoURL: data["photoURL"] as? String,
+            frozenUntil: frozenUntil,
+            freezeHours: data["freezeHours"] as? Int ?? 24,
+            reportId: data["reportId"] as? String,
+            status: resolvedStatus,
+            createdAt: createdAt,
+            endedAt: endedAt ?? (resolvedStatus == .active ? nil : frozenUntil)
+        )
+    }
+
+    // MARK: - Ban history helpers
+
+    private func createBanHistoryRecord(
+        userId: String,
+        userData: [String: Any],
+        reportId: String?,
+        status: BanRecordStatus
+    ) async throws {
+        let snapshot = Self.freezeUserSnapshot(from: userData)
+        var payload: [String: Any] = [
+            "userId": userId,
+            "userName": snapshot.name,
+            "status": status.rawValue,
+            "createdAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        if let email = snapshot.email { payload["userEmail"] = email }
+        if let age = snapshot.age { payload["userAge"] = age }
+        if let photoURL = snapshot.photoURL { payload["photoURL"] = photoURL }
+        if let reportId, !reportId.isEmpty { payload["reportId"] = reportId }
+        if status != .active {
+            payload["endedAt"] = FieldValue.serverTimestamp()
+        }
+        try await db.collection("moderationBans").addDocument(data: payload)
+    }
+
+    private func activeBanHistoryDocuments(userId: String) async throws -> [QueryDocumentSnapshot] {
+        // Single-field query only — no composite index required.
+        let snapshot = try await db.collection("moderationBans")
+            .whereField("userId", isEqualTo: userId)
+            .getDocuments()
+        return snapshot.documents.filter {
+            ($0.data()["status"] as? String) == BanRecordStatus.active.rawValue
+        }
+    }
+
+    @discardableResult
+    private func closeActiveBanHistory(userId: String, status: BanRecordStatus) async throws -> Int {
+        do {
+            let documents = try await activeBanHistoryDocuments(userId: userId)
+            for document in documents {
+                try await document.reference.setData([
+                    "status": status.rawValue,
+                    "endedAt": FieldValue.serverTimestamp(),
+                    "updatedAt": FieldValue.serverTimestamp()
+                ], merge: true)
+            }
+            return documents.count
+        } catch {
+            print("⚠️ Unable to close ban history for \(userId): \(error.localizedDescription)")
+            return 0
+        }
+    }
+
+    /// Marks leftover "active" ban history rows as lifted when the user is no longer banned.
+    private func reconcileOrphanedBanHistory() async throws {
+        do {
+            let snapshot = try await db.collection("moderationBans").getDocuments()
+            let activeDocs = snapshot.documents.filter {
+                ($0.data()["status"] as? String) == BanRecordStatus.active.rawValue
+            }
+            guard !activeDocs.isEmpty else { return }
+
+            let userIds = Set(activeDocs.compactMap { $0.data()["userId"] as? String })
+            var stillBanned = Set<String>()
+            for userId in userIds {
+                let userSnap = try await db.collection("users").document(userId).getDocument()
+                if userSnap.data()?["isBanned"] as? Bool == true {
+                    stillBanned.insert(userId)
+                }
+            }
+
+            for document in activeDocs {
+                guard let userId = document.data()["userId"] as? String,
+                      !stillBanned.contains(userId)
+                else { continue }
+                try await document.reference.setData([
+                    "status": BanRecordStatus.lifted.rawValue,
+                    "endedAt": FieldValue.serverTimestamp(),
+                    "updatedAt": FieldValue.serverTimestamp()
+                ], merge: true)
+            }
+        } catch {
+            print("⚠️ Unable to reconcile orphaned ban history: \(error.localizedDescription)")
+        }
+    }
+
+    private static func parseBannedProfile(documentID: String, data: [String: Any]) -> BannedProfile? {
+        guard data["isBanned"] as? Bool == true else { return nil }
+        let snapshot = freezeUserSnapshot(from: data)
+        let bannedAt = (data["bannedAt"] as? Timestamp)?.dateValue()
+        return BannedProfile(
+            id: documentID,
+            userId: documentID,
+            historyRecordId: nil,
+            name: snapshot.name,
+            age: snapshot.age,
+            email: snapshot.email,
+            photoURL: snapshot.photoURL,
+            reportId: data["bannedReportId"] as? String,
+            status: .active,
+            bannedAt: bannedAt,
+            endedAt: nil
+        )
+    }
+
+    /// History entry from user fields written when a ban is removed.
+    private static func parseLiftedBanFromUser(documentID: String, data: [String: Any]) -> BannedProfile? {
+        let liftedAt: Date?
+        if let timestamp = data["lastBanLiftedAt"] as? Timestamp {
+            liftedAt = timestamp.dateValue()
+        } else if let interval = data["lastBanLiftedAt"] as? TimeInterval {
+            liftedAt = Date(timeIntervalSince1970: interval)
+        } else {
+            return nil
+        }
+
+        let bannedAt: Date?
+        if let timestamp = data["lastBannedAt"] as? Timestamp {
+            bannedAt = timestamp.dateValue()
+        } else if let interval = data["lastBannedAt"] as? TimeInterval {
+            bannedAt = Date(timeIntervalSince1970: interval)
+        } else if let timestamp = data["bannedAt"] as? Timestamp {
+            bannedAt = timestamp.dateValue()
+        } else {
+            bannedAt = nil
+        }
+
+        let snapshot = freezeUserSnapshot(from: data)
+        return BannedProfile(
+            id: "lifted-\(documentID)",
+            userId: documentID,
+            historyRecordId: nil,
+            name: snapshot.name,
+            age: snapshot.age,
+            email: snapshot.email,
+            photoURL: snapshot.photoURL,
+            reportId: data["lastBannedReportId"] as? String ?? data["bannedReportId"] as? String,
+            status: .lifted,
+            bannedAt: bannedAt,
+            endedAt: liftedAt
+        )
+    }
+
+    private static func parseBanHistoryProfile(documentID: String, data: [String: Any]) -> BannedProfile? {
+        guard let userId = data["userId"] as? String,
+              let statusRaw = data["status"] as? String,
+              let status = BanRecordStatus(rawValue: statusRaw)
+        else {
+            return nil
+        }
+
+        let name = (data["userName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedName = (name?.isEmpty == false) ? name! : "Unknown"
+        let bannedAt = (data["createdAt"] as? Timestamp)?.dateValue()
+        let endedAt = (data["endedAt"] as? Timestamp)?.dateValue()
+
+        return BannedProfile(
+            id: documentID,
+            userId: userId,
+            historyRecordId: documentID,
+            name: resolvedName,
+            age: data["userAge"] as? Int,
+            email: data["userEmail"] as? String,
+            photoURL: data["photoURL"] as? String,
+            reportId: data["reportId"] as? String,
+            status: status,
+            bannedAt: bannedAt,
+            endedAt: endedAt
+        )
+    }
+
+    func clearPendingSystemWarning() async throws {
+        guard let userId = auth.currentUser?.uid else { return }
+        try await db.collection("users").document(userId).updateData([
+            "pendingSystemWarning": FieldValue.delete()
+        ])
+    }
+
+    func clearPendingAccountFreezeNotice() async throws {
+        guard let userId = auth.currentUser?.uid else { return }
+        // Keep discoverFrozenUntil — only clear the acknowledgment payload.
+        try await db.collection("users").document(userId).updateData([
+            "pendingAccountFreeze": FieldValue.delete()
+        ])
+    }
+
+    func clearPendingAccountBanNotice() async throws {
+        guard let userId = auth.currentUser?.uid else { return }
+        // Keep fcmToken so a later ban-lift push can still be delivered.
+        try await db.collection("users").document(userId).updateData([
+            "pendingAccountBan": FieldValue.delete()
+        ])
+    }
+
+    func clearPendingAccountUnbanNotice() async throws {
+        guard let userId = auth.currentUser?.uid else { return }
+        try await db.collection("users").document(userId).updateData([
+            "pendingAccountUnban": FieldValue.delete()
+        ])
+    }
+
+    func fetchPendingModerationNotice(preferServer: Bool = false) async throws -> ModerationNotice? {
+        guard let userData = try await fetchUserData(preferServer: preferServer) else { return nil }
+
+        if userData["isBanned"] as? Bool == true {
+            return ModerationNotice(kind: .banAcknowledgement)
+        }
+
+        if let unban = userData["pendingAccountUnban"] as? [String: Any],
+           (unban["acknowledged"] as? Bool) != true {
+            return ModerationNotice(kind: .banLifted)
+        }
+
+        if let freeze = userData["pendingAccountFreeze"] as? [String: Any],
+           (freeze["acknowledged"] as? Bool) != true,
+           let until = Self.parseFreezeUntilValue(freeze["freeze_until"]) ?? Self.parseDiscoverFreezeUntil(from: userData),
+           until > Date() {
+            let hours = freeze["hours"] as? Int
+                ?? userData["discoverFreezeHours"] as? Int
+                ?? 24
+            return ModerationNotice(kind: .freezeAcknowledgement(until: until, hours: hours))
+        }
+
+        if let warning = userData["pendingSystemWarning"] as? [String: Any],
+           (warning["acknowledged"] as? Bool) != true {
+            let message = (warning["message"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolved = (message?.isEmpty == false)
+                ? message!
+                : "admin.warning.default.message".localized
+            return ModerationNotice(kind: .warning(message: resolved))
+        }
+
+        // Session restored while freeze is still active (notice already cleared).
+        if let until = Self.parseDiscoverFreezeUntil(from: userData), until > Date() {
+            let hours = userData["discoverFreezeHours"] as? Int ?? 24
+            return ModerationNotice(kind: .freezeAcknowledgement(until: until, hours: hours))
+        }
+
+        return nil
+    }
+
+    func fetchPendingSystemWarning() async throws -> String? {
+        try await fetchPendingModerationNotice().map(\.message)
+    }
+
+    private static func parseFreezeUntilValue(_ value: Any?) -> Date? {
+        if let timestamp = value as? Timestamp {
+            return timestamp.dateValue()
+        }
+        if let interval = value as? TimeInterval {
+            return Date(timeIntervalSince1970: interval)
+        }
+        if let number = value as? NSNumber {
+            return Date(timeIntervalSince1970: number.doubleValue)
+        }
+        return nil
+    }
+
+    private func requireAdmin() throws {
+        guard AdminAccess.isAdmin(email: auth.currentUser?.email) else {
+            throw SpectRoomAuthError.notAdmin
+        }
+    }
+
+    // MARK: - Admin all profiles
+
+    struct AdminUsersPage {
+        let users: [AdminUserProfile]
+        let lastDocumentId: String?
+        let hasMore: Bool
+    }
+
+    /// Paginated users for Admin → All profiles (includes banned / frozen / deleted).
+    func fetchAdminUsersPage(limit: Int = 25, startAfterDocumentId: String? = nil) async throws -> AdminUsersPage {
+        try requireAdmin()
+
+        var query: Query = db.collection("users")
+            .order(by: FieldPath.documentID())
+            .limit(to: limit)
+
+        if let startAfterDocumentId {
+            let previousDoc = try await db.collection("users").document(startAfterDocumentId).getDocument()
+            if previousDoc.exists {
+                query = query.start(afterDocument: previousDoc)
+            }
+        }
+
+        let snapshot = try await query.getDocuments()
+        let users = snapshot.documents.compactMap { document in
+            Self.parseAdminUserProfile(documentID: document.documentID, data: document.data())
+        }
+        return AdminUsersPage(
+            users: users,
+            lastDocumentId: snapshot.documents.last?.documentID,
+            hasMore: snapshot.documents.count == limit
+        )
+    }
+
+    /// Name / email search for Admin → All profiles (scans users collection, filtered client-side).
+    func searchAdminUsers(query: String, limit: Int = 80) async throws -> [AdminUserProfile] {
+        try requireAdmin()
+
+        let trimmed = Self.normalizedAdminSearchQuery(query)
+        guard trimmed.count >= 2 else { return [] }
+
+        var matchesById: [String: AdminUserProfile] = [:]
+
+        // Fast path for full / near-full emails (indexed equality + common casing).
+        if trimmed.contains("@") {
+            let exactSnapshot = try await db.collection("users")
+                .whereField("email", isEqualTo: trimmed)
+                .limit(to: limit)
+                .getDocuments()
+            for document in exactSnapshot.documents {
+                if let profile = Self.parseAdminUserProfile(documentID: document.documentID, data: document.data()) {
+                    matchesById[profile.id] = profile
+                }
+            }
+        }
+
+        // Full scan so partial email / name queries still work (e.g. "test20", "yopmail").
+        let snapshot = try await db.collection("users").getDocuments()
+        for document in snapshot.documents {
+            guard let profile = Self.parseAdminUserProfile(documentID: document.documentID, data: document.data()) else {
+                continue
+            }
+            guard Self.adminProfileMatchesSearch(profile, query: trimmed) else { continue }
+            matchesById[profile.id] = profile
+        }
+
+        let matches = matchesById.values.sorted { lhs, rhs in
+            let lhsEmail = lhs.email.lowercased()
+            let rhsEmail = rhs.email.lowercased()
+            let lhsExact = !lhsEmail.isEmpty && lhsEmail == trimmed
+            let rhsExact = !rhsEmail.isEmpty && rhsEmail == trimmed
+            if lhsExact != rhsExact { return lhsExact && !rhsExact }
+
+            let lhsEmailHit = !lhsEmail.isEmpty && lhsEmail.contains(trimmed)
+            let rhsEmailHit = !rhsEmail.isEmpty && rhsEmail.contains(trimmed)
+            if lhsEmailHit != rhsEmailHit { return lhsEmailHit && !rhsEmailHit }
+
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+
+        return Array(matches.prefix(limit))
+    }
+
+    private static func normalizedAdminSearchQuery(_ query: String) -> String {
+        query
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\u{00a0}", with: "")
+            .lowercased()
+    }
+
+    private static func adminProfileMatchesSearch(_ profile: AdminUserProfile, query: String) -> Bool {
+        let name = profile.name.lowercased()
+        let email = profile.email.lowercased()
+        if name.contains(query) { return true }
+        if !email.isEmpty, email.contains(query) { return true }
+        // Match local-part only when the query looks like an email ("test20@…" → "test20").
+        if query.contains("@"), let local = query.split(separator: "@").first, local.count >= 2 {
+            if email.hasPrefix(String(local) + "@") { return true }
+        }
+        return false
+    }
+
+    /// Latest conversation previews for a given user (admin-only).
+    func fetchAdminRecentConversations(for userId: String, limit: Int = 40) async throws -> [AdminRecentConversation] {
+        try requireAdmin()
+
+        let recentLimit = 100
+        // Load each collection independently so a rules denial on one side
+        // (or on users with no message docs) does not surface as a hard error.
+        async let sentDocsTask = fetchAdminMessageDocuments(
+            userId: userId,
+            collection: "sentMessages",
+            limit: recentLimit
+        )
+        async let incomingDocsTask = fetchAdminMessageDocuments(
+            userId: userId,
+            collection: "incomingMessages",
+            limit: recentLimit
+        )
+
+        let sentDocuments = try await sentDocsTask
+        let incomingDocuments = try await incomingDocsTask
+
+        struct Candidate {
+            let partnerId: String
+            let preview: String
+            let createdAt: TimeInterval
+            let isOutgoing: Bool
+        }
+
+        var latestByPartner: [String: Candidate] = [:]
+
+        for document in sentDocuments {
+            let data = document.data()
+            guard let partnerId = data["recipientId"] as? String,
+                  let createdAt = Self.timeIntervalValue(data["createdAt"]) else { continue }
+            if let existing = latestByPartner[partnerId], existing.createdAt >= createdAt { continue }
+            latestByPartner[partnerId] = Candidate(
+                partnerId: partnerId,
+                preview: Self.adminMessagePreview(from: data),
+                createdAt: createdAt,
+                isOutgoing: true
+            )
+        }
+
+        for document in incomingDocuments {
+            let data = document.data()
+            guard let partnerId = data["senderId"] as? String,
+                  let createdAt = Self.timeIntervalValue(data["createdAt"]) else { continue }
+            if let existing = latestByPartner[partnerId], existing.createdAt >= createdAt { continue }
+            latestByPartner[partnerId] = Candidate(
+                partnerId: partnerId,
+                preview: Self.adminMessagePreview(from: data),
+                createdAt: createdAt,
+                isOutgoing: false
+            )
+        }
+
+        let summaries = await fetchUserSummaries(for: Array(latestByPartner.keys))
+        let conversations = latestByPartner.values.map { candidate in
+            let summary = summaries[candidate.partnerId]
+            return AdminRecentConversation(
+                id: candidate.partnerId,
+                partnerId: candidate.partnerId,
+                partnerName: summary?.name ?? "Unknown",
+                partnerPhotoURL: summary?.photoURL,
+                preview: candidate.preview,
+                isOutgoing: candidate.isOutgoing,
+                createdAt: Date(timeIntervalSince1970: candidate.createdAt)
+            )
+        }
+        .sorted { $0.createdAt > $1.createdAt }
+
+        return Array(conversations.prefix(limit))
+    }
+
+    /// Reads a user's message collection for admin review.
+    /// Permission-denied is treated as empty so users with no chats don't show a Firestore rules error.
+    private func fetchAdminMessageDocuments(
+        userId: String,
+        collection: String,
+        limit: Int
+    ) async throws -> [QueryDocumentSnapshot] {
+        do {
+            let snapshot = try await db.collection("users")
+                .document(userId)
+                .collection(collection)
+                .order(by: "createdAt", descending: true)
+                .limit(to: limit)
+                .getDocuments()
+            return snapshot.documents
+        } catch {
+            if Self.isFirestorePermissionDenied(error) {
+                print("⚠️ Admin \(collection) read denied for \(userId) — treating as empty. Ensure Firestore rules allow isAdmin() on message subcollections.")
+                return []
+            }
+            throw error
+        }
+    }
+
+    private static func isFirestorePermissionDenied(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == FirestoreErrorDomain,
+           nsError.code == FirestoreErrorCode.permissionDenied.rawValue {
+            return true
+        }
+        let message = nsError.localizedDescription.lowercased()
+        return message.contains("insufficient permissions") || message.contains("permission denied")
+    }
+
+    /// Filtered message docs for admin thread view; permission-denied → empty.
+    private func fetchAdminFilteredMessageDocuments(
+        collection: String,
+        filterField: String,
+        filterValue: String,
+        userId: String,
+        limit: Int
+    ) async throws -> [QueryDocumentSnapshot] {
+        do {
+            return try await fetchFilteredMessageDocuments(
+                collection: collection,
+                filterField: filterField,
+                filterValue: filterValue,
+                userId: userId,
+                limit: limit,
+                before: nil
+            )
+        } catch {
+            if Self.isFirestorePermissionDenied(error) {
+                print("⚠️ Admin filtered \(collection) read denied for \(userId) — treating as empty.")
+                return []
+            }
+            throw error
+        }
+    }
+
+
+    /// Last N messages between a subject user and a partner (admin-only). Chronological order.
+    func fetchAdminConversationMessages(
+        subjectUserId: String,
+        partnerId: String,
+        limit: Int = 20
+    ) async throws -> [AdminConversationMessage] {
+        try requireAdmin()
+
+        async let sentDocsTask = fetchAdminFilteredMessageDocuments(
+            collection: "sentMessages",
+            filterField: "recipientId",
+            filterValue: partnerId,
+            userId: subjectUserId,
+            limit: limit
+        )
+        async let incomingDocsTask = fetchAdminFilteredMessageDocuments(
+            collection: "incomingMessages",
+            filterField: "senderId",
+            filterValue: partnerId,
+            userId: subjectUserId,
+            limit: limit
+        )
+
+        let sentDocs = try await sentDocsTask
+        let incomingDocs = try await incomingDocsTask
+
+        var merged: [AdminConversationMessage] = []
+
+        for document in sentDocs {
+            if let message = Self.parseAdminConversationMessage(
+                documentID: document.documentID,
+                data: document.data(),
+                isFromSubject: true
+            ) {
+                merged.append(message)
+            }
+        }
+
+        for document in incomingDocs {
+            if let message = Self.parseAdminConversationMessage(
+                documentID: document.documentID,
+                data: document.data(),
+                isFromSubject: false
+            ) {
+                merged.append(message)
+            }
+        }
+
+        // Newest first from queries — keep the most recent `limit`, then show oldest→newest.
+        merged.sort { $0.createdAt > $1.createdAt }
+        return Array(merged.prefix(limit)).sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private static func parseAdminConversationMessage(
+        documentID: String,
+        data: [String: Any],
+        isFromSubject: Bool
+    ) -> AdminConversationMessage? {
+        guard let content = data["content"] as? String,
+              let createdAt = timeIntervalValue(data["createdAt"])
+        else {
+            return nil
+        }
+
+        let typeString = (data["type"] as? String ?? "text").lowercased()
+        let type = MessageType(rawValue: typeString) ?? .text
+        let voiceDuration = timeIntervalValue(data["voiceDuration"])
+
+        return AdminConversationMessage(
+            id: (data["id"] as? String) ?? documentID,
+            content: content,
+            type: type,
+            isFromSubject: isFromSubject,
+            createdAt: Date(timeIntervalSince1970: createdAt),
+            voiceDuration: voiceDuration
+        )
+    }
+
+    private static func adminMessagePreview(from data: [String: Any]) -> String {
+        let type = (data["type"] as? String ?? "text").lowercased()
+        switch type {
+        case "image":
+            return "📷 Image"
+        case "voice", "audio":
+            return "🎤 Voice message"
+        default:
+            let content = (data["content"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return content.isEmpty ? "—" : content
+        }
+    }
+
+    private static func parseAdminUserProfile(documentID: String, data: [String: Any]) -> AdminUserProfile? {
+        let name = (data["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // Prefer `email`; fall back to legacy keys some docs may still use.
+        let rawEmail = (data["email"] as? String)
+            ?? (data["userEmail"] as? String)
+            ?? (data["Email"] as? String)
+            ?? ""
+        let email = rawEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty && email.isEmpty { return nil }
+
+        let photos = data["photos"] as? [String] ?? []
+        var photoURL = data["profilePhotoURL"] as? String
+        if photoURL == nil || photoURL?.isEmpty == true {
+            photoURL = photos.first(where: { !$0.isEmpty })
+        }
+
+        let location = Self.parseLocation(from: data)
+        let frozenUntil = Self.parseDiscoverFreezeUntil(from: data)
+        let lastSeen: Date?
+        if let interval = data["lastSeen"] as? TimeInterval {
+            lastSeen = Date(timeIntervalSince1970: interval)
+        } else if let timestamp = data["lastSeen"] as? Timestamp {
+            lastSeen = timestamp.dateValue()
+        } else {
+            lastSeen = nil
+        }
+
+        let createdAt: Date?
+        if let timestamp = data["createdAt"] as? Timestamp {
+            createdAt = timestamp.dateValue()
+        } else if let interval = data["createdAt"] as? TimeInterval {
+            createdAt = Date(timeIntervalSince1970: interval)
+        } else {
+            createdAt = nil
+        }
+
+        return AdminUserProfile(
+            id: documentID,
+            name: name.isEmpty ? "Unknown" : name,
+            age: data["age"] as? Int,
+            email: email,
+            bio: data["bio"] as? String ?? "",
+            photoURL: photoURL,
+            photos: photos,
+            gender: data["gender"] as? String ?? "",
+            interests: data["interests"] as? [String] ?? [],
+            interestedIn: data["interestedIn"] as? [String] ?? [],
+            lookingFor: data["lookingFor"] as? [String] ?? [],
+            locationDisplay: location.displayString,
+            isOnline: data["isOnline"] as? Bool ?? false,
+            lastSeen: lastSeen,
+            isBanned: data["isBanned"] as? Bool == true,
+            isFrozen: (frozenUntil ?? .distantPast) > Date(),
+            frozenUntil: frozenUntil,
+            isDeleted: data["isDeleted"] as? Bool == true,
+            createdAt: createdAt
+        )
+    }
+
+    private func applyReportModeration(
+        reportId: String,
+        status: String,
+        action: ReportModerationAction,
+        extraFields: [String: Any] = [:]
+    ) async throws {
+        guard let adminId = auth.currentUser?.uid else {
+            throw SpectRoomAuthError.notAuthenticated
+        }
+
+        var data: [String: Any] = [
+            "status": status,
+            "moderation_action": action.rawValue,
+            "moderated_at": FieldValue.serverTimestamp(),
+            "moderated_by": adminId
+        ]
+        for (key, value) in extraFields {
+            data[key] = value
+        }
+
+        try await db.collection("reports").document(reportId).setData(data, merge: true)
+    }
+
+    static func parseDiscoverFreezeUntil(from userData: [String: Any]) -> Date? {
+        if let timestamp = userData["discoverFrozenUntil"] as? Timestamp {
+            return timestamp.dateValue()
+        }
+        if let interval = userData["discoverFrozenUntil"] as? TimeInterval {
+            return Date(timeIntervalSince1970: interval)
+        }
+        return nil
+    }
+
     private static func parseUserReport(documentID: String, data: [String: Any]) -> UserReport? {
         let reportId = data["report_id"] as? String ?? documentID
         guard
@@ -1076,6 +2648,95 @@ class FirebaseAuthService: ObservableObject {
     func stopListeningForBlockedByUsers() {
         blockedByListener?.remove()
         blockedByListener = nil
+    }
+
+    func stopListeningForModerationStatus() {
+        moderationListener?.remove()
+        moderationListener = nil
+    }
+
+    /// Live updates for ban / warning / freeze notice on the signed-in user.
+    func listenForModerationStatus(
+        onBanned: @escaping () -> Void,
+        onNotice: @escaping (ModerationNotice) -> Void,
+        onNoticeCleared: @escaping () -> Void
+    ) {
+        guard let currentUserId = auth.currentUser?.uid else { return }
+
+        stopListeningForModerationStatus()
+        moderationListener = db.collection("users").document(currentUserId)
+            .addSnapshotListener { [weak self] snapshot, error in
+                if let error {
+                    print("⚠️ Error listening for moderation status: \(error.localizedDescription)")
+                    return
+                }
+                guard let data = snapshot?.data() else { return }
+
+                if data["isBanned"] as? Bool == true {
+                    print("🚫 Pending account ban notice for \(currentUserId)")
+                    DispatchQueue.main.async {
+                        onNotice(ModerationNotice(kind: .banAcknowledgement))
+                    }
+                    return
+                }
+
+                if let unban = data["pendingAccountUnban"] as? [String: Any],
+                   (unban["acknowledged"] as? Bool) != true {
+                    print("✅ Pending account unban notice for \(currentUserId)")
+                    DispatchQueue.main.async {
+                        onNotice(ModerationNotice(kind: .banLifted))
+                    }
+                    return
+                }
+
+                if let freeze = data["pendingAccountFreeze"] as? [String: Any],
+                   (freeze["acknowledged"] as? Bool) != true,
+                   let until = Self.parseFreezeUntilValue(freeze["freeze_until"]) ?? Self.parseDiscoverFreezeUntil(from: data),
+                   until > Date() {
+                    let hours = freeze["hours"] as? Int
+                        ?? data["discoverFreezeHours"] as? Int
+                        ?? 24
+                    print("❄️ Pending account freeze notice for \(currentUserId)")
+                    DispatchQueue.main.async {
+                        onNotice(ModerationNotice(kind: .freezeAcknowledgement(until: until, hours: hours)))
+                    }
+                    return
+                }
+
+                if let warning = data["pendingSystemWarning"] as? [String: Any],
+                   (warning["acknowledged"] as? Bool) != true {
+                    let message = (warning["message"] as? String)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let resolved = (message?.isEmpty == false)
+                        ? message!
+                        : "admin.warning.default.message".localized
+                    // Ignore stale cache snapshots that omit a warning we already know about —
+                    // handled by not clearing warnings in onNoticeCleared.
+                    print("⚠️ Pending system warning for \(currentUserId)")
+                    DispatchQueue.main.async {
+                        onNotice(ModerationNotice(kind: .warning(message: resolved)))
+                    }
+                    return
+                }
+
+                // Skip "cleared" signals from cache — wait for a server confirmation when possible.
+                if snapshot?.metadata.isFromCache == true {
+                    return
+                }
+
+                // Active freeze without pending notice (e.g. after ack race) — still require sign-out via UI notice.
+                if let until = Self.parseDiscoverFreezeUntil(from: data), until > Date() {
+                    let hours = data["discoverFreezeHours"] as? Int ?? 24
+                    DispatchQueue.main.async {
+                        onNotice(ModerationNotice(kind: .freezeAcknowledgement(until: until, hours: hours)))
+                    }
+                    return
+                }
+
+                DispatchQueue.main.async {
+                    onNoticeCleared()
+                }
+            }
     }
     
     /// Live updates when someone blocks/unblocks the current user (mutual hide).
@@ -2282,37 +3943,54 @@ class FirebaseAuthService: ObservableObject {
         return messages
     }
     
-    func fetchAllConversationsForExport() async throws -> (currentUserName: String, currentUserId: String, conversations: [MessagesExportConversation]) {
-        guard let currentUserId = auth.currentUser?.uid else {
-            throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+    func fetchAllConversationsForExport(
+        forUserId subjectUserId: String? = nil,
+        userName subjectUserName: String? = nil
+    ) async throws -> (currentUserName: String, currentUserId: String, conversations: [MessagesExportConversation]) {
+        let exportUserId: String
+        let exportUserName: String
+
+        if let subjectUserId {
+            try requireAdmin()
+            exportUserId = subjectUserId
+            let trimmed = subjectUserName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            exportUserName = trimmed.isEmpty ? "settings.export.messages.you".localized : trimmed
+        } else {
+            guard let currentUserId = auth.currentUser?.uid else {
+                throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+            }
+            exportUserId = currentUserId
+            exportUserName = currentUser?.name
+                ?? AppStateManager.shared.currentUser?.name
+                ?? "settings.export.messages.you".localized
         }
-        
-        let cutoffDate = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date().addingTimeInterval(-15552000)
+
+        let cutoffDate = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date().addingTimeInterval(-15_552_000)
         let cutoffTimestamp = cutoffDate.timeIntervalSince1970
-        
+
         async let sentSnapshotTask = db.collection("users")
-            .document(currentUserId)
+            .document(exportUserId)
             .collection("sentMessages")
             .whereField("createdAt", isGreaterThanOrEqualTo: cutoffTimestamp)
             .getDocuments()
         async let incomingSnapshotTask = db.collection("users")
-            .document(currentUserId)
+            .document(exportUserId)
             .collection("incomingMessages")
             .whereField("createdAt", isGreaterThanOrEqualTo: cutoffTimestamp)
             .getDocuments()
-        
+
         let sentSnapshot = try await sentSnapshotTask
         let incomingSnapshot = try await incomingSnapshotTask
-        
+
         struct RawMessage {
             let data: [String: Any]
             let otherUserId: String
             let isOutgoing: Bool
         }
-        
+
         var rawMessages: [RawMessage] = []
         var partnerIds = Set<String>()
-        
+
         for document in sentSnapshot.documents {
             let data = document.data()
             guard let recipientId = data["recipientId"] as? String, !recipientId.isEmpty else { continue }
@@ -2322,7 +4000,7 @@ class FirebaseAuthService: ObservableObject {
             partnerIds.insert(recipientId)
             rawMessages.append(RawMessage(data: data, otherUserId: recipientId, isOutgoing: true))
         }
-        
+
         for document in incomingSnapshot.documents {
             let data = document.data()
             guard let senderId = data["senderId"] as? String, !senderId.isEmpty else { continue }
@@ -2332,18 +4010,15 @@ class FirebaseAuthService: ObservableObject {
             partnerIds.insert(senderId)
             rawMessages.append(RawMessage(data: data, otherUserId: senderId, isOutgoing: false))
         }
-        
+
         let profiles = await fetchUserSummaries(for: Array(partnerIds))
-        let currentUserName = currentUser?.name
-            ?? AppStateManager.shared.currentUser?.name
-            ?? "settings.export.messages.you".localized
-        
+
         var grouped: [String: [MessageDisplay]] = [:]
         for raw in rawMessages {
             let partnerName = profiles[raw.otherUserId]?.name ?? "Unknown User"
             guard let display = messageDisplay(
                 from: raw.data,
-                currentUserId: currentUserId,
+                currentUserId: exportUserId,
                 otherUserId: raw.otherUserId,
                 otherUserName: partnerName,
                 otherUserPhotoURL: profiles[raw.otherUserId]?.photoURL,
@@ -2353,7 +4028,7 @@ class FirebaseAuthService: ObservableObject {
             guard display.createdAt >= cutoffDate else { continue }
             grouped[raw.otherUserId, default: []].append(display)
         }
-        
+
         let conversations = grouped.compactMap { partnerId, messages -> MessagesExportConversation? in
             let sorted = messages.sorted { $0.createdAt < $1.createdAt }
             guard !sorted.isEmpty else { return nil }
@@ -2367,10 +4042,10 @@ class FirebaseAuthService: ObservableObject {
             let rhsDate = rhs.messages.last?.createdAt ?? .distantPast
             return lhsDate > rhsDate
         }
-        
-        return (currentUserName, currentUserId, conversations)
+
+        return (exportUserName, exportUserId, conversations)
     }
-    
+
     func fetchSenderName(for senderId: String) async throws -> String {
         let userDoc = try await db.collection("users").document(senderId).getDocument()
         guard let userData = userDoc.data() else {
@@ -3467,20 +5142,54 @@ private extension FirebaseAuthService {
 
 enum SpectRoomAuthError: LocalizedError {
     case accountPendingDeletion
-    case emailPendingDeletion
+    case accountBanned
+    case accountFrozen(until: Date)
+    case emailPendingDeletion(email: String, deletedAt: Date?)
     case notAuthenticated
     case wrongPassword
+    case notAdmin
+    case emailNotVerifiedForMfa
+    case invalidMfaCode
+    case mfaSessionExpired
+    case mfaSendFailed
+    case mfaFactorUnavailable
     
     var errorDescription: String? {
         switch self {
         case .accountPendingDeletion:
             return "auth.error.account.pending.deletion".localized
-        case .emailPendingDeletion:
-            return "auth.error.email.pending.deletion".localized
+        case .accountBanned:
+            return "auth.error.account.banned".localized
+        case .accountFrozen(let until):
+            return String(
+                format: "admin.freeze.login.message".localized,
+                ModerationNotice.formattedUnlockDate(until)
+            )
+        case .emailPendingDeletion(let email, let deletedAt):
+            let dateText = deletedAt.map {
+                $0.formatted(Date.FormatStyle().day().month(.abbreviated))
+            } ?? "—"
+            return String(
+                format: "auth.error.email.pending.deletion".localized,
+                email,
+                dateText
+            )
         case .notAuthenticated:
             return "auth.error".localized
         case .wrongPassword:
             return "settings.delete.account.wrong.password".localized
+        case .notAdmin:
+            return "admin.error.not.authorized".localized
+        case .emailNotVerifiedForMfa:
+            return "auth.mfa.error.email.unverified".localized
+        case .invalidMfaCode:
+            return "auth.mfa.error.invalid.code".localized
+        case .mfaSessionExpired:
+            return "auth.mfa.error.session".localized
+        case .mfaSendFailed:
+            return "auth.mfa.error.send".localized
+        case .mfaFactorUnavailable:
+            return "auth.mfa.error.factor".localized
         }
     }
 }

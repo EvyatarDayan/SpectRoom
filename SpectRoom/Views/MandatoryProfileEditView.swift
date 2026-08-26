@@ -587,12 +587,18 @@ struct MandatoryProfileEditView: View {
                     print("✅ New user data saved to UserDefaults")
                 }
 
-                let userData: [String: Any] = [
+                var userData: [String: Any] = [
                     "name": name,
                     "age": ageInt,
                     "bio": bio,
                     "profilePhotoURL": appState.currentUser?.profilePhotoURL ?? NSNull()
                 ]
+                let profileEmail = (FirebaseAuthService.shared.auth.currentUser?.email ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                if !profileEmail.isEmpty {
+                    userData["email"] = profileEmail
+                }
 
                 print("🔄 Saving to Firebase...")
                 try await FirebaseAuthService.shared.updateUserData(userData)

@@ -47,6 +47,7 @@ class AppStateManager: ObservableObject {
     @Published var blockedByUsers: [BlockedUser] = []
     @Published private(set) var suppressedBlockedAlertUserIds: Set<String> = []
     @Published var authErrorMessage: String?
+    @Published var pendingModerationNotice: ModerationNotice?
     private var lastMatchesUpdate: Date?
     private var lastMessageConversationsUpdate: Date?
     
@@ -81,6 +82,14 @@ class AppStateManager: ObservableObject {
     private var suppressIncomingMessageSoundUntil: Date?
     
     private let firebaseAuth = FirebaseAuthService.shared
+    /// Exposed for MFA enrollment / OTP screens.
+    var authService: FirebaseAuthService { firebaseAuth }
+
+    @Published var pendingMfaPhoneE164: String = ""
+    @Published var pendingMfaSignIn: Bool = false
+    @Published var mfaSignInMaskedPhone: String = ""
+    /// True when signed in but SMS MFA is not enrolled yet.
+    @Published var needsMfaEnrollment: Bool = false
     private var cancellables = Set<AnyCancellable>()
     private let newMessageReceivedSubject = PassthroughSubject<MessageDisplay, Never>()
     var newMessageReceivedPublisher: AnyPublisher<MessageDisplay, Never> {
@@ -120,7 +129,9 @@ class AppStateManager: ObservableObject {
             .sink { [weak self] isAuth in
                 let wasAuthenticated = self?.isAuthenticated ?? false
                 self?.isAuthenticated = isAuth
+                self?.refreshMfaEnrollmentRequirement()
                 if isAuth {
+                    self?.pendingMfaSignIn = false
                     if !wasAuthenticated, self?.firebaseAuth.currentUser == nil {
                         // New login: keep home on the spinner until this account's profile loads.
                         self?.hasResolvedUserProfile = false
@@ -144,13 +155,24 @@ class AppStateManager: ObservableObject {
                     // This will notify users when they receive a new message
                     self?.startListeningForNewMessages()
                     self?.startListeningForBlockedByUsers()
+                    self?.startListeningForModerationStatus()
                     self?.refreshUnreadMessageCount()
                 } else {
+                    self?.pendingMfaSignIn = false
+                    self?.mfaSignInMaskedPhone = ""
+                    self?.needsMfaEnrollment = false
                     // Set offline status before clearing data
                     Task {
                         await self?.updateOnlineStatus(isOnline: false)
                     }
                     self?.firebaseAuth.stopListeningForBlockedByUsers()
+                    self?.firebaseAuth.stopListeningForModerationStatus()
+                    // Keep login-blocked freeze notice so the user can still dismiss it after sign-out.
+                    if case .loginBlocked = self?.pendingModerationNotice?.kind {
+                        // leave notice
+                    } else {
+                        self?.pendingModerationNotice = nil
+                    }
                     // Clear user data when not authenticated to prevent stale data
                     self?.currentUser = nil
                     self?.unreadMessageCount = 0
@@ -227,11 +249,20 @@ class AppStateManager: ObservableObject {
         
         Task {
             do {
-                try await firebaseAuth.signIn(email: trimmedEmail, password: trimmedPassword)
+                let outcome = try await firebaseAuth.signInWithPossibleMfa(
+                    email: trimmedEmail,
+                    password: trimmedPassword
+                )
                 await MainActor.run {
                     self.isLoading = false
-                    // Reset failed sign-in attempts counter on successful sign-in
-                    UserDefaults.standard.set(0, forKey: "failedSignInAttempts")
+                    switch outcome {
+                    case .completed:
+                        UserDefaults.standard.set(0, forKey: "failedSignInAttempts")
+                        self.refreshMfaEnrollmentRequirement()
+                    case .mfaRequired(let maskedPhone):
+                        self.mfaSignInMaskedPhone = maskedPhone
+                        self.pendingMfaSignIn = true
+                    }
                 }
             } catch let error as SpectRoomAuthError {
                 await MainActor.run {
@@ -246,6 +277,12 @@ class AppStateManager: ObservableObject {
                         } else {
                             self.authErrorMessage = "auth.error.credentials".localized
                         }
+                    } else if case .accountBanned = error {
+                        self.authErrorMessage = nil
+                        self.pendingModerationNotice = ModerationNotice(kind: .loginBanned)
+                    } else if case .accountFrozen(let until) = error {
+                        self.authErrorMessage = nil
+                        self.pendingModerationNotice = ModerationNotice(kind: .loginBlocked(until: until))
                     } else {
                         self.authErrorMessage = error.errorDescription
                     }
@@ -276,37 +313,87 @@ class AppStateManager: ObservableObject {
         try await firebaseAuth.requestAccountDeletion()
     }
     
-    func signUp(name: String, age: Int, email: String, password: String) {
+    func signUp(name: String, age: Int, email: String, password: String, phoneE164: String) {
         isLoading = true
+        // Persist phone immediately so the MFA screen can open before signUp finishes.
+        pendingMfaPhoneE164 = phoneE164
+        UserDefaults.standard.set(phoneE164, forKey: "pendingMfaPhoneE164")
         
         Task {
             do {
-                try await firebaseAuth.signUp(email: email, password: password, name: name, age: age)
+                try await firebaseAuth.signUp(
+                    email: email,
+                    password: password,
+                    name: name,
+                    age: age,
+                    phoneE164: phoneE164
+                )
                 await MainActor.run {
                     self.isLoading = false
-                    // Mark as new signup to trigger mandatory profile completion
+                    // Mark as new signup to trigger mandatory profile completion after MFA.
                     self.isNewSignup = true
                     self.signUpName = name
                     self.hasCompletedInitialProfile = false
+                    self.pendingMfaPhoneE164 = phoneE164
+                    UserDefaults.standard.set(phoneE164, forKey: "pendingMfaPhoneE164")
+                    self.needsMfaEnrollment = true
                     self.saveAppState()
-                    print("🆕 New user signed up - will show mandatory profile completion")
+                    print("🆕 New user signed up - MFA enrollment required next")
                 }
             } catch let error as SpectRoomAuthError {
                 await MainActor.run {
                     self.isLoading = false
+                    self.pendingMfaPhoneE164 = ""
+                    UserDefaults.standard.removeObject(forKey: "pendingMfaPhoneE164")
                     self.authErrorMessage = error.errorDescription
                 }
             } catch {
                 await MainActor.run {
                     self.isLoading = false
+                    self.pendingMfaPhoneE164 = ""
+                    UserDefaults.standard.removeObject(forKey: "pendingMfaPhoneE164")
                     print("Sign up error: \(error.localizedDescription)")
                     self.authErrorMessage = error.localizedDescription
                 }
             }
         }
     }
+
+    func refreshMfaEnrollmentRequirement() {
+        guard isAuthenticated else {
+            needsMfaEnrollment = false
+            return
+        }
+        needsMfaEnrollment = !firebaseAuth.isMfaEnrolled
+    }
+
+    func confirmMfaSignIn(code: String) async throws {
+        try await firebaseAuth.confirmSignInMfa(code: code)
+        await MainActor.run {
+            pendingMfaSignIn = false
+            mfaSignInMaskedPhone = ""
+            UserDefaults.standard.set(0, forKey: "failedSignInAttempts")
+            refreshMfaEnrollmentRequirement()
+        }
+    }
+
+    func confirmMfaEnrollment(code: String, phoneE164: String) async throws {
+        try await firebaseAuth.confirmMfaEnrollment(code: code, phoneE164: phoneE164)
+        await MainActor.run {
+            needsMfaEnrollment = false
+            pendingMfaPhoneE164 = phoneE164
+            UserDefaults.standard.removeObject(forKey: "pendingMfaPhoneE164")
+            refreshMfaEnrollmentRequirement()
+        }
+    }
+
+    func cancelMfaSignIn() {
+        firebaseAuth.cancelPendingMfaSignIn()
+        pendingMfaSignIn = false
+        mfaSignInMaskedPhone = ""
+    }
     
-    func signOut() {
+    func signOut(forceShowOnboarding: Bool = false) {
         Task {
             do {
                 try await firebaseAuth.signOut()
@@ -315,6 +402,11 @@ class AppStateManager: ObservableObject {
                     isNewSignup = false
                     signUpName = ""
                     hasCompletedInitialProfile = false
+                    needsMfaEnrollment = false
+                    pendingMfaPhoneE164 = ""
+                    UserDefaults.standard.removeObject(forKey: "pendingMfaPhoneE164")
+                    pendingMfaSignIn = false
+                    mfaSignInMaskedPhone = ""
                     matches = []
                     cachedMatches = []
                     lastMatchesUpdate = nil
@@ -326,8 +418,7 @@ class AppStateManager: ObservableObject {
                     clearMessageConversationsCache()
                     clearDiscoverProfilesCache()
                     
-                    // Show welcome again after logout unless the user opted out
-                    if !UserDefaults.standard.bool(forKey: "dontShowWelcomeAgain") {
+                    if forceShowOnboarding || !UserDefaults.standard.bool(forKey: "dontShowWelcomeAgain") {
                         hasCompletedOnboarding = false
                     }
                     
@@ -337,6 +428,14 @@ class AppStateManager: ObservableObject {
             } catch {
                 await MainActor.run {
                     print("Sign out error: \(error.localizedDescription)")
+                    // Even if remote sign-out fails (deleted account), clear local session.
+                    needsMfaEnrollment = false
+                    pendingMfaSignIn = false
+                    isNewSignup = false
+                    if forceShowOnboarding {
+                        hasCompletedOnboarding = false
+                    }
+                    saveAppState()
                 }
             }
         }
@@ -431,6 +530,9 @@ class AppStateManager: ObservableObject {
         isNewSignup = false
         saveAppState()
         print("✅ Synced initial profile completion from saved user data")
+        Task {
+            await firebaseAuth.syncProfileStatus()
+        }
     }
     
     
@@ -465,6 +567,9 @@ class AppStateManager: ObservableObject {
         signUpName = "" // Clear the sign up name
         saveAppState()
         print("✅ Initial profile completed - user can now access main app")
+        Task {
+            await firebaseAuth.syncProfileStatus()
+        }
     }
     
     /// Lets a new user browse the app before finishing mandatory profile setup.
@@ -734,6 +839,7 @@ class AppStateManager: ObservableObject {
         hasCompletedInitialProfile = UserDefaults.standard.bool(forKey: "hasCompletedInitialProfile")
         isNewSignup = UserDefaults.standard.bool(forKey: "isNewSignup")
         signUpName = UserDefaults.standard.string(forKey: "signUpName") ?? ""
+        pendingMfaPhoneE164 = UserDefaults.standard.string(forKey: "pendingMfaPhoneE164") ?? ""
         restoreSignupNameFromAuthIfNeeded()
         
         if let matchesData = UserDefaults.standard.data(forKey: "matches"),
@@ -877,7 +983,144 @@ class AppStateManager: ObservableObject {
             }
         }
     }
-    
+
+    func startListeningForModerationStatus() {
+        guard isAuthenticated else { return }
+        firebaseAuth.listenForModerationStatus(
+            onBanned: { [weak self] in
+                Task { @MainActor in
+                    if case .loginBanned = self?.pendingModerationNotice?.kind {
+                        // keep login ban notice
+                    } else if case .loginBlocked = self?.pendingModerationNotice?.kind {
+                        // keep login freeze notice
+                    } else if case .banAcknowledgement = self?.pendingModerationNotice?.kind {
+                        // Ban popup is showing — do not clear or force another sign-out yet.
+                    } else {
+                        self?.pendingModerationNotice = nil
+                        self?.signOut()
+                    }
+                }
+            },
+            onNotice: { [weak self] notice in
+                Task { @MainActor in
+                    guard self?.isDismissingModerationNotice != true else { return }
+                    self?.pendingModerationNotice = notice
+                }
+            },
+            onNoticeCleared: { [weak self] in
+                Task { @MainActor in
+                    guard self?.isDismissingModerationNotice != true else { return }
+                    // Never auto-clear warnings from a "cleared" snapshot — a stale cache
+                    // event can wipe a warning that was just loaded from the server.
+                    // Warnings are cleared only when the user taps OK.
+                    switch self?.pendingModerationNotice?.kind {
+                    case .freezeAcknowledgement:
+                        self?.pendingModerationNotice = nil
+                    default:
+                        // Keep warnings / ban acknowledgement until the user dismisses.
+                        break
+                    }
+                }
+            }
+        )
+        Task { await refreshPendingModerationNotice() }
+    }
+
+    @MainActor
+    func refreshPendingModerationNotice() async {
+        guard isAuthenticated else { return }
+        do {
+            if let notice = try await firebaseAuth.fetchPendingModerationNotice(preferServer: true) {
+                pendingModerationNotice = notice
+            }
+        } catch {
+            print("⚠️ Failed to refresh moderation notice: \(error.localizedDescription)")
+        }
+    }
+
+    /// Backward-compatible alias used by older call sites.
+    @MainActor
+    func refreshPendingSystemWarning() async {
+        await refreshPendingModerationNotice()
+    }
+
+    private var isDismissingModerationNotice = false
+
+    @MainActor
+    func dismissModerationNotice() {
+        guard let notice = pendingModerationNotice, !isDismissingModerationNotice else { return }
+        isDismissingModerationNotice = true
+
+        switch notice.kind {
+        case .loginBlocked, .loginBanned:
+            pendingModerationNotice = nil
+            isDismissingModerationNotice = false
+
+        case .warning:
+            Task {
+                do {
+                    try await firebaseAuth.clearPendingSystemWarning()
+                    await MainActor.run {
+                        self.pendingModerationNotice = nil
+                        self.isDismissingModerationNotice = false
+                    }
+                } catch {
+                    print("⚠️ Failed to clear system warning: \(error.localizedDescription)")
+                    await MainActor.run {
+                        self.isDismissingModerationNotice = false
+                    }
+                }
+            }
+
+        case .freezeAcknowledgement:
+            Task {
+                do {
+                    try await firebaseAuth.clearPendingAccountFreezeNotice()
+                } catch {
+                    print("⚠️ Failed to clear account freeze notice: \(error.localizedDescription)")
+                }
+                await MainActor.run {
+                    self.pendingModerationNotice = nil
+                    self.isDismissingModerationNotice = false
+                    self.signOut()
+                }
+            }
+
+        case .banAcknowledgement:
+            Task {
+                do {
+                    try await firebaseAuth.clearPendingAccountBanNotice()
+                } catch {
+                    print("⚠️ Failed to clear account ban notice: \(error.localizedDescription)")
+                }
+                await MainActor.run {
+                    self.pendingModerationNotice = nil
+                    self.isDismissingModerationNotice = false
+                    self.signOut()
+                }
+            }
+
+        case .banLifted:
+            Task {
+                do {
+                    try await firebaseAuth.clearPendingAccountUnbanNotice()
+                } catch {
+                    print("⚠️ Failed to clear account unban notice: \(error.localizedDescription)")
+                }
+                await MainActor.run {
+                    self.pendingModerationNotice = nil
+                    self.isDismissingModerationNotice = false
+                }
+            }
+        }
+    }
+
+    /// Backward-compatible alias.
+    @MainActor
+    func dismissSystemWarning() {
+        dismissModerationNotice()
+    }
+
     @MainActor
     private func applyBlockedByUsers(_ users: [BlockedUser]) {
         let previousIds = Set(blockedByUsers.map(\.id))
@@ -1743,6 +1986,20 @@ class AppStateManager: ObservableObject {
     
     func exportAllMessagesToFile() async throws -> URL? {
         let export = try await firebaseAuth.fetchAllConversationsForExport()
+        guard !export.conversations.isEmpty else { return nil }
+        return try await MessagesExport.writePDFFile(
+            currentUserName: export.currentUserName,
+            currentUserId: export.currentUserId,
+            conversations: export.conversations
+        )
+    }
+
+    /// Admin: export one user's last 6 months of conversations into a PDF (same format as Settings).
+    func exportAdminUserMessagesToFile(userId: String, userName: String) async throws -> URL? {
+        let export = try await firebaseAuth.fetchAllConversationsForExport(
+            forUserId: userId,
+            userName: userName
+        )
         guard !export.conversations.isEmpty else { return nil }
         return try await MessagesExport.writePDFFile(
             currentUserName: export.currentUserName,

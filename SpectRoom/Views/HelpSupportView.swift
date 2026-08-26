@@ -14,35 +14,88 @@ struct HelpSupportView: View {
     @EnvironmentObject var appState: AppStateManager
 
     enum Topic: String, CaseIterable, Identifiable {
-        case safety, bug, feedback, other
+        case safety, bug, feedback, accountFreeze, accountBan, other
         var id: String { rawValue }
 
         var label: String {
             switch self {
-            case .bug:      return "support.topic.bug".localized
-            case .safety:   return "support.topic.safety".localized
-            case .feedback: return "support.topic.feedback".localized
-            case .other:    return "support.topic.other".localized
+            case .bug:
+                return "support.topic.bug".localized
+            case .safety:
+                return "support.topic.safety".localized
+            case .feedback:
+                return "support.topic.feedback".localized
+            case .accountFreeze:
+                return localizedOrFallback("support.topic.account.freeze", "Account freeze")
+            case .accountBan:
+                return localizedOrFallback("support.topic.account.ban", "Account ban")
+            case .other:
+                return "support.topic.other".localized
             }
+        }
+
+        private static func localizedOrFallback(_ key: String, _ fallback: String) -> String {
+            let value = key.localized
+            return (value == key || value.isEmpty) ? fallback : value
+        }
+
+        private func localizedOrFallback(_ key: String, _ fallback: String) -> String {
+            Self.localizedOrFallback(key, fallback)
         }
 
         var subjectPrefix: String {
             switch self {
-            case .bug:      return "[Bug]"
-            case .safety:   return "[Safety]"
-            case .feedback: return "[Feedback]"
-            case .other:    return "[Other]"
+            case .bug:           return "[Bug]"
+            case .safety:        return "[Safety]"
+            case .feedback:      return "[Feedback]"
+            case .accountFreeze: return "[Account freeze]"
+            case .accountBan:    return "[Account ban]"
+            case .other:         return "[Other]"
+            }
+        }
+
+        /// Moderation topics are only offered when the sheet is opened from freeze/ban flows.
+        var isModerationOnly: Bool {
+            switch self {
+            case .accountFreeze, .accountBan: return true
+            default: return false
             }
         }
     }
 
-    @State private var selectedTopic: Topic = .safety
+    /// Topics shown in the chip row. Moderation topics only appear when preselected/locked.
+    private var selectableTopics: [Topic] {
+        if let lockedTopic {
+            return [lockedTopic]
+        }
+        return Topic.allCases.filter { !$0.isModerationOnly }
+    }
+
+    var initialTopic: Topic = .safety
+    var lockedTopic: Topic? = nil
+    var maxMessageLength: Int = 500
+    var onMessageSent: (() -> Void)? = nil
+
+    @State private var selectedTopic: Topic
     @State private var message: String = ""
     @State private var isSending = false
     @State private var didSendSuccessfully = false
     @State private var showErrorAlert = false
     @State private var errorMessage = ""
     @State private var didAttemptSend = false
+
+    init(
+        initialTopic: Topic = .safety,
+        lockedTopic: Topic? = nil,
+        maxMessageLength: Int = 500,
+        onMessageSent: (() -> Void)? = nil
+    ) {
+        self.initialTopic = initialTopic
+        self.lockedTopic = lockedTopic
+        self.maxMessageLength = maxMessageLength
+        self.onMessageSent = onMessageSent
+        _selectedTopic = State(initialValue: lockedTopic ?? initialTopic)
+    }
 
     private var showMinWarning: Bool {
         didAttemptSend && !didSendSuccessfully && message.trimmingCharacters(in: .whitespacesAndNewlines).count < 20
@@ -75,9 +128,10 @@ struct HelpSupportView: View {
                                 .foregroundColor(SpectRoomTheme.secondaryText)
 
                             HStack(spacing: 10) {
-                                ForEach(Topic.allCases) { topic in
+                                ForEach(selectableTopics) { topic in
                                     let isSelected = topic == selectedTopic
                                     Button {
+                                        guard lockedTopic == nil else { return }
                                         withAnimation(.easeInOut(duration: 0.2)) {
                                             if didSendSuccessfully {
                                                 message = ""
@@ -102,6 +156,7 @@ struct HelpSupportView: View {
                                         )
                                     }
                                     .buttonStyle(.plain)
+                                    .disabled(lockedTopic != nil)
                                 }
                             }
                         }
@@ -128,8 +183,8 @@ struct HelpSupportView: View {
                                     .disabled(didSendSuccessfully)
                                     .opacity(didSendSuccessfully ? 0.5 : 1)
                                     .onChange(of: message) { _, newValue in
-                                        if newValue.count > 500 {
-                                            message = String(newValue.prefix(500))
+                                        if newValue.count > maxMessageLength {
+                                            message = String(newValue.prefix(maxMessageLength))
                                         }
                                     }
                             }
@@ -149,7 +204,7 @@ struct HelpSupportView: View {
                                     .foregroundColor(.red)
                                     .opacity(showMinWarning ? 1 : 0)
                                 Spacer()
-                                Text("\(message.count) / 500")
+                                Text("\(message.count) / \(maxMessageLength)")
                                     .font(.system(size: 12))
                                     .foregroundColor(SpectRoomTheme.secondaryText)
                             }
@@ -256,8 +311,10 @@ private extension HelpSupportView {
         let userId = appState.currentUser?.firebaseDocumentId ?? appState.currentUser?.id.uuidString ?? "unknown"
         let userName = appState.currentUser?.name ?? "Unknown"
         let userEmail = appState.currentUser?.email ?? ""
+        let ticketId = Self.makeSupportTicketId()
 
         let data: [String: Any] = [
+            "ticketId": ticketId,
             "userId": userId,
             "userName": userName,
             "userEmail": userEmail,
@@ -274,8 +331,23 @@ private extension HelpSupportView {
                 showErrorAlert = true
             } else {
                 didSendSuccessfully = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    onMessageSent?()
+                    dismiss()
+                }
             }
         }
+    }
+
+    /// e.g. `20082026-12345` — day/month/year + 5 random digits
+    static func makeSupportTicketId(date: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "ddMMyyyy"
+        let datePart = formatter.string(from: date)
+        let randomPart = String(format: "%05d", Int.random(in: 0...99_999))
+        return "\(datePart)-\(randomPart)"
     }
 
     func openMail(to address: String) {
@@ -289,4 +361,3 @@ private extension HelpSupportView {
     HelpSupportView()
         .environmentObject(AppStateManager.shared)
 }
-

@@ -1,6 +1,8 @@
 import Foundation
 import FirebaseAuth
+import FirebaseCore
 import FirebaseFirestore
+import FirebaseFunctions
 
 // MARK: - MFA types
 
@@ -131,8 +133,17 @@ extension FirebaseAuthService {
         guard let user = auth.currentUser else {
             throw SpectRoomAuthError.notAuthenticated
         }
+        try await user.reload()
         if user.isEmailVerified { return }
-        try await sendBrandedEmailVerification()
+
+        do {
+            try await sendBrandedEmailVerification()
+            return
+        } catch {
+            print("⚠️ Branded verification email failed, using Firebase default: \(FirebaseAuthService.humanReadableFunctionsError(error))")
+        }
+
+        try await user.sendEmailVerification()
     }
 
     func reloadAndIsEmailVerified() async throws -> Bool {
@@ -163,8 +174,8 @@ extension FirebaseAuthService {
             print("⚠️ Re-applying phone test mode before MFA enroll")
             FirebaseBootstrap.applyDebugPhoneAuthSettings()
         }
-        print("📱 MFA enroll to \(phoneE164), testMode=\(Auth.auth().settings?.isAppVerificationDisabledForTesting ?? false)")
         #endif
+        print("📱 MFA enroll to \(phoneE164), testMode=\(Auth.auth().settings?.isAppVerificationDisabledForTesting ?? false), clientID=\(FirebaseApp.app()?.options.clientID ?? "nil")")
         #endif
 
         let session = try await getMultiFactorSession(for: user)
@@ -216,6 +227,21 @@ extension FirebaseAuthService {
 
         Self.pendingVerificationID = nil
         Self.pendingEnrollPhoneE164 = nil
+
+        // Welcome mail only after email + SMS MFA (not on Auth account creation).
+        await Self.requestWelcomeEmailAfterMfaEnrollment()
+    }
+
+    /// Best-effort: enrollment must not fail if mail delivery fails.
+    private static func requestWelcomeEmailAfterMfaEnrollment() async {
+        do {
+            _ = try await Functions.functions(region: "us-central1")
+                .httpsCallable("sendSpectRoomWelcomeEmail")
+                .call([:])
+            print("✅ Welcome email requested after MFA enrollment")
+        } catch {
+            print("⚠️ Welcome email after MFA failed: \(error.localizedDescription)")
+        }
     }
 
     func fetchStoredPhoneE164() async -> String? {
@@ -360,7 +386,24 @@ extension FirebaseAuthService {
     }
 
     private func mapMfaError(_ error: Error) -> Error {
+        if error is SpectRoomAuthError { return error }
+
         let nsError = error as NSError
+        if nsError.domain == AuthErrorDomain {
+            switch nsError.code {
+            case AuthErrorCode.invalidVerificationCode.rawValue,
+                 AuthErrorCode.missingVerificationCode.rawValue:
+                return SpectRoomAuthError.invalidMfaCode
+            case AuthErrorCode.sessionExpired.rawValue,
+                 AuthErrorCode.invalidVerificationID.rawValue:
+                return SpectRoomAuthError.mfaSessionExpired
+            case AuthErrorCode.unverifiedEmail.rawValue:
+                return SpectRoomAuthError.emailNotVerifiedForMfa
+            default:
+                break
+            }
+        }
+
         if let code = AuthErrorCode(_bridgedNSError: nsError)?.code {
             switch code {
             case .invalidVerificationCode, .missingVerificationCode:
@@ -373,6 +416,13 @@ extension FirebaseAuthService {
                 break
             }
         }
+
+        let message = nsError.localizedDescription
+        if message.localizedCaseInsensitiveContains("multifactor verification code")
+            || message.localizedCaseInsensitiveContains("invalid verification code") {
+            return SpectRoomAuthError.invalidMfaCode
+        }
+
         return error
     }
 }

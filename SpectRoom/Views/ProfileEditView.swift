@@ -35,9 +35,7 @@ struct ProfileEditView: View {
         self.isMandatoryCompletion = isMandatoryCompletion
         self.embedsInTabBar = embedsInTabBar
         self._selectedTab = selectedTab
-        _showingCompleteProfileWelcome = State(
-            initialValue: isMandatoryCompletion && CompleteProfileWelcomeOverlay.shouldShowWelcome
-        )
+        _showingCompleteProfileWelcome = State(initialValue: false)
     }
     
     // MARK: - State Variables
@@ -319,6 +317,8 @@ struct ProfileEditView: View {
             }
         }
         .onAppear {
+            refreshWelcomeOverlayIfNeeded()
+
             // Show cached profile immediately when available
             let hadCachedUser = appState.currentUser != nil
             if hadCachedUser {
@@ -410,11 +410,19 @@ struct ProfileEditView: View {
         .overlay {
             if showingCompleteProfileWelcome {
                 CompleteProfileWelcomeOverlay {
-                    CompleteProfileWelcomeOverlay.markWelcomeSeen()
+                    let uid = FirebaseAuthService.shared.auth.currentUser?.uid
+                    CompleteProfileWelcomeOverlay.markWelcomeSeen(for: uid)
                     showingCompleteProfileWelcome = false
                 }
+                .zIndex(1000)
             }
         }
+    }
+    
+    private func refreshWelcomeOverlayIfNeeded() {
+        guard isMandatoryCompletion else { return }
+        let uid = FirebaseAuthService.shared.auth.currentUser?.uid
+        showingCompleteProfileWelcome = CompleteProfileWelcomeOverlay.shouldShowWelcome(for: uid)
     }
     
     // MARK: - Profile Photo Section

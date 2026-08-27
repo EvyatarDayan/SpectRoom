@@ -21,20 +21,14 @@ private struct ModerationSupportPresentation: Identifiable {
 
 @main
 struct SpectRoomApp: App {
-    /// Must stay above other wrappers so Firebase configures before Auth/Firestore are touched.
-    private let firebaseReady: Bool = FirebaseBootstrap.configureIfNeeded()
-
+    /// Firebase must configure in `AppDelegate.didFinishLaunching` only — not here.
+    /// Early `Auth.auth()` from `App.init` breaks phone/MFA (nil tokenManager).
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var appState = AppStateManager.shared
     @AppStorage("isDarkMode") private var isDarkMode = false
     @AppStorage("selectedLanguage") private var selectedLanguage: String = "en"
     @State private var languageChanged = false
     @State private var moderationSupport: ModerationSupportPresentation? = nil
-    
-    init() {
-        _ = firebaseReady
-        FirebaseBootstrap.configureIfNeeded()
-    }
     
     var body: some Scene {
         WindowGroup {
@@ -204,14 +198,18 @@ private struct LaunchAuthPlaceholderView: View {
 // MARK: - AppDelegate for handling push notifications
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
 
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-        // Configure before Messaging/Auth are used from this delegate.
-        FirebaseBootstrap.configureIfNeeded()
+    private static var pendingAPNsToken: Data?
 
-        // Set UNUserNotificationCenter delegate
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        // Only safe place to configure Firebase for phone/MFA (firebase-ios-sdk#16273).
+        guard FirebaseBootstrap.configureIfNeeded() else {
+            assertionFailure("Firebase configure failed in didFinishLaunching")
+            return true
+        }
+        FirebaseAuthService.shared.startAuthListening()
+        Self.forwardPendingAPNsTokenToAuthIfPossible()
+
         UNUserNotificationCenter.current().delegate = self
-        
-        // Set Firebase Messaging delegate
         Messaging.messaging().delegate = self
 
         // Phone / MFA silent verification needs APNs registration even if the user
@@ -236,10 +234,23 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     // Handle APNs token registration
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         print("📱 APNs token received (\(deviceToken.count) bytes)")
-        // FCM only. Do NOT call Auth.setAPNSToken — it fatally crashes in this
-        // Firebase Auth / SwiftUI setup (nil kAuthGlobalWorkQueue / tokenManager).
-        // Phone MFA uses reCAPTCHA via URL scheme + canHandleNotification / canHandle(url).
         Messaging.messaging().apnsToken = deviceToken
+        Self.pendingAPNsToken = deviceToken
+        Self.forwardPendingAPNsTokenToAuthIfPossible()
+    }
+
+    /// After Firebase is configured in didFinishLaunching, Auth's tokenManager exists and
+    /// setAPNSToken is safe. Needed for silent push verification on real devices.
+    private static func forwardPendingAPNsTokenToAuthIfPossible() {
+        guard FirebaseBootstrap.isConfigured, let token = pendingAPNsToken else { return }
+        #if DEBUG
+        // Prefer sandbox in DEBUG builds; .unknown also works if the build is installed via Xcode.
+        Auth.auth().setAPNSToken(token, type: .sandbox)
+        #else
+        Auth.auth().setAPNSToken(token, type: .prod)
+        #endif
+        print("✅ APNs token forwarded to Firebase Auth")
+        pendingAPNsToken = nil
     }
     
     // Handle APNs token registration failure

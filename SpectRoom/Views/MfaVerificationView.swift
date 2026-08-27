@@ -8,22 +8,35 @@ struct MfaVerificationView: View {
 
     @EnvironmentObject var appState: AppStateManager
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
 
     let kind: MfaFlowKind
 
     @State private var code = ""
     @State private var errorMessage = ""
+    @State private var alertTitle = ""
     @State private var showingError = false
     @State private var isBusy = false
     @State private var emailVerified = false
+    @State private var showEmailVerifiedCelebration = false
+    @State private var isHandlingEmailVerified = false
     @State private var smsSent = false
     @State private var smsSendFailed = false
-    @State private var resendSecondsRemaining = 0
+    @State private var isEditingPhone = false
+    @State private var lastSmsResendAt: Date?
+    @State private var smsResendToast = ""
+    @State private var smsResendToastTask: Task<Void, Never>?
+    @State private var emailResendSecondsRemaining = 0
     @State private var phoneE164: String = ""
     @State private var phoneCountry = PhoneCountry.default
     @State private var phoneNational = ""
-    @State private var resendTimer: Timer?
+    @State private var emailResendTimer: Timer?
+    @State private var emailPollTask: Task<Void, Never>?
+    @State private var emailIconPulse = false
     @FocusState private var phoneFocus: PhoneFocus?
+    @FocusState private var isCodeFieldFocused: Bool
+
+    private let smsResendCooldownSeconds: TimeInterval = 45
 
     private var maskedPhone: String {
         if kind == .signIn {
@@ -33,34 +46,73 @@ struct MfaVerificationView: View {
         return value.isEmpty ? "auth.mfa.phone.fallback".localized : PhoneNumberE164.maskedDisplay(value)
     }
 
+    private var displayedPhone: String {
+        if kind == .enroll {
+            let value = phoneE164.isEmpty ? appState.pendingMfaPhoneE164 : phoneE164
+            if !value.isEmpty { return value }
+        }
+        return maskedPhone
+    }
+
+    private var verificationEmail: String {
+        appState.authService.currentUser?.email
+            ?? Auth.auth().currentUser?.email
+            ?? ""
+    }
+
+    private var isWaitingForEmail: Bool {
+        kind == .enroll && !phoneE164.isEmpty && !emailVerified && !showEmailVerifiedCelebration
+    }
+
+    private var isOnOtpStep: Bool {
+        if kind == .signIn { return true }
+        return emailVerified
+            && !showEmailVerifiedCelebration
+            && !phoneE164.isEmpty
+            && !isEditingPhone
+            && (smsSent || smsSendFailed)
+    }
+
+    private var headerTitle: String {
+        if isWaitingForEmail || showEmailVerifiedCelebration {
+            return "auth.mfa.email.title".localized
+        }
+        if isOnOtpStep && !smsSendFailed {
+            return "auth.mfa.code.title".localized
+        }
+        if kind == .enroll && isEditingPhone {
+            return "auth.mfa.phone.edit.title".localized
+        }
+        return "auth.mfa.title".localized
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
                 VStack(spacing: 10) {
-                    Text("auth.mfa.title".localized)
+                    Text(headerTitle)
                         .font(.largeTitle.weight(.bold))
                         .foregroundColor(SpectRoomTheme.text)
                         .multilineTextAlignment(.center)
 
-                    Text(subtitleText)
-                        .font(.body)
-                        .foregroundColor(SpectRoomTheme.secondaryText)
-                        .multilineTextAlignment(.center)
+                    if !subtitleText.isEmpty {
+                        Text(subtitleText)
+                            .font(.body)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
+                            .multilineTextAlignment(.center)
+                    }
                 }
                 .padding(.top, 40)
                 .padding(.horizontal)
 
-                if kind == .enroll && !phoneE164.isEmpty {
-                    Text(String(format: "auth.mfa.phone.using".localized, maskedPhone))
-                        .font(.subheadline.weight(.medium))
-                        .foregroundColor(SpectRoomTheme.text)
-                        .padding(.horizontal)
-                }
-
                 if kind == .enroll && phoneE164.isEmpty {
                     phoneMissingCard
+                } else if kind == .enroll && showEmailVerifiedCelebration {
+                    emailVerifiedCelebration
                 } else if kind == .enroll && !emailVerified {
                     emailVerificationCard
+                } else if kind == .enroll && isEditingPhone {
+                    editPhoneCard
                 } else if kind == .enroll && smsSendFailed {
                     smsFailedCard
                 } else if kind == .enroll && !smsSent {
@@ -73,13 +125,14 @@ struct MfaVerificationView: View {
 
                 if kind == .enroll {
                     Button {
+                        stopEmailVerificationPolling()
                         appState.signOut(forceShowOnboarding: true)
                     } label: {
                         Text("auth.mfa.sign.out".localized)
                             .font(.subheadline)
                             .foregroundColor(SpectRoomTheme.secondaryText)
                     }
-                    .disabled(isBusy)
+                    .disabled(isBusy || showEmailVerifiedCelebration)
                     .padding(.bottom, 20)
                 }
             }
@@ -88,19 +141,28 @@ struct MfaVerificationView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .spectRoomScreenBackground()
-        .alert(isPresented: $showingError) {
-            Alert(
-                title: Text("auth.error".localized),
-                message: Text(errorMessage),
-                dismissButton: .default(Text("auth.ok".localized))
-            )
+        .overlay {
+            if showingError {
+                SpectRoomNoticePopup(
+                    title: alertTitle,
+                    message: errorMessage,
+                    onDismiss: { showingError = false }
+                )
+            }
         }
         .onAppear {
             Task { await prepareOnAppear() }
         }
         .onDisappear {
-            resendTimer?.invalidate()
-            resendTimer = nil
+            emailResendTimer?.invalidate()
+            emailResendTimer = nil
+            smsResendToastTask?.cancel()
+            smsResendToastTask = nil
+            stopEmailVerificationPolling()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, isWaitingForEmail else { return }
+            Task { await checkEmailVerifiedQuietly() }
         }
     }
 
@@ -108,8 +170,11 @@ struct MfaVerificationView: View {
         if kind == .enroll && phoneE164.isEmpty {
             return "auth.mfa.phone.missing.title".localized
         }
-        if kind == .enroll && !emailVerified {
-            return "auth.mfa.email.subtitle".localized
+        if kind == .enroll && (isWaitingForEmail || showEmailVerifiedCelebration) {
+            return ""
+        }
+        if kind == .enroll && isEditingPhone {
+            return "auth.mfa.phone.edit.subtitle".localized
         }
         if kind == .enroll && smsSendFailed {
             return "auth.mfa.sending.failed.subtitle".localized
@@ -117,7 +182,8 @@ struct MfaVerificationView: View {
         if kind == .enroll && !smsSent {
             return "auth.mfa.sending.subtitle".localized
         }
-        return String(format: "auth.mfa.code.subtitle".localized, maskedPhone)
+        // OTP step carries its own copy inside the card.
+        return ""
     }
 
     private var sendingSmsCard: some View {
@@ -133,7 +199,7 @@ struct MfaVerificationView: View {
 
     private var smsFailedCard: some View {
         VStack(spacing: 16) {
-            Text(String(format: "auth.mfa.error.sms.detail".localized, phoneE164.isEmpty ? maskedPhone : phoneE164))
+            Text(String(format: smsFailureHelpText, phoneE164.isEmpty ? maskedPhone : phoneE164))
                 .font(.subheadline)
                 .foregroundColor(SpectRoomTheme.secondaryText)
                 .multilineTextAlignment(.center)
@@ -152,6 +218,14 @@ struct MfaVerificationView: View {
             .disabled(isBusy)
             .padding(.horizontal)
         }
+    }
+
+    private var smsFailureHelpText: String {
+        #if targetEnvironment(simulator)
+        return "auth.mfa.error.sms.detail".localized
+        #else
+        return "auth.mfa.error.sms.device".localized
+        #endif
     }
 
     private var phoneMissingCard: some View {
@@ -186,6 +260,7 @@ struct MfaVerificationView: View {
 
     private func saveMissingPhone() {
         guard let e164 = PhoneNumberE164.build(country: phoneCountry, nationalNumber: phoneNational) else {
+            alertTitle = "auth.notice".localized
             errorMessage = "auth.error.phone.invalid".localized
             showingError = true
             return
@@ -197,29 +272,36 @@ struct MfaVerificationView: View {
                 "phoneE164": e164,
                 "mfaEnrolled": false
             ])
+            await MainActor.run {
+                startEmailResendCooldown()
+                startEmailVerificationPolling()
+            }
         }
     }
 
     private var emailVerificationCard: some View {
-        VStack(spacing: 16) {
-            Text("auth.mfa.email.body".localized)
-                .font(.subheadline)
+        VStack(spacing: 22) {
+            Image(systemName: "envelope.circle.fill")
+                .font(.system(size: 72))
+                .foregroundStyle(Color.blue.gradient)
+                .scaleEffect(emailIconPulse ? 1.08 : 0.96)
+                .opacity(emailIconPulse ? 1.0 : 0.82)
+                .onAppear {
+                    withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
+                        emailIconPulse = true
+                    }
+                }
+
+            Text(emailWaitingBodyText)
+                .font(.body)
                 .foregroundColor(SpectRoomTheme.secondaryText)
                 .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
 
             Button {
-                Task { await resendVerificationEmail() }
+                Task { await checkEmailAndStartSms(manual: true) }
             } label: {
-                Text("auth.mfa.email.resend".localized)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.blue)
-            }
-            .disabled(isBusy)
-
-            Button {
-                Task { await checkEmailAndStartSms() }
-            } label: {
-                loadingLabel(title: "auth.mfa.email.continue".localized)
+                loadingLabel(title: "auth.mfa.email.check".localized)
                     .frame(maxWidth: .infinity)
                     .padding()
                     .background(isBusy ? Color.gray : Color.blue)
@@ -228,33 +310,144 @@ struct MfaVerificationView: View {
             }
             .disabled(isBusy)
             .padding(.horizontal)
+
+            if emailResendSecondsRemaining > 0 {
+                VStack(spacing: 4) {
+                    Text("auth.mfa.email.resend".localized)
+                        .font(.subheadline.weight(.semibold))
+                    Text("auth.mfa.email.resend.wait.hint".localized)
+                        .font(.footnote)
+                }
+                .foregroundColor(SpectRoomTheme.secondaryText)
+                .multilineTextAlignment(.center)
+            } else {
+                Button {
+                    Task { await resendVerificationEmail() }
+                } label: {
+                    Text("auth.mfa.email.resend".localized)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.blue)
+                }
+                .disabled(isBusy)
+            }
         }
         .padding(.horizontal)
     }
 
-    private var otpCard: some View {
-        VStack(spacing: 16) {
-            TextField("auth.mfa.code.placeholder".localized, text: $code)
-                .keyboardType(.numberPad)
-                .textContentType(.oneTimeCode)
+    private var emailWaitingBodyText: String {
+        let email = verificationEmail.isEmpty ? "auth.mfa.email.fallback".localized : verificationEmail
+        return String(format: "auth.mfa.email.body".localized, email)
+    }
+
+    private var emailVerifiedCelebration: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 76))
+                .foregroundColor(.green)
+                .transition(.scale.combined(with: .opacity))
+
+            Text("auth.mfa.email.verified".localized)
+                .font(.title2.weight(.bold))
+                .foregroundColor(SpectRoomTheme.text)
                 .multilineTextAlignment(.center)
-                .font(.title2.monospacedDigit())
-                .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                )
+        }
+        .padding(.vertical, 28)
+        .padding(.horizontal)
+    }
+
+    private var editPhoneCard: some View {
+        VStack(spacing: 16) {
+            PhoneNumberInputView(
+                country: $phoneCountry,
+                nationalNumber: $phoneNational,
+                isFocused: $phoneFocus,
+                focusValue: .national
+            )
+            .padding(.horizontal)
+
+            Text("auth.phone.helper".localized)
+                .font(.caption)
+                .foregroundColor(SpectRoomTheme.secondaryText)
+                .multilineTextAlignment(.center)
                 .padding(.horizontal)
-                .onChange(of: code) { _, newValue in
-                    let digits = newValue.filter(\.isNumber)
-                    if digits.count > 6 {
-                        code = String(digits.prefix(6))
-                    } else if digits != newValue {
-                        code = digits
+
+            Button {
+                saveEditedPhone()
+            } label: {
+                loadingLabel(title: "auth.mfa.phone.edit.save".localized)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+            }
+            .disabled(isBusy)
+            .padding(.horizontal)
+
+            Button {
+                isEditingPhone = false
+            } label: {
+                Text("auth.mfa.phone.edit.cancel".localized)
+                    .font(.subheadline)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
+            }
+            .disabled(isBusy)
+        }
+    }
+
+    private func saveEditedPhone() {
+        guard let e164 = PhoneNumberE164.build(country: phoneCountry, nationalNumber: phoneNational) else {
+            alertTitle = "auth.notice".localized
+            errorMessage = "auth.error.phone.invalid".localized
+            showingError = true
+            return
+        }
+        phoneE164 = e164
+        appState.pendingMfaPhoneE164 = e164
+        UserDefaults.standard.set(e164, forKey: "pendingMfaPhoneE164")
+        code = ""
+        isEditingPhone = false
+        smsSent = false
+        smsSendFailed = false
+        Task {
+            try? await appState.authService.updateUserData([
+                "phoneE164": e164,
+                "mfaEnrolled": false
+            ])
+            await startEnrollmentSmsIfNeeded(force: true)
+        }
+    }
+
+    private var otpCard: some View {
+        VStack(spacing: 22) {
+            VStack(spacing: 8) {
+                Text("auth.mfa.code.sent.to".localized)
+                    .font(.body)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
+                    .multilineTextAlignment(.center)
+
+                Text(displayedPhone)
+                    .font(.title3.weight(.semibold))
+                    .foregroundColor(SpectRoomTheme.text)
+                    .multilineTextAlignment(.center)
+
+                if kind == .enroll {
+                    Button {
+                        applyPhoneFields(from: phoneE164)
+                        isEditingPhone = true
+                        isCodeFieldFocused = false
+                    } label: {
+                        Text("auth.mfa.edit.number".localized)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.blue)
                     }
+                    .disabled(isBusy)
                 }
+            }
+            .padding(.horizontal)
+
+            otpDigitBoxes
+                .padding(.horizontal, 20)
 
             Button {
                 Task { await confirmCode() }
@@ -269,19 +462,22 @@ struct MfaVerificationView: View {
             .disabled(isBusy || code.count < 6)
             .padding(.horizontal)
 
-            if resendSecondsRemaining > 0 {
-                Text(String(format: "auth.mfa.resend.cooldown".localized, resendSecondsRemaining))
+            Button {
+                attemptResendSms()
+            } label: {
+                Text("auth.mfa.resend.link".localized)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.blue)
+            }
+            .disabled(isBusy)
+
+            if !smsResendToast.isEmpty {
+                Text(smsResendToast)
                     .font(.footnote)
                     .foregroundColor(SpectRoomTheme.secondaryText)
-            } else {
-                Button {
-                    Task { await resendSms() }
-                } label: {
-                    Text("auth.mfa.resend".localized)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.blue)
-                }
-                .disabled(isBusy)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+                    .transition(.opacity)
             }
 
             if kind == .signIn {
@@ -293,9 +489,65 @@ struct MfaVerificationView: View {
                         .foregroundColor(SpectRoomTheme.secondaryText)
                 }
                 .disabled(isBusy)
-                .padding(.top, 8)
+                .padding(.top, 4)
             }
         }
+        .onAppear {
+            isCodeFieldFocused = true
+        }
+    }
+
+    private var otpDigitBoxes: some View {
+        ZStack {
+            TextField("", text: $code)
+                .keyboardType(.numberPad)
+                .textContentType(.oneTimeCode)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($isCodeFieldFocused)
+                .opacity(0.02)
+                .frame(height: 56)
+                .onChange(of: code) { _, newValue in
+                    let digits = newValue.filter(\.isNumber)
+                    let trimmed = String(digits.prefix(6))
+                    if trimmed != newValue {
+                        code = trimmed
+                    }
+                }
+
+            HStack(spacing: 10) {
+                ForEach(0..<6, id: \.self) { index in
+                    let digit = digit(at: index)
+                    Text(digit.isEmpty ? " " : digit)
+                        .font(.title2.monospacedDigit().weight(.semibold))
+                        .foregroundColor(SpectRoomTheme.text)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(Color.gray.opacity(0.1))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(
+                                    code.count == index && isCodeFieldFocused
+                                        ? Color.blue
+                                        : Color.gray.opacity(0.3),
+                                    lineWidth: code.count == index && isCodeFieldFocused ? 2 : 1
+                                )
+                        )
+                        .cornerRadius(12)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isCodeFieldFocused = true
+        }
+    }
+
+    private func digit(at index: Int) -> String {
+        guard index < code.count else { return "" }
+        let i = code.index(code.startIndex, offsetBy: index)
+        return String(code[i])
     }
 
     @ViewBuilder
@@ -319,7 +571,7 @@ struct MfaVerificationView: View {
         if kind == .signIn {
             emailVerified = true
             smsSent = true
-            startResendCooldown()
+            markSmsResendCooldownStarted()
             return
         }
 
@@ -327,10 +579,22 @@ struct MfaVerificationView: View {
 
         do {
             let verified = try await appState.authService.reloadAndIsEmailVerified()
-            await MainActor.run { emailVerified = verified }
-            // Stay on email step until the user taps "I've verified my email".
+            if verified {
+                await MainActor.run { emailVerified = true }
+                await startEnrollmentSmsIfNeeded(force: true)
+            } else {
+                await MainActor.run {
+                    emailVerified = false
+                    startEmailResendCooldown()
+                    startEmailVerificationPolling()
+                }
+            }
         } catch {
             present(error)
+            await MainActor.run {
+                startEmailResendCooldown()
+                startEmailVerificationPolling()
+            }
         }
     }
 
@@ -372,12 +636,70 @@ struct MfaVerificationView: View {
         }
     }
 
+    private func startEmailVerificationPolling() {
+        stopEmailVerificationPolling()
+        emailPollTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard !Task.isCancelled else { break }
+                await checkEmailVerifiedQuietly()
+            }
+        }
+    }
+
+    private func stopEmailVerificationPolling() {
+        emailPollTask?.cancel()
+        emailPollTask = nil
+    }
+
+    private func checkEmailVerifiedQuietly() async {
+        guard kind == .enroll, !emailVerified, !showEmailVerifiedCelebration, !isHandlingEmailVerified else { return }
+        do {
+            let verified = try await appState.authService.reloadAndIsEmailVerified()
+            guard verified else { return }
+            await advanceAfterEmailVerified(showCelebration: true)
+        } catch {
+            // Quiet polling — ignore transient reload failures.
+        }
+    }
+
+    private func advanceAfterEmailVerified(showCelebration: Bool) async {
+        let shouldProceed = await MainActor.run { () -> Bool in
+            guard !isHandlingEmailVerified else { return false }
+            isHandlingEmailVerified = true
+            stopEmailVerificationPolling()
+            return true
+        }
+        guard shouldProceed else { return }
+
+        if showCelebration {
+            await MainActor.run {
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
+                    showEmailVerifiedCelebration = true
+                }
+            }
+            try? await Task.sleep(nanoseconds: 1_250_000_000)
+        }
+
+        await MainActor.run {
+            emailVerified = true
+            showEmailVerifiedCelebration = false
+            emailResendTimer?.invalidate()
+            emailResendTimer = nil
+            emailResendSecondsRemaining = 0
+        }
+        await startEnrollmentSmsIfNeeded(force: true)
+        await MainActor.run { isHandlingEmailVerified = false }
+    }
+
     private func resendVerificationEmail() async {
         isBusy = true
         defer { isBusy = false }
         do {
             try await appState.authService.sendEmailVerificationForMfa()
             await MainActor.run {
+                startEmailResendCooldown()
+                alertTitle = "auth.mfa.email.sent.title".localized
                 errorMessage = "auth.mfa.email.sent".localized
                 showingError = true
             }
@@ -386,22 +708,25 @@ struct MfaVerificationView: View {
         }
     }
 
-    private func checkEmailAndStartSms() async {
-        isBusy = true
-        defer { isBusy = false }
+    private func checkEmailAndStartSms(manual: Bool) async {
+        await MainActor.run { isBusy = true }
         do {
             FirebaseBootstrap.applyDebugPhoneAuthSettings()
             let verified = try await appState.authService.reloadAndIsEmailVerified()
-            await MainActor.run { emailVerified = verified }
+            await MainActor.run { isBusy = false }
             guard verified else {
-                await MainActor.run {
-                    errorMessage = "auth.mfa.error.email.unverified".localized
-                    showingError = true
+                if manual {
+                    await MainActor.run {
+                        alertTitle = ""
+                        errorMessage = "auth.mfa.error.email.unverified".localized
+                        showingError = true
+                    }
                 }
                 return
             }
-            await startEnrollmentSmsIfNeeded(force: true)
+            await advanceAfterEmailVerified(showCelebration: true)
         } catch {
+            await MainActor.run { isBusy = false }
             present(error)
         }
     }
@@ -410,6 +735,7 @@ struct MfaVerificationView: View {
         guard kind == .enroll else { return }
         guard !phoneE164.isEmpty else {
             await MainActor.run {
+                alertTitle = "auth.notice".localized
                 errorMessage = "auth.error.phone.invalid".localized
                 showingError = true
             }
@@ -426,7 +752,7 @@ struct MfaVerificationView: View {
             await MainActor.run {
                 smsSent = true
                 smsSendFailed = false
-                startResendCooldown()
+                markSmsResendCooldownStarted()
             }
         } catch {
             await MainActor.run {
@@ -438,6 +764,8 @@ struct MfaVerificationView: View {
                 await MainActor.run {
                     emailVerified = false
                     smsSendFailed = false
+                    isHandlingEmailVerified = false
+                    startEmailVerificationPolling()
                 }
             } else {
                 present(error)
@@ -459,6 +787,31 @@ struct MfaVerificationView: View {
         }
     }
 
+    private func attemptResendSms() {
+        if let last = lastSmsResendAt,
+           Date().timeIntervalSince(last) < smsResendCooldownSeconds {
+            showSmsResendToast("auth.mfa.resend.wait".localized)
+            return
+        }
+        Task { await resendSms() }
+    }
+
+    private func showSmsResendToast(_ message: String) {
+        smsResendToastTask?.cancel()
+        withAnimation(.easeInOut(duration: 0.2)) {
+            smsResendToast = message
+        }
+        smsResendToastTask = Task {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    smsResendToast = ""
+                }
+            }
+        }
+    }
+
     private func resendSms() async {
         isBusy = true
         defer { isBusy = false }
@@ -469,37 +822,90 @@ struct MfaVerificationView: View {
             } else {
                 try await appState.authService.resendMfaEnrollmentCode(phoneE164: phoneE164)
             }
-            await MainActor.run { startResendCooldown() }
+            await MainActor.run {
+                markSmsResendCooldownStarted()
+                code = ""
+                showSmsResendToast("auth.mfa.resend.sent".localized)
+            }
         } catch {
             present(error)
         }
     }
 
-    private func startResendCooldown() {
-        resendTimer?.invalidate()
-        resendSecondsRemaining = 45
-        resendTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
+    private func markSmsResendCooldownStarted() {
+        lastSmsResendAt = Date()
+    }
+
+    private func startEmailResendCooldown() {
+        emailResendTimer?.invalidate()
+        emailResendSecondsRemaining = 30
+        emailResendTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
             DispatchQueue.main.async {
-                if resendSecondsRemaining <= 1 {
-                    resendSecondsRemaining = 0
+                if emailResendSecondsRemaining <= 1 {
+                    emailResendSecondsRemaining = 0
                     timer.invalidate()
                 } else {
-                    resendSecondsRemaining -= 1
+                    emailResendSecondsRemaining -= 1
                 }
             }
         }
     }
 
     private func present(_ error: Error) {
-        let raw = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        if let authError = error as? SpectRoomAuthError, let message = authError.errorDescription {
+            switch authError {
+            case .invalidMfaCode, .emailNotVerifiedForMfa:
+                alertTitle = ""
+            default:
+                alertTitle = "auth.notice".localized
+            }
+            errorMessage = message
+            showingError = true
+            return
+        }
+
         let ns = error as NSError
-        print("❌ MFA error domain=\(ns.domain) code=\(ns.code) \(raw)")
+        print("❌ MFA error domain=\(ns.domain) code=\(ns.code) \(error.localizedDescription)")
+
+        if ns.domain == AuthErrorDomain,
+           ns.code == AuthErrorCode.invalidVerificationCode.rawValue
+            || ns.code == AuthErrorCode.missingVerificationCode.rawValue {
+            alertTitle = ""
+            errorMessage = "auth.mfa.error.invalid.code".localized
+            showingError = true
+            return
+        }
+
+        alertTitle = "auth.notice".localized
+
+        let raw = FirebaseAuthService.humanReadableFunctionsError(error)
         if raw.localizedCaseInsensitiveContains("canHandleNotification")
-            || raw.localizedCaseInsensitiveContains("app delegate swizzling") {
+            || raw.localizedCaseInsensitiveContains("app delegate swizzling")
+            || ns.code == AuthErrorCode.notificationNotForwarded.rawValue {
+            #if targetEnvironment(simulator)
             errorMessage = String(
                 format: "auth.mfa.error.sms.detail".localized,
                 phoneE164.isEmpty ? maskedPhone : phoneE164
             )
+            #else
+            errorMessage = String(
+                format: "auth.mfa.error.sms.device".localized,
+                phoneE164.isEmpty ? maskedPhone : phoneE164
+            )
+            #endif
+        } else if raw.localizedCaseInsensitiveContains("client identifier")
+            || ns.code == AuthErrorCode.missingClientIdentifier.rawValue {
+            #if targetEnvironment(simulator)
+            errorMessage = String(
+                format: "auth.mfa.error.sms.detail".localized,
+                phoneE164.isEmpty ? maskedPhone : phoneE164
+            )
+            #else
+            errorMessage = String(
+                format: "auth.mfa.error.sms.client".localized,
+                phoneE164.isEmpty ? maskedPhone : phoneE164
+            )
+            #endif
         } else {
             errorMessage = raw
         }

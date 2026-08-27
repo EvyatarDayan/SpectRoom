@@ -337,6 +337,9 @@ class AppStateManager: ObservableObject {
                     self.pendingMfaPhoneE164 = phoneE164
                     UserDefaults.standard.set(phoneE164, forKey: "pendingMfaPhoneE164")
                     self.needsMfaEnrollment = true
+                    if let uid = self.firebaseAuth.auth.currentUser?.uid {
+                        CompleteProfileWelcomeOverlay.prepareForNewSignup(userId: uid)
+                    }
                     self.saveAppState()
                     print("🆕 New user signed up - MFA enrollment required next")
                 }
@@ -383,7 +386,13 @@ class AppStateManager: ObservableObject {
             needsMfaEnrollment = false
             pendingMfaPhoneE164 = phoneE164
             UserDefaults.standard.removeObject(forKey: "pendingMfaPhoneE164")
+            // Keep routing on mandatory profile until the user finishes or defers.
+            if !hasCompletedInitialProfile {
+                isNewSignup = true
+                hasCompletedInitialProfile = false
+            }
             refreshMfaEnrollmentRequirement()
+            saveAppState()
         }
     }
 

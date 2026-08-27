@@ -30,32 +30,42 @@ class FirebaseAuthService: ObservableObject {
     private var blockedByListener: ListenerRegistration?
     private var moderationListener: ListenerRegistration?
     private var authStateListenerHandle: AuthStateDidChangeListenerHandle?
+    private var didStartAuthListening = false
     /// Keeps the app on the login screen while we verify the account isn't soft-deleted.
     var isVerifyingSignIn = false
     
     private init() {
-        FirebaseBootstrap.configureIfNeeded()
+        // Do not call FirebaseApp.configure() or Auth.auth() here.
+        // AppDelegate.didFinishLaunching must configure first, then call startAuthListening().
+    }
+
+    /// Call once from `AppDelegate.application(_:didFinishLaunchingWithOptions:)` after
+    /// `FirebaseBootstrap.configureIfNeeded()`. Touching Auth earlier breaks phone/MFA.
+    func startAuthListening() {
+        guard !didStartAuthListening else { return }
+        guard FirebaseBootstrap.configureIfNeeded() else {
+            print("❌ startAuthListening skipped — Firebase not configured yet")
+            return
+        }
+        didStartAuthListening = true
 
         // Firebase restores the session from the keychain synchronously when available.
         isAuthenticated = Auth.auth().currentUser != nil
-        
-        // Listen for authentication state changes
+
         authStateListenerHandle = Auth.auth().addStateDidChangeListener { [weak self] _, firebaseUser in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.hasResolvedAuthState = true
-                
+
                 // During sign-in verification, don't flip UI to authenticated yet.
                 if self.isVerifyingSignIn {
                     return
                 }
-                
+
                 self.isAuthenticated = firebaseUser != nil
                 if let firebaseUser = firebaseUser {
                     self.hasResolvedUserProfile = false
-                    // Load user data from Firestore when Firebase user changes
                     await self.loadUserData(for: firebaseUser.uid)
-                    // Update FCM token when user logs in
                     await self.updateFCMTokenIfNeeded()
                 } else {
                     self.currentUser = nil
@@ -152,12 +162,12 @@ class FirebaseAuthService: ObservableObject {
             try await db.collection("users").document(uid).setData(stub, merge: true)
         }
 
-        if let user = auth.currentUser, !user.isEmailVerified {
+        if auth.currentUser?.isEmailVerified == false {
             do {
-                try await sendBrandedEmailVerification()
-                print("✅ Branded verification email sent for MFA enrollment prerequisite")
+                try await sendEmailVerificationForMfa()
+                print("✅ Verification email sent for MFA enrollment prerequisite")
             } catch {
-                print("⚠️ Failed to send verification email: \(error.localizedDescription)")
+                print("⚠️ Failed to send verification email: \(Self.humanReadableFunctionsError(error))")
             }
         }
 
@@ -170,9 +180,33 @@ class FirebaseAuthService: ObservableObject {
         guard auth.currentUser != nil else {
             throw SpectRoomAuthError.notAuthenticated
         }
+        // Fresh ID token so the callable receives auth context reliably on resend.
+        _ = try await auth.currentUser?.getIDToken(forcingRefresh: true)
         _ = try await Functions.functions(region: "us-central1")
             .httpsCallable("sendSpectRoomEmailVerificationEmail")
             .call([:])
+    }
+
+    /// User-facing message for Firebase callable failures (avoids bare "INTERNAL").
+    static func humanReadableFunctionsError(_ error: Error) -> String {
+        let ns = error as NSError
+        if let reason = ns.userInfo[NSLocalizedFailureReasonErrorKey] as? String,
+           !reason.isEmpty,
+           reason.uppercased() != reason || reason.count > 12 {
+            return reason
+        }
+        if let message = ns.userInfo["message"] as? String, !message.isEmpty {
+            return message
+        }
+        if let details = ns.userInfo["details"] as? [String: Any],
+           let message = details["message"] as? String, !message.isEmpty {
+            return message
+        }
+        let desc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        if desc.uppercased() == desc, desc.count <= 24 {
+            return "Could not complete the request. Check your connection and try again."
+        }
+        return desc
     }
     
     /// Returns whether this email belongs to a soft-deleted account still within the 14-day window.

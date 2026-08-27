@@ -363,6 +363,8 @@
 "auth.mfa.resend.cooldown" = "Ny kod om %d sekunder";
 "auth.mfa.back.to.sign.in" = "Tillbaka till logga in";
 "auth.mfa.error.email.unverified" = "Din e-post har inte verifierats ännu, kolla din inkorg";
+"auth.mfa.error.rate.limited.subtitle" = "Försök igen senare";
+"auth.mfa.error.rate.limited" = "Det verkar som att för många koder begärdes från den här enheten. Försök igen om ungefär 1 timme.";
 "auth.mfa.error.invalid.code" = "Fel verifieringskod, försök igen.";
 "auth.mfa.error.session" = "Verifieringen har gått ut. Begär en ny kod.";
 "auth.mfa.error.send" = "Kunde inte skicka SMS-koden. Försök igen.";

@@ -22,6 +22,7 @@ struct MfaVerificationView: View {
     @State private var isHandlingEmailVerified = false
     @State private var smsSent = false
     @State private var smsSendFailed = false
+    @State private var smsRateLimited = false
     @State private var isEditingPhone = false
     @State private var lastSmsResendAt: Date?
     @State private var smsResendToast = ""
@@ -86,6 +87,11 @@ struct MfaVerificationView: View {
         return "auth.mfa.title".localized
     }
 
+    /// Lock asset under the security titles (not on the email-verify step, which has its own icon).
+    private var showsSecurityLockIcon: Bool {
+        !isWaitingForEmail && !showEmailVerifiedCelebration
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
@@ -94,6 +100,16 @@ struct MfaVerificationView: View {
                         .font(.largeTitle.weight(.bold))
                         .foregroundColor(SpectRoomTheme.text)
                         .multilineTextAlignment(.center)
+
+                    if showsSecurityLockIcon {
+                        Image("lock")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 72, height: 72)
+                            .padding(.top, 4)
+                            .padding(.bottom, 2)
+                            .accessibilityHidden(true)
+                    }
 
                     if !subtitleText.isEmpty {
                         Text(subtitleText)
@@ -177,7 +193,9 @@ struct MfaVerificationView: View {
             return "auth.mfa.phone.edit.subtitle".localized
         }
         if kind == .enroll && smsSendFailed {
-            return "auth.mfa.sending.failed.subtitle".localized
+            return smsRateLimited
+                ? "auth.mfa.error.rate.limited.subtitle".localized
+                : "auth.mfa.sending.failed.subtitle".localized
         }
         if kind == .enroll && !smsSent {
             return "auth.mfa.sending.subtitle".localized
@@ -199,24 +217,32 @@ struct MfaVerificationView: View {
 
     private var smsFailedCard: some View {
         VStack(spacing: 16) {
-            Text(String(format: smsFailureHelpText, phoneE164.isEmpty ? maskedPhone : phoneE164))
-                .font(.subheadline)
-                .foregroundColor(SpectRoomTheme.secondaryText)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
+            if smsRateLimited {
+                Text("auth.mfa.error.rate.limited".localized)
+                    .font(.body)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            } else {
+                Text(String(format: smsFailureHelpText, phoneE164.isEmpty ? maskedPhone : phoneE164))
+                    .font(.subheadline)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
 
-            Button {
-                Task { await startEnrollmentSmsIfNeeded(force: true) }
-            } label: {
-                loadingLabel(title: "auth.mfa.resend".localized)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(isBusy ? Color.gray : Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
+                Button {
+                    Task { await startEnrollmentSmsIfNeeded(force: true) }
+                } label: {
+                    loadingLabel(title: "auth.mfa.resend".localized)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(isBusy ? Color.gray : Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                }
+                .disabled(isBusy)
+                .padding(.horizontal)
             }
-            .disabled(isBusy)
-            .padding(.horizontal)
         }
     }
 
@@ -746,27 +772,36 @@ struct MfaVerificationView: View {
         isBusy = true
         defer { isBusy = false }
         do {
-            await MainActor.run { smsSendFailed = false }
+            await MainActor.run {
+                smsSendFailed = false
+                smsRateLimited = false
+            }
             FirebaseBootstrap.applyDebugPhoneAuthSettings()
             try await appState.authService.startMfaEnrollment(phoneE164: phoneE164)
             await MainActor.run {
                 smsSent = true
                 smsSendFailed = false
+                smsRateLimited = false
                 markSmsResendCooldownStarted()
             }
         } catch {
+            let rateLimited = isSmsRateLimited(error)
             await MainActor.run {
                 smsSent = false
                 smsSendFailed = true
+                smsRateLimited = rateLimited
             }
             if let authError = error as? SpectRoomAuthError,
                case .emailNotVerifiedForMfa = authError {
                 await MainActor.run {
                     emailVerified = false
                     smsSendFailed = false
+                    smsRateLimited = false
                     isHandlingEmailVerified = false
                     startEmailVerificationPolling()
                 }
+            } else if rateLimited {
+                // Show on-screen message only — no popup.
             } else {
                 present(error)
             }
@@ -825,11 +860,34 @@ struct MfaVerificationView: View {
             await MainActor.run {
                 markSmsResendCooldownStarted()
                 code = ""
+                smsRateLimited = false
                 showSmsResendToast("auth.mfa.resend.sent".localized)
             }
         } catch {
-            present(error)
+            if isSmsRateLimited(error) {
+                await MainActor.run {
+                    smsSent = false
+                    smsSendFailed = true
+                    smsRateLimited = true
+                }
+            } else {
+                present(error)
+            }
         }
+    }
+
+    private func isSmsRateLimited(_ error: Error) -> Bool {
+        if let authError = error as? SpectRoomAuthError, case .mfaRateLimited = authError {
+            return true
+        }
+        let ns = error as NSError
+        if ns.domain == AuthErrorDomain, ns.code == AuthErrorCode.tooManyRequests.rawValue {
+            return true
+        }
+        let message = ns.localizedDescription
+        return message.localizedCaseInsensitiveContains("unusual activity")
+            || message.localizedCaseInsensitiveContains("blocked all requests")
+            || message.localizedCaseInsensitiveContains("too many requests")
     }
 
     private func markSmsResendCooldownStarted() {

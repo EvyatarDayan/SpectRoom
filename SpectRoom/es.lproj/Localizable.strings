@@ -363,6 +363,8 @@
 "auth.mfa.resend.cooldown" = "Podrás reenviar en %d segundos";
 "auth.mfa.back.to.sign.in" = "Volver a iniciar sesión";
 "auth.mfa.error.email.unverified" = "Tu correo aún no ha sido verificado, revisa tu bandeja de entrada";
+"auth.mfa.error.rate.limited.subtitle" = "Inténtalo más tarde";
+"auth.mfa.error.rate.limited" = "Parece que se solicitaron demasiados códigos desde este dispositivo. Vuelve a intentarlo en aproximadamente 1 hora.";
 "auth.mfa.error.invalid.code" = "Código de verificación incorrecto, inténtalo de nuevo.";
 "auth.mfa.error.session" = "La sesión caducó. Solicita un código nuevo.";
 "auth.mfa.error.send" = "No se pudo enviar el SMS. Inténtalo de nuevo.";

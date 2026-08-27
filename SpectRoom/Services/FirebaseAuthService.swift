@@ -5187,6 +5187,7 @@ enum SpectRoomAuthError: LocalizedError {
     case mfaSessionExpired
     case mfaSendFailed
     case mfaFactorUnavailable
+    case mfaRateLimited
     
     var errorDescription: String? {
         switch self {
@@ -5224,6 +5225,8 @@ enum SpectRoomAuthError: LocalizedError {
             return "auth.mfa.error.send".localized
         case .mfaFactorUnavailable:
             return "auth.mfa.error.factor".localized
+        case .mfaRateLimited:
+            return "auth.mfa.error.rate.limited".localized
         }
     }
 }

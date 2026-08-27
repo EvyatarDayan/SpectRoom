@@ -362,6 +362,8 @@
 "auth.mfa.resend.cooldown" = "Resend available in %d seconds";
 "auth.mfa.back.to.sign.in" = "Back to Sign In";
 "auth.mfa.error.email.unverified" = "Your email has not been verified yet, check your inbox";
+"auth.mfa.error.rate.limited.subtitle" = "Please try again later";
+"auth.mfa.error.rate.limited" = "It looks like too many codes were requested from this device. Please try again in about 1 hour.";
 "auth.mfa.error.invalid.code" = "Incorrect verification code, try again.";
 "auth.mfa.error.session" = "This verification session expired. Request a new code.";
 "auth.mfa.error.send" = "Couldn't send the SMS code. Try again.";

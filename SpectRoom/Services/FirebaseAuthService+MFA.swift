@@ -179,9 +179,13 @@ extension FirebaseAuthService {
         #endif
 
         let session = try await getMultiFactorSession(for: user)
-        let verificationID = try await verifyPhoneForEnrollment(phoneE164: phoneE164, session: session)
-        Self.pendingVerificationID = verificationID
-        Self.pendingEnrollPhoneE164 = phoneE164
+        do {
+            let verificationID = try await verifyPhoneForEnrollment(phoneE164: phoneE164, session: session)
+            Self.pendingVerificationID = verificationID
+            Self.pendingEnrollPhoneE164 = phoneE164
+        } catch {
+            throw mapMfaError(error)
+        }
 
         try await updateUserData([
             Self.phoneE164Key: phoneE164,
@@ -399,6 +403,8 @@ extension FirebaseAuthService {
                 return SpectRoomAuthError.mfaSessionExpired
             case AuthErrorCode.unverifiedEmail.rawValue:
                 return SpectRoomAuthError.emailNotVerifiedForMfa
+            case AuthErrorCode.tooManyRequests.rawValue:
+                return SpectRoomAuthError.mfaRateLimited
             default:
                 break
             }
@@ -412,12 +418,19 @@ extension FirebaseAuthService {
                 return SpectRoomAuthError.mfaSessionExpired
             case .unverifiedEmail:
                 return SpectRoomAuthError.emailNotVerifiedForMfa
+            case .tooManyRequests:
+                return SpectRoomAuthError.mfaRateLimited
             default:
                 break
             }
         }
 
         let message = nsError.localizedDescription
+        if message.localizedCaseInsensitiveContains("unusual activity")
+            || message.localizedCaseInsensitiveContains("too many requests")
+            || message.localizedCaseInsensitiveContains("blocked all requests") {
+            return SpectRoomAuthError.mfaRateLimited
+        }
         if message.localizedCaseInsensitiveContains("multifactor verification code")
             || message.localizedCaseInsensitiveContains("invalid verification code") {
             return SpectRoomAuthError.invalidMfaCode

@@ -57,16 +57,15 @@ struct SpectRoomApp: App {
                 if appState.needsMfaEnrollment {
                     MfaVerificationView(kind: .enroll)
                         .environmentObject(appState)
+                } else if !appState.hasResolvedProfileRouting {
+                    // Wait until profile is loaded and completion flags are synced.
+                    LaunchAuthPlaceholderView()
                 } else if appState.hasCompletedInitialProfile {
                     ContentView()
                         .environmentObject(appState)
-                } else if appState.isNewSignup {
-                    // New user after signup - must complete profile
-                    ProfileEditView(isMandatoryCompletion: true)
-                        .environmentObject(appState)
                 } else {
-                    // Existing user with incomplete profile - allow access but encourage completion
-                    ContentView()
+                    // Incomplete profile: stay here until Save succeeds. No skip into the app.
+                    ProfileEditView(isMandatoryCompletion: true)
                         .environmentObject(appState)
                 }
             } else if appState.hasCompletedOnboarding {
@@ -81,6 +80,10 @@ struct SpectRoomApp: App {
         }
         .preferredColorScheme(isDarkMode ? .dark : .light)
         .onOpenURL { url in
+            if url.scheme == "spectroom" {
+                // Deep link from email verification page or in-app links.
+                return
+            }
             _ = Auth.auth().canHandle(url)
         }
         .overlay {
@@ -97,6 +100,8 @@ struct SpectRoomApp: App {
                             switch notice.kind {
                             case .banAcknowledgement, .loginBanned:
                                 topic = .accountBan
+                            case .deletedAcknowledgement, .loginDeleted:
+                                topic = .accountDeleted
                             default:
                                 topic = .accountFreeze
                             }

@@ -24,6 +24,7 @@ struct SettingsView: View {
     @State private var reportedProfilesCount = 0
     @State private var showingHelpSupport = false
     @State private var showingAbout = false
+    @State private var showingAccountBilling = false
     @State private var showingDeleteAccountConfirmation = false
     @State private var deleteConfirmationStep: DeleteAccountConfirmationStep = .sure
     @State private var deleteConfirmationText = ""
@@ -228,6 +229,32 @@ struct SettingsView: View {
                 
                 // Account & Data
                 Section("settings.section.account.data".localized) {
+                    Button(action: {
+                        showingAccountBilling = true
+                    }) {
+                        HStack {
+                            Image(systemName: "creditcard.circle.fill")
+                                .foregroundColor(.blue)
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("settings.account.billing".localized)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                                    .foregroundColor(SpectRoomTheme.text)
+                                Text("settings.account.billing.description".localized)
+                                    .font(.caption)
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(SpectRoomTheme.secondaryText)
+                                .font(.caption)
+                        }
+                    }
+
                     Button(action: exportMessages) {
                         HStack {
                             Image(systemName: "square.and.arrow.up.circle.fill")
@@ -270,7 +297,12 @@ struct SettingsView: View {
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.85)
                                     .foregroundColor(SpectRoomTheme.text)
-                                Text("settings.authentication.signout.subtitle".localized)
+                                Text(
+                                    String(
+                                        format: "settings.authentication.signout.subtitle".localized,
+                                        FirebaseAuthService.shared.auth.currentUser?.email ?? ""
+                                    )
+                                )
                                     .font(.caption)
                                     .foregroundColor(SpectRoomTheme.secondaryText)
                                     .lineLimit(1)
@@ -442,6 +474,9 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingPrivacySafety) {
                 PrivacySafetyView()
+            }
+            .sheet(isPresented: $showingAccountBilling) {
+                AccountBillingView()
             }
             .sheet(isPresented: $showingAbout) {
                 AboutView()

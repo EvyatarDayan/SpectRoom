@@ -13,11 +13,6 @@ struct OnboardingView: View {
     @EnvironmentObject var appState: AppStateManager
     @Environment(\.colorScheme) private var colorScheme
     @State private var currentPage = 0
-    @AppStorage("selectedLanguage") private var selectedLanguageCode: String = "en"
-    @AppStorage("isDarkMode") private var isDarkMode = false
-    @State private var showingLanguageModal = false
-    @StateObject private var slideshow = WelcomeSlideshowController()
-    @State private var pinnedSlideshowY: CGFloat?
     @State private var dontShowWelcomeAgain = false
     
     var pages: [OnboardingPage] {
@@ -37,21 +32,21 @@ struct OnboardingView: View {
                 title: "onboarding.welcome.title".localized,
                 subtitle: "onboarding.welcome.subtitle".localized,
                 description: "onboarding.welcome.description".localized,
-                staticImageName: "ProfileScreen1"
+                staticImageName: "Onboarding1"
             ),
             OnboardingPage(
                 step: "onboarding.step.2".localized,
                 title: "onboarding.match.title".localized,
                 subtitle: "onboarding.match.subtitle".localized,
                 description: "onboarding.match.description".localized,
-                staticImageName: "Home"
+                staticImageName: "Onboarding2"
             ),
             OnboardingPage(
                 step: "onboarding.step.3".localized,
                 title: "onboarding.communication.title".localized,
                 subtitle: "onboarding.communication.subtitle".localized,
                 description: "onboarding.communication.description".localized,
-                staticImageName: "Chat1"
+                staticImageName: "Onboarding3"
             )
         ]
     }
@@ -59,7 +54,6 @@ struct OnboardingView: View {
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                // Same centered layout as before; photo is overlaid so it doesn't slide with text
                 TabView(selection: $currentPage) {
                     ForEach(0..<pages.count, id: \.self) { index in
                         OnboardingPageView(page: pages[index])
@@ -68,23 +62,6 @@ struct OnboardingView: View {
                 }
                 .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
                 .animation(.easeInOut, value: currentPage)
-                .overlayPreferenceValue(WelcomeSlideshowAnchorKey.self) { anchor in
-                    GeometryReader { geometry in
-                        let page = pages[currentPage]
-                        let resolvedY = pinnedSlideshowY ?? anchor.map { geometry[$0].midY }
-                        
-                        if page.showsImage, page.staticImageName == nil, let resolvedY {
-                            WelcomeImageSlideshow(slideshow: slideshow)
-                                .position(x: geometry.size.width / 2, y: resolvedY)
-                                .allowsHitTesting(false)
-                                .onAppear {
-                                    if pinnedSlideshowY == nil {
-                                        pinnedSlideshowY = resolvedY
-                                    }
-                                }
-                        }
-                    }
-                }
                 
                 // Always reserve space so nav/dots don't shift when this is hidden on later pages.
                 Button(action: {
@@ -157,169 +134,10 @@ struct OnboardingView: View {
                 .padding(.bottom, 24)
             }
             
-            HStack {
-                Button(action: {
-                    isDarkMode.toggle()
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: isDarkMode ? "moon.fill" : "sun.max.fill")
-                            .font(.headline)
-                            .foregroundColor(isDarkMode ? .yellow : .orange)
-                        Text(isDarkMode ? "settings.light.mode".localized : "settings.dark.mode".localized)
-                            .font(.subheadline)
-                            .foregroundColor(SpectRoomTheme.text)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(20)
-                }
-                
-                Spacer()
-                
-                Button(action: {
-                    showingLanguageModal = true
-                }) {
-                    HStack(spacing: 6) {
-                        Text(currentLanguageFlag)
-                            .font(.headline)
-                        Text(currentLanguageName)
-                            .font(.subheadline)
-                            .foregroundColor(SpectRoomTheme.text)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(20)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            AuthFlowPreferenceBar()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .spectRoomScreenBackground()
-        .sheet(isPresented: $showingLanguageModal) {
-            LanguageSelectionModal()
-        }
-    }
-    
-    private var currentLanguageFlag: String {
-        Language.allLanguages.first(where: { $0.code == selectedLanguageCode })?.flag ?? "🇺🇸"
-    }
-    
-    private var currentLanguageName: String {
-        Language.allLanguages.first(where: { $0.code == selectedLanguageCode })?.name ?? "English"
-    }
-}
-
-/// Shared slideshow state so every welcome page shows the same image and timing.
-/// Any asset named `Welcome1`, `Welcome2`, … in Assets.xcassets is included automatically.
-final class WelcomeSlideshowController: ObservableObject {
-    static let imageSize: CGFloat = 140
-    /// A photo cannot repeat until this many other photos have been shown.
-    private static let cooldownCount = 3
-    
-    let imageNames: [String]
-    
-    @Published var currentIndex = 0
-    
-    /// Indices of recently shown photos (most recent last). Kept at most `cooldownCount` long.
-    private var recentlyShown: [Int] = []
-    private var timer: Timer?
-    
-    init() {
-        imageNames = Self.discoverWelcomeImageNames()
-        if !imageNames.isEmpty {
-            currentIndex = Int.random(in: 0..<imageNames.count)
-            recentlyShown = [currentIndex]
-        }
-        
-        guard imageNames.count > 1 else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: 7, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            DispatchQueue.main.async {
-                withAnimation(.easeInOut(duration: 1.4)) {
-                    self.currentIndex = self.nextRandomIndex()
-                }
-            }
-        }
-    }
-    
-    deinit {
-        timer?.invalidate()
-    }
-    
-    /// Finds every asset catalog image named Welcome1, Welcome2, … (gaps allowed).
-    private static func discoverWelcomeImageNames() -> [String] {
-        var names: [String] = []
-        // Scan a generous range so newly added WelcomeN assets are picked up automatically
-        for index in 1...100 {
-            let name = "Welcome\(index)"
-            if UIImage(named: name) != nil {
-                names.append(name)
-            }
-        }
-        return names
-    }
-    
-    private func nextRandomIndex() -> Int {
-        guard !imageNames.isEmpty else { return currentIndex }
-        
-        // Exclude photos shown in the last `cooldownCount` slots (when enough alternatives exist)
-        let cooldown = Set(recentlyShown.suffix(Self.cooldownCount))
-        var candidates = Array(0..<imageNames.count).filter { !cooldown.contains($0) }
-        
-        // If the catalog is smaller than cooldown + 1, fall back to "anything except current"
-        if candidates.isEmpty {
-            candidates = Array(0..<imageNames.count).filter { $0 != currentIndex }
-        }
-        if candidates.isEmpty {
-            return currentIndex
-        }
-        
-        let next = candidates.randomElement() ?? currentIndex
-        recentlyShown.append(next)
-        if recentlyShown.count > Self.cooldownCount {
-            recentlyShown.removeFirst(recentlyShown.count - Self.cooldownCount)
-        }
-        return next
-    }
-}
-
-private struct WelcomeSlideshowAnchorKey: PreferenceKey {
-    static var defaultValue: Anchor<CGRect>?
-    
-    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
-        value = nextValue() ?? value
-    }
-}
-
-struct WelcomeImageSlideshow: View {
-    @ObservedObject var slideshow: WelcomeSlideshowController
-    
-    private let imageOpacity: Double = 0.8
-    private let cornerRadius: CGFloat = 16
-    private let frameWidth: CGFloat = 3
-    
-    private var imageSize: CGFloat { WelcomeSlideshowController.imageSize }
-    
-    var body: some View {
-        ZStack {
-            ForEach(Array(slideshow.imageNames.enumerated()), id: \.offset) { index, name in
-                Image(name)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: imageSize, height: imageSize)
-                    .clipped()
-                    .opacity(index == slideshow.currentIndex ? imageOpacity : 0)
-            }
-        }
-        .frame(width: imageSize, height: imageSize)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .stroke(Color.black, lineWidth: frameWidth)
-        )
     }
 }
 
@@ -332,7 +150,6 @@ struct OnboardingPage {
     var noticeLead: String? = nil
     var noticeBody: String? = nil
     var showsImage: Bool = true
-    /// When set, shows this asset as-is (no frame) instead of the welcome slideshow.
     var staticImageName: String? = nil
     
     var hasNotice: Bool {
@@ -342,7 +159,7 @@ struct OnboardingPage {
 
 /// Side-peek carousel for onboarding step images.
 struct OnboardingImageCarousel: View {
-    static let stepImageNames = ["ProfileScreen1", "Home", "Chat1"]
+    static let stepImageNames = ["Onboarding1", "Onboarding2", "Onboarding3"]
     
     let currentImageName: String
     let imageNames: [String]
@@ -402,26 +219,12 @@ struct OnboardingPageView: View {
                 Spacer(minLength: 12)
             }
             
-            if page.showsImage {
-                if let staticImageName = page.staticImageName {
-                    OnboardingImageCarousel(
-                        currentImageName: staticImageName,
-                        imageNames: OnboardingImageCarousel.stepImageNames
-                    )
-                    .padding(.top, 20)
-                } else {
-                    // Reserves the same space as the photo so layout/text sizing stay unchanged
-                    Color.clear
-                        .frame(
-                            width: WelcomeSlideshowController.imageSize,
-                            height: WelcomeSlideshowController.imageSize
-                        )
-                        .padding(.top, 20)
-                        .anchorPreference(
-                            key: WelcomeSlideshowAnchorKey.self,
-                            value: .bounds
-                        ) { $0 }
-                }
+            if page.showsImage, let staticImageName = page.staticImageName {
+                OnboardingImageCarousel(
+                    currentImageName: staticImageName,
+                    imageNames: OnboardingImageCarousel.stepImageNames
+                )
+                .padding(.top, 20)
             }
             
             // Text content - original sizes

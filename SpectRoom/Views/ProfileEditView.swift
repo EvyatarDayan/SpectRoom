@@ -40,7 +40,7 @@ struct ProfileEditView: View {
     
     // MARK: - State Variables
     @State private var name: String = ""
-    @State private var dateOfBirth: Date = Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()
+    @State private var dateOfBirth: Date = ProfileEditView.defaultDateOfBirth
     @State private var location: String = ""
     @State private var locationLatitude: Double? = nil
     @State private var locationLongitude: Double? = nil
@@ -199,7 +199,9 @@ struct ProfileEditView: View {
     @State private var sensoryInfoOption: SensoryPreferenceOption? = nil
     @State private var isDatePickerExpanded = false
     @State private var showingCompleteProfileWelcome: Bool
-    @State private var isCompletionBarVisible = true
+    @State private var isCompletionBarVisible = false
+    /// Avoids layout jump: bar inset is applied only after profile data is loaded.
+    @State private var hasResolvedCompletionBarVisibility = false
     /// After a 100% save (or opening an already-complete profile), hide the bar until
     /// the user drops below 100% and taps Save again.
     @State private var suppressCompletionBarUntilIncompleteSave = false
@@ -250,13 +252,12 @@ struct ProfileEditView: View {
                         .padding(.top, 8)
                         .padding(.bottom, embedsInTabBar ? 130 : 40)
                     }
-                    .safeAreaInset(edge: .top, spacing: isCompletionBarVisible ? 24 : 0) {
-                        if isCompletionBarVisible {
+                    .safeAreaInset(edge: .top, spacing: shouldShowCompletionBar ? 24 : 0) {
+                        if shouldShowCompletionBar {
                             profileCompletionBar
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
                     }
-                    .animation(.easeInOut(duration: 0.25), value: isCompletionBarVisible)
                     .profileEditScrollEdgeChrome()
                     .background(
                         SpectRoomBackground()
@@ -296,9 +297,11 @@ struct ProfileEditView: View {
             .navigationBarTitleDisplayMode(.inline)
             .spectRoomNavigationChrome(colorScheme: colorScheme)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(isMandatoryCompletion ? "common.close".localized : "profile.edit.cancel".localized) {
-                        closeEdit()
+                if !isMandatoryCompletion {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("profile.edit.cancel".localized) {
+                            closeEdit()
+                        }
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -324,9 +327,10 @@ struct ProfileEditView: View {
             if hadCachedUser {
                 loadCurrentProfile()
                 syncProfileNameFromAccount()
-                isDataLoaded = true
                 syncCompletionBarVisibilityAfterLoad()
+                isDataLoaded = true
             } else {
+                hasResolvedCompletionBarVisibility = false
                 isDataLoaded = false
             }
             
@@ -420,23 +424,27 @@ struct ProfileEditView: View {
     }
     
     private func refreshWelcomeOverlayIfNeeded() {
-        guard isMandatoryCompletion else { return }
+        // Opt-in only: armed by signup via prepareForNewSignup — never for returning logins.
+        guard isMandatoryCompletion else {
+            showingCompleteProfileWelcome = false
+            return
+        }
         let uid = FirebaseAuthService.shared.auth.currentUser?.uid
         showingCompleteProfileWelcome = CompleteProfileWelcomeOverlay.shouldShowWelcome(for: uid)
     }
     
     // MARK: - Profile Photo Section
     private var profilePhotoSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             Text("profile.edit.profile.photo".localized)
                 .font(.headline)
                 .fontWeight(.semibold)
-            
+
             ProfileMainPhotoCard(
                 imageURL: profilePhoto == nil ? appState.currentUser?.profilePhotoURL : nil,
                 localImage: profilePhoto,
-                placeholderSystemName: "camera",
                 showsCameraBadge: true,
+                usesDashedAddPlaceholder: true,
                 onTap: {
                     isEditingProfilePhoto = true
                     showingImagePicker = true
@@ -494,9 +502,11 @@ struct ProfileEditView: View {
             suppressCompletionBarUntilIncompleteSave = false
             isCompletionBarVisible = true
         }
+        hasResolvedCompletionBarVisibility = true
     }
     
     private func revealCompletionBar() {
+        hasResolvedCompletionBarVisibility = true
         withAnimation(.easeInOut(duration: 0.25)) {
             isCompletionBarVisible = true
         }
@@ -1195,6 +1205,10 @@ struct ProfileEditView: View {
         return Int((Double(completed) / Double(checks.count)) * 100)
     }
     
+    private var shouldShowCompletionBar: Bool {
+        hasResolvedCompletionBarVisibility && isCompletionBarVisible
+    }
+    
     private var profileCompletionBar: some View {
         let progressColor: Color = profileCompletionPercentage == 100 ? .green : .blue
         let barBackground = SpectRoomTheme.card
@@ -1305,9 +1319,8 @@ struct ProfileEditView: View {
     
     // MARK: - Helper Methods
     private func closeEdit() {
-        if isMandatoryCompletion {
-            appState.deferInitialProfileCompletion()
-        } else if embedsInTabBar {
+        guard !isMandatoryCompletion else { return }
+        if embedsInTabBar {
             selectedTab = 2 // Home / Discover
         } else {
             dismiss()
@@ -1389,13 +1402,14 @@ struct ProfileEditView: View {
         
         if let user = appState.currentUser {
             name = resolvedProfileName(from: user)
-            // Load actual date of birth from database if available, otherwise calculate from age
+            // Load actual date of birth from database if available, otherwise default to 18.
             if let savedDateOfBirth = user.dateOfBirth {
                 dateOfBirth = savedDateOfBirth
-            } else {
-                // Fallback: Convert age to date of birth (approximate)
+            } else if user.age >= 18 {
                 let calendar = Calendar.current
-                dateOfBirth = calendar.date(byAdding: .year, value: -user.age, to: Date()) ?? Date()
+                dateOfBirth = calendar.date(byAdding: .year, value: -user.age, to: Date()) ?? Self.defaultDateOfBirth
+            } else {
+                dateOfBirth = Self.defaultDateOfBirth
             }
             location = user.location.displayString
             locationLatitude = user.location.latitude
@@ -1507,7 +1521,7 @@ struct ProfileEditView: View {
             if !name.isEmpty {
                 print("📝 Using sign up name: \(name)")
             }
-            dateOfBirth = Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()
+            dateOfBirth = Self.defaultDateOfBirth
             location = ""
             locationLatitude = nil
             locationLongitude = nil
@@ -1517,6 +1531,11 @@ struct ProfileEditView: View {
             existingPhotos = []
             selectedLifestyle = LifestyleOption.preferNot.rawValue
         }
+    }
+    
+    /// Birthday that makes the user exactly 18 today (picker / new-profile default).
+    private static var defaultDateOfBirth: Date {
+        Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()
     }
     
     private func validationFrame(isValid: Bool) -> some View {

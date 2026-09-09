@@ -7,6 +7,9 @@ struct ProfileView: View {
     @State private var showingEditView = false
     @State private var showingPhotoViewer = false
     @State private var selectedPhotoIndex = 0
+    @State private var isActivatingBoost = false
+    @State private var boostToastMessage: String?
+    @State private var boostStatusTick = Date()
     
     var body: some View {
         NavigationView {
@@ -14,6 +17,9 @@ struct ProfileView: View {
                 VStack(spacing: 16) {
                     // Profile Header Section
                     profileHeaderSection
+
+                    // Profile Boost
+                    profileBoostSection
                     
                     // My Photos Section (moved right after profile photo)
                     myPhotosSection
@@ -73,6 +79,22 @@ struct ProfileView: View {
                 }
             }
         }
+        .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { date in
+            boostStatusTick = date
+        }
+        .overlay(alignment: .bottom) {
+            if let boostToastMessage {
+                Text(boostToastMessage)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.black.opacity(0.82))
+                    .clipShape(Capsule())
+                    .padding(.bottom, 24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
         .sheet(isPresented: $showingEditView) {
             ProfileEditView(isMandatoryCompletion: false)
                 .environmentObject(appState)
@@ -111,6 +133,66 @@ struct ProfileView: View {
     private var profileTitle: String {
         return "profile.my.title".localized
     }
+
+    private var boostStatusText: String {
+        _ = boostStatusTick
+        if ProfileBoostLimit.isBoostActive,
+           let until = ProfileBoostLimit.boostedUntil {
+            return String(
+                format: "profile.boost.status.active".localized,
+                until.formatted(date: .omitted, time: .shortened)
+            )
+        }
+        if !ProfileBoostLimit.isAvailableOnPlan {
+            return "profile.boost.status.unavailable".localized
+        }
+        if let next = ProfileBoostLimit.nextBoostAvailableAt, Date() < next {
+            return String(
+                format: "profile.boost.status.cooldown".localized,
+                next.formatted(date: .abbreviated, time: .omitted)
+            )
+        }
+        if let days = ProfileBoostLimit.cooldownDays {
+            return String(format: "profile.boost.status.ready".localized, days)
+        }
+        return "profile.boost.status.unavailable".localized
+    }
+
+    private func activateBoost() {
+        guard !isActivatingBoost else { return }
+        isActivatingBoost = true
+        Task {
+            defer {
+                Task { @MainActor in
+                    isActivatingBoost = false
+                }
+            }
+            do {
+                _ = try await FirebaseAuthService.shared.activateProfileBoost()
+                await MainActor.run {
+                    boostStatusTick = Date()
+                    showBoostToast("profile.boost.toast.activated".localized)
+                }
+            } catch {
+                await MainActor.run {
+                    showBoostToast(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func showBoostToast(_ message: String) {
+        withAnimation {
+            boostToastMessage = message
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+            withAnimation {
+                if boostToastMessage == message {
+                    boostToastMessage = nil
+                }
+            }
+        }
+    }
     
     // MARK: - Profile Header Section
     private var profileHeaderSection: some View {
@@ -126,6 +208,43 @@ struct ProfileView: View {
                 }
             }
         )
+    }
+
+    // MARK: - Profile Boost
+    private var profileBoostSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("profile.boost.title".localized)
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(.blue)
+
+            Text("profile.boost.description".localized)
+                .font(.subheadline)
+                .foregroundColor(SpectRoomTheme.secondaryText)
+
+            Text(boostStatusText)
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(SpectRoomTheme.text)
+
+            Button(action: activateBoost) {
+                HStack {
+                    if isActivatingBoost {
+                        ProgressView()
+                    }
+                    Text("profile.boost.action".localized)
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!ProfileBoostLimit.canActivate || isActivatingBoost)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(SpectRoomTheme.card)
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
     
     // MARK: - Age Section

@@ -10,7 +10,23 @@ import Foundation
 
 /// Tracks how many discover like/pass actions each account has used today (local day).
 enum DiscoverDailyLimit {
-    static let maxSwipesPerDay = 10
+    private static let planTierDefaultsKey = "billingCurrentPlanTier"
+
+    /// Keep Discover quota in sync when the user changes plan in Account & Billing.
+    static func syncPlanTier(_ tier: PlanTier) {
+        UserDefaults.standard.set(tier.rawValue, forKey: planTierDefaultsKey)
+    }
+
+    static var currentPlanTier: PlanTier {
+        let raw = UserDefaults.standard.string(forKey: planTierDefaultsKey) ?? PlanTier.free.rawValue
+        return PlanTier(rawValue: raw) ?? .free
+    }
+
+    /// Free 10 / Pro 15 / Premium 20 — driven by the active billing plan.
+    static var maxSwipesPerDay: Int {
+        currentPlanTier.dailyDiscoverSwipeLimit
+    }
+
     private static let legacyDateKey = "discoverDailySwipeDate"
     private static let legacyCountKey = "discoverDailySwipeCount"
     
@@ -58,6 +74,52 @@ enum DiscoverDailyLimit {
     private static func secondThoughtsDateStorageKey(for accountKey: String) -> String {
         "discoverSecondThoughtsDate_\(accountKey)"
     }
+
+    private static func undoDateStorageKey(for accountKey: String) -> String {
+        "discoverDailyUndoDate_\(accountKey)"
+    }
+
+    private static func undoCountStorageKey(for accountKey: String) -> String {
+        "discoverDailyUndoCount_\(accountKey)"
+    }
+
+    /// Free 1 / Pro 3 / Premium unlimited — driven by the active billing plan.
+    static var maxUndosPerDay: Int? {
+        currentPlanTier.dailyDiscoverUndoLimit
+    }
+
+    static func currentUndoCount() -> Int {
+        clearLegacyDeviceKeys()
+        guard let accountKey else { return 0 }
+
+        let defaults = UserDefaults.standard
+        let dateKey = undoDateStorageKey(for: accountKey)
+        let countKey = undoCountStorageKey(for: accountKey)
+
+        if defaults.string(forKey: dateKey) != todayKey {
+            defaults.set(todayKey, forKey: dateKey)
+            defaults.set(0, forKey: countKey)
+            return 0
+        }
+        return defaults.integer(forKey: countKey)
+    }
+
+    static var hasReachedUndoLimit: Bool {
+        guard let max = maxUndosPerDay else { return false }
+        return currentUndoCount() >= max
+    }
+
+    @discardableResult
+    static func recordUndo() -> Int {
+        clearLegacyDeviceKeys()
+        guard let accountKey else { return 0 }
+
+        let count = currentUndoCount() + 1
+        let defaults = UserDefaults.standard
+        defaults.set(todayKey, forKey: undoDateStorageKey(for: accountKey))
+        defaults.set(count, forKey: undoCountStorageKey(for: accountKey))
+        return count
+    }
     
     static func currentCount() -> Int {
         clearLegacyDeviceKeys()
@@ -72,6 +134,8 @@ enum DiscoverDailyLimit {
             defaults.set(0, forKey: countKey)
             defaults.set(todayKey, forKey: secondThoughtsDateStorageKey(for: accountKey))
             defaults.set(false, forKey: secondThoughtsStorageKey(for: accountKey))
+            defaults.set(todayKey, forKey: undoDateStorageKey(for: accountKey))
+            defaults.set(0, forKey: undoCountStorageKey(for: accountKey))
             return 0
         }
         return defaults.integer(forKey: countKey)
@@ -137,6 +201,8 @@ enum DiscoverDailyLimit {
         defaults.set(0, forKey: countStorageKey(for: accountKey))
         defaults.set(todayKey, forKey: secondThoughtsDateStorageKey(for: accountKey))
         defaults.set(false, forKey: secondThoughtsStorageKey(for: accountKey))
+        defaults.set(todayKey, forKey: undoDateStorageKey(for: accountKey))
+        defaults.set(0, forKey: undoCountStorageKey(for: accountKey))
     }
 }
 
@@ -169,6 +235,7 @@ struct SearchView: View {
     @State private var isLoading = true
     @State private var showingProfileModal = false
     @State private var selectedProfile: ProfileCard?
+    @State private var showingAccountBilling = false
     @State private var showingNewMessageModal = false
     @State private var matchCheckTimer: Timer?
     @State private var hasCompletedDiscoverLoad = false
@@ -213,6 +280,14 @@ struct SearchView: View {
     /// Locked overlay on the top card (not while reviewing today's passes).
     private var showsDailyLimitOverlay: Bool {
         hasReachedDailyLimit && !isReviewingTodaysPasses
+    }
+
+    private var canUndoLastSwipe: Bool {
+        canUseUndoButton
+            && lastUndoableSwipe != nil
+            && !isUndoingSwipe
+            && !showsDailyLimitOverlay
+            && !DiscoverDailyLimit.hasReachedUndoLimit
     }
     
     private var needsProfileCompletion: Bool {
@@ -293,8 +368,6 @@ struct SearchView: View {
                                         profile: profile,
                                         isTopCard: index == currentCardIndex,
                                         isDailyLimitReached: showsDailyLimitOverlay,
-                                        canUseSecondThoughts: !hasUsedSecondThoughtsToday,
-                                        isLoadingSecondThoughts: isLoadingSecondThoughts,
                                         swipeActionEpoch: swipeActionEpoch,
                                         undoEntrance: index == currentCardIndex ? pendingUndoEntrance : nil,
                                         programmaticSwipeDirection: index == currentCardIndex ? Binding(
@@ -324,8 +397,8 @@ struct SearchView: View {
                                             selectedProfile = profile
                                             showingProfileModal = true
                                         },
-                                        onSecondThoughtsTap: {
-                                            startSecondThoughtsReview()
+                                        onUpgradeTap: {
+                                            showingAccountBilling = true
                                         }
                                     )
                                     .zIndex(Double(3 - (index - currentCardIndex))) // Higher zIndex for cards closer to front
@@ -393,8 +466,8 @@ struct SearchView: View {
                                         .foregroundColor(SpectRoomTheme.text)
                                         .floatingCircleButtonStyle(colorScheme: colorScheme, size: 52)
                                 }
-                                .disabled(!canUseUndoButton || lastUndoableSwipe == nil || isUndoingSwipe || showsDailyLimitOverlay)
-                                .opacity(!canUseUndoButton || lastUndoableSwipe == nil || isUndoingSwipe ? 0.4 : 1)
+                                .disabled(!canUndoLastSwipe)
+                                .opacity(canUndoLastSwipe ? 1 : 0.4)
                                 .accessibilityLabel("search.undo".localized)
                                 
                                 // Like button (right side)
@@ -584,6 +657,9 @@ struct SearchView: View {
                     UserProfileModal(profile: profile)
                         .environmentObject(appState)
                 }
+            }
+            .sheet(isPresented: $showingAccountBilling) {
+                AccountBillingView()
             }
             .sheet(isPresented: $showingNewMessageModal) {
                 if let profile = matchedProfile {
@@ -1064,17 +1140,56 @@ struct SearchView: View {
             sensoryPreferences: user.sensoryPreferences,
             shareSensoryPreferences: user.shareSensoryPreferences,
             energyLevel: user.energyLevel,
-            matchPercentage: matchPercentage
+            matchPercentage: matchPercentage,
+            boostedUntil: user.boostedUntil
         )
     }
     
-    private func sortProfilesByMatchPercentage(_ items: [ProfileCard]) -> [ProfileCard] {
-        items.sorted {
-            if $0.matchPercentage != $1.matchPercentage {
-                return $0.matchPercentage > $1.matchPercentage
-            }
-            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+    /// Ranks Discover cards by match % bands, then lightly mixes within each band.
+    /// Soft boosts: profile-boosted → online → recently active → everyone else (each tier shuffled).
+    private func sortProfilesForDiscoverDeck(_ items: [ProfileCard]) -> [ProfileCard] {
+        guard !items.isEmpty else { return items }
+
+        let bandSize = 10
+        let recentActivityWindow: TimeInterval = 48 * 60 * 60
+        let now = Date()
+
+        func bandIndex(for percentage: Int) -> Int {
+            let clamped = min(100, max(0, percentage))
+            // Keep 100 with the 90–99 band so tiny gaps don't pin one profile forever.
+            return clamped == 100 ? 9 : clamped / bandSize
         }
+
+        func isBoosted(_ profile: ProfileCard) -> Bool {
+            guard let until = profile.boostedUntil else { return false }
+            return until > now
+        }
+
+        let grouped = Dictionary(grouping: items) { bandIndex(for: $0.matchPercentage) }
+
+        var ranked: [ProfileCard] = []
+        ranked.reserveCapacity(items.count)
+
+        for bandKey in grouped.keys.sorted(by: >) {
+            guard let band = grouped[bandKey], !band.isEmpty else { continue }
+
+            let boosted = band.filter(isBoosted).shuffled()
+            let remainder = band.filter { !isBoosted($0) }
+            let online = remainder.filter(\.isOnline).shuffled()
+            let recentlyActive = remainder.filter { profile in
+                !profile.isOnline && now.timeIntervalSince(profile.lastSeen) <= recentActivityWindow
+            }.shuffled()
+            let rest = remainder.filter { profile in
+                !profile.isOnline && now.timeIntervalSince(profile.lastSeen) > recentActivityWindow
+            }.shuffled()
+
+            ranked.append(contentsOf: boosted)
+            ranked.append(contentsOf: online)
+            ranked.append(contentsOf: recentlyActive)
+            ranked.append(contentsOf: rest)
+        }
+
+        return ranked
     }
     
     private func appendProfilesFromPendingQueue() {
@@ -1196,7 +1311,7 @@ struct SearchView: View {
                     collectedProfiles.append(contentsOf: eligibleUsers.map { makeProfileCard(from: $0, currentUser: currentUser) })
                 }
                 
-                let sortedProfiles = sortProfilesByMatchPercentage(collectedProfiles)
+                let sortedProfiles = sortProfilesForDiscoverDeck(collectedProfiles)
                 
                 await MainActor.run {
                     guard loadEpoch == discoverLoadEpoch else {
@@ -1216,7 +1331,7 @@ struct SearchView: View {
                         profiles = Array(sortedProfiles.prefix(DiscoverConstants.profilesPerBatch))
                         pendingDiscoverProfiles = Array(sortedProfiles.dropFirst(DiscoverConstants.profilesPerBatch))
                         hasMoreUsersToLoad = hasMoreRemoteUsers || !pendingDiscoverProfiles.isEmpty
-                        print("✅ SearchView: Loaded initial \(profiles.count) profiles, \(pendingDiscoverProfiles.count) queued by match %")
+                        print("✅ SearchView: Loaded initial \(profiles.count) profiles, \(pendingDiscoverProfiles.count) queued by ranked match bands")
                         markDiscoverLoadCompleted()
                     }
                     
@@ -1280,7 +1395,7 @@ struct SearchView: View {
         canUseUndoButton = false
         let work = DispatchWorkItem {
             // Only arm undo once the fly-off has finished and the next card is showing.
-            if lastUndoableSwipe != nil {
+            if lastUndoableSwipe != nil, !DiscoverDailyLimit.hasReachedUndoLimit {
                 canUseUndoButton = true
             }
         }
@@ -1422,6 +1537,7 @@ struct SearchView: View {
     private func undoLastSwipeIfPossible() {
         guard canUseUndoButton else { return }
         guard let undo = lastUndoableSwipe, !isUndoingSwipe, !showsDailyLimitOverlay else { return }
+        guard !DiscoverDailyLimit.hasReachedUndoLimit else { return }
         
         isUndoingSwipe = true
         canUseUndoButton = false
@@ -1434,6 +1550,8 @@ struct SearchView: View {
         
         let feedback = UINotificationFeedbackGenerator()
         feedback.notificationOccurred(.warning)
+        
+        DiscoverDailyLimit.recordUndo()
         
         if undo.countedTowardDailyLimit {
             dailySwipeCount = DiscoverDailyLimit.undoLastSwipe()
@@ -1526,7 +1644,7 @@ struct SearchView: View {
                 }
                 
                 let users = try await FirebaseAuthService.shared.fetchUsers(byIds: passedIds)
-                let cards = sortProfilesByMatchPercentage(
+                let cards = sortProfilesForDiscoverDeck(
                     users.map { makeProfileCard(from: $0, currentUser: currentUser) }
                 )
                 
@@ -1746,8 +1864,6 @@ struct SwipeableProfileCard: View {
     let profile: ProfileCard
     let isTopCard: Bool
     var isDailyLimitReached: Bool = false
-    var canUseSecondThoughts: Bool = false
-    var isLoadingSecondThoughts: Bool = false
     var swipeActionEpoch: Int = 0
     var undoEntrance: UndoCardEntrance? = nil
     @Binding var programmaticSwipeDirection: String?
@@ -1756,7 +1872,7 @@ struct SwipeableProfileCard: View {
     var onSwipeCommitted: ((String) -> Void)? = nil
     var onUndoEntranceConsumed: (() -> Void)? = nil
     let onTap: () -> Void
-    var onSecondThoughtsTap: (() -> Void)? = nil
+    var onUpgradeTap: (() -> Void)? = nil
     
     private let cardWidth = UIScreen.main.bounds.width - 60
     private let cardHeight: CGFloat = 500
@@ -1766,6 +1882,17 @@ struct SwipeableProfileCard: View {
     private func firstName(from fullName: String) -> String {
         let components = fullName.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
         return components.first.map(String.init) ?? fullName
+    }
+
+    private var dailyLimitTitle: String {
+        String(
+            format: "search.daily.limit.reached".localized,
+            DiscoverDailyLimit.maxSwipesPerDay
+        )
+    }
+
+    private var showsUpgradePrompt: Bool {
+        DiscoverDailyLimit.currentPlanTier != .premium
     }
     
     @State private var dragOffset = CGSize.zero
@@ -1828,35 +1955,44 @@ struct SwipeableProfileCard: View {
                 
                 // Limit message only on the front card; pile tips stay blurred/dimmed.
                 if isTopCard {
-                    VStack(spacing: 18) {
-                        Text("search.daily.limit.reached".localized)
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundColor(.white)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 28)
-                            .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 2)
-                        
-                        if canUseSecondThoughts {
-                            Button(action: {
-                                onSecondThoughtsTap?()
-                            }) {
-                                Group {
-                                    if isLoadingSecondThoughts {
-                                        ProgressView()
-                                            .tint(.white)
-                                    } else {
-                                        Text("search.daily.limit.second.thoughts".localized)
-                                            .font(.system(size: 15, weight: .semibold))
-                                            .multilineTextAlignment(.center)
-                                    }
-                                }
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 24)
+
+                        VStack(spacing: 14) {
+                            Text(dailyLimitTitle)
+                                .font(.system(size: 22, weight: .bold))
                                 .foregroundColor(.white)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 28)
+                                .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 2)
+
+                            if showsUpgradePrompt {
+                                Button(action: { onUpgradeTap?() }) {
+                                    (
+                                        Text("search.daily.limit.upgrade.prefix".localized)
+                                            .foregroundColor(Color(red: 0.45, green: 0.78, blue: 1.0))
+                                        + Text("search.daily.limit.upgrade.suffix".localized)
+                                            .foregroundColor(.white)
+                                    )
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .multilineTextAlignment(.center)
+                                    .shadow(color: .black.opacity(0.55), radius: 3, x: 0, y: 1)
+                                    .shadow(color: Color(red: 0.45, green: 0.78, blue: 1.0).opacity(0.35), radius: 6, x: 0, y: 0)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(onUpgradeTap == nil)
                                 .padding(.horizontal, 24)
+                            } else {
+                                Text("search.daily.limit.premium.tomorrow".localized)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 24)
                             }
-                            .disabled(isLoadingSecondThoughts || onSecondThoughtsTap == nil)
-                            .buttonStyle(.plain)
                         }
-                        
+
+                        Spacer(minLength: 24)
+
                         Button(action: {
                             showingDailyLimitWhy = true
                         }) {
@@ -1864,10 +2000,13 @@ struct SwipeableProfileCard: View {
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.white.opacity(0.92))
                                 .underline()
+                                .multilineTextAlignment(.center)
                         }
                         .buttonStyle(.plain)
-                        .padding(.top, canUseSecondThoughts ? 2 : 0)
+                        .padding(.bottom, 28)
+                        .padding(.horizontal, 24)
                     }
+                    .frame(width: cardWidth, height: cardHeight)
                 }
             }
             
@@ -2856,6 +2995,7 @@ struct UserProfileModal: View {
                 MatchDetailsOverlay(
                     firstName: firstName(from: displayProfile.name),
                     breakdown: resolvedMatchBreakdown,
+                    showsFullBreakdown: DiscoverDailyLimit.currentPlanTier.showsFullMatchBreakdown,
                     localizedInterests: (resolvedMatchBreakdown?.commonInterests ?? []).map { localizedInterest($0) },
                     localizedLookingFor: {
                         let common = resolvedMatchBreakdown?.commonLookingFor ?? []
@@ -2946,7 +3086,8 @@ struct UserProfileModal: View {
                 sensoryPreferences: refreshed.sensoryPreferences,
                 shareSensoryPreferences: refreshed.shareSensoryPreferences,
                 energyLevel: refreshed.energyLevel,
-                matchPercentage: matchPercentage
+                matchPercentage: matchPercentage,
+                boostedUntil: refreshed.boostedUntil
             )
             
             await MainActor.run {
@@ -3915,6 +4056,7 @@ private struct ReportThankYouOverlay: View {
 private struct MatchDetailsOverlay: View {
     let firstName: String
     let breakdown: ProfileCard.MatchBreakdown?
+    let showsFullBreakdown: Bool
     let localizedInterests: [String]
     let localizedLookingFor: String
     let localizedSensory: String
@@ -3947,41 +4089,43 @@ private struct MatchDetailsOverlay: View {
                 Text(String(format: "search.match.details.percent".localized, matchPercentage))
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(matchColor)
-                
-                VStack(alignment: .leading, spacing: 12) {
-                    matchDetailRow(
-                        title: "search.match.details.age".localized,
-                        value: ageDetailText
-                    )
-                    if !localizedLookingFor.isEmpty {
+
+                if showsFullBreakdown {
+                    VStack(alignment: .leading, spacing: 12) {
                         matchDetailRow(
-                            title: "search.match.details.looking.for".localized,
-                            value: localizedLookingFor
+                            title: "search.match.details.age".localized,
+                            value: ageDetailText
                         )
-                    }
-                    if !localizedInterests.isEmpty {
-                        matchDetailRow(
-                            title: "search.match.details.interests".localized,
-                            value: localizedInterests.joined(separator: ", ")
-                        )
-                    }
-                    if !localizedSensory.isEmpty {
-                        matchDetailRow(
-                            title: "search.match.details.sensory".localized,
-                            value: localizedSensory
-                        )
-                    }
-                    if !localizedLifestyle.isEmpty {
-                        matchDetailRow(
-                            title: "search.match.details.lifestyle".localized,
-                            value: localizedLifestyle
-                        )
-                    }
-                    if !localizedIdealFirstDate.isEmpty {
-                        matchDetailRow(
-                            title: "search.match.details.ideal.first.date".localized,
-                            value: localizedIdealFirstDate
-                        )
+                        if !localizedLookingFor.isEmpty {
+                            matchDetailRow(
+                                title: "search.match.details.looking.for".localized,
+                                value: localizedLookingFor
+                            )
+                        }
+                        if !localizedInterests.isEmpty {
+                            matchDetailRow(
+                                title: "search.match.details.interests".localized,
+                                value: localizedInterests.joined(separator: ", ")
+                            )
+                        }
+                        if !localizedSensory.isEmpty {
+                            matchDetailRow(
+                                title: "search.match.details.sensory".localized,
+                                value: localizedSensory
+                            )
+                        }
+                        if !localizedLifestyle.isEmpty {
+                            matchDetailRow(
+                                title: "search.match.details.lifestyle".localized,
+                                value: localizedLifestyle
+                            )
+                        }
+                        if !localizedIdealFirstDate.isEmpty {
+                            matchDetailRow(
+                                title: "search.match.details.ideal.first.date".localized,
+                                value: localizedIdealFirstDate
+                            )
+                        }
                     }
                 }
                 

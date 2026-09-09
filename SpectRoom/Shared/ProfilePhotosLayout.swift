@@ -37,6 +37,7 @@ struct ProfileMainPhotoCard: View {
     let localImage: UIImage?
     var placeholderSystemName: String = "person.fill"
     var showsCameraBadge: Bool = false
+    var usesDashedAddPlaceholder: Bool = false
     var onTap: (() -> Void)?
     
     init(
@@ -44,27 +45,31 @@ struct ProfileMainPhotoCard: View {
         localImage: UIImage? = nil,
         placeholderSystemName: String = "person.fill",
         showsCameraBadge: Bool = false,
+        usesDashedAddPlaceholder: Bool = false,
         onTap: (() -> Void)? = nil
     ) {
         self.imageURL = imageURL
         self.localImage = localImage
         self.placeholderSystemName = placeholderSystemName
         self.showsCameraBadge = showsCameraBadge
+        self.usesDashedAddPlaceholder = usesDashedAddPlaceholder
         self.onTap = onTap
+    }
+    
+    private var hasPhoto: Bool {
+        localImage != nil || !(imageURL ?? "").isEmpty
     }
     
     var body: some View {
         Button(action: { onTap?() }) {
             ZStack(alignment: .bottomTrailing) {
-                // Clear frame first so scaledToFill images can't expand the parent
-                // (that was collapsing horizontal padding on the whole profile scroll).
                 Color.clear
                     .frame(maxWidth: .infinity)
                     .frame(height: ProfilePhotoStyle.mainPhotoHeight)
                     .overlay { photoContent }
                     .clipped()
                 
-                if showsCameraBadge {
+                if showsCameraBadge && hasPhoto {
                     Image(systemName: "camera.circle.fill")
                         .font(.system(size: 34))
                         .symbolRenderingMode(.palette)
@@ -75,7 +80,7 @@ struct ProfileMainPhotoCard: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: ProfilePhotoStyle.cardCorner, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: ProfilePhotoStyle.cardCorner, style: .continuous))
-            .shadow(color: ProfilePhotoStyle.cardShadow, radius: 16, x: 0, y: 8)
+            .shadow(color: hasPhoto || !usesDashedAddPlaceholder ? ProfilePhotoStyle.cardShadow : .clear, radius: 16, x: 0, y: 8)
         }
         .buttonStyle(.plain)
         .disabled(onTap == nil)
@@ -101,20 +106,78 @@ struct ProfileMainPhotoCard: View {
     }
     
     private var placeholder: some View {
-        Rectangle()
-            .fill(Color.gray.opacity(0.18))
-            .overlay(
-                VStack(spacing: 8) {
-                    Image(systemName: placeholderSystemName)
-                        .font(.system(size: 44, weight: .medium))
-                        .foregroundColor(SpectRoomTheme.secondaryText)
-                    if showsCameraBadge {
-                        Text("profile.edit.add.photo".localized)
-                            .font(.subheadline)
-                            .foregroundColor(SpectRoomTheme.secondaryText)
+        Group {
+            if usesDashedAddPlaceholder {
+                SpectRoomTheme.card
+                    .overlay {
+                        ProfileAddPhotoGlyph()
                     }
-                }
+            } else {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.18))
+                    .overlay(
+                        Image(systemName: placeholderSystemName)
+                            .font(.system(size: 44, weight: .medium))
+                            .foregroundColor(SpectRoomTheme.secondaryText)
+                    )
+            }
+        }
+    }
+}
+
+/// Dashed “+ Add” mark shared by the large profile frame and gallery tiles.
+struct ProfileAddPhotoGlyph: View {
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "plus")
+                .font(.system(size: 22, weight: .semibold))
+            Text("profile.edit.add".localized)
+                .font(.caption)
+                .fontWeight(.semibold)
+        }
+        .foregroundColor(.blue)
+        .frame(width: ProfilePhotoStyle.galleryPhotoSize, height: ProfilePhotoStyle.galleryPhotoSize)
+        .background(
+            RoundedRectangle(cornerRadius: ProfilePhotoStyle.photoCorner, style: .continuous)
+                .fill(SpectRoomTheme.card)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ProfilePhotoStyle.photoCorner, style: .continuous)
+                .strokeBorder(Color.blue.opacity(0.25), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+        )
+        .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 3)
+    }
+}
+
+/// Dashed “+ Add” tile used by gallery empty slots.
+struct ProfileAddPhotoTile: View {
+    var isEnabled: Bool = true
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: "plus")
+                    .font(.system(size: 22, weight: .semibold))
+                Text("profile.edit.add".localized)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+            }
+            .foregroundColor(.blue)
+            .frame(maxWidth: .infinity)
+            .frame(height: ProfilePhotoStyle.galleryPhotoSize)
+            .background(
+                RoundedRectangle(cornerRadius: ProfilePhotoStyle.photoCorner, style: .continuous)
+                    .fill(SpectRoomTheme.card)
             )
+            .overlay(
+                RoundedRectangle(cornerRadius: ProfilePhotoStyle.photoCorner, style: .continuous)
+                    .strokeBorder(Color.blue.opacity(0.25), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1.0 : 0.45)
     }
 }
 
@@ -224,29 +287,7 @@ struct ProfileGalleryPhotosCard: View {
             }
             
             if let onAdd {
-                Button(action: onAdd) {
-                    VStack(spacing: 8) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 22, weight: .semibold))
-                        Text("profile.edit.add".localized)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                    }
-                    .foregroundColor(.blue)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: ProfilePhotoStyle.galleryPhotoSize)
-                    .background(
-                        RoundedRectangle(cornerRadius: ProfilePhotoStyle.photoCorner, style: .continuous)
-                            .fill(SpectRoomTheme.card)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: ProfilePhotoStyle.photoCorner, style: .continuous)
-                            .strokeBorder(Color.blue.opacity(0.25), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(!canAddMore)
-                .opacity(canAddMore ? 1.0 : 0.45)
+                ProfileAddPhotoTile(isEnabled: canAddMore, action: onAdd)
             }
         }
     }

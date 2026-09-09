@@ -13,10 +13,13 @@ struct MessageComposerBar: View {
     var isDisabled: Bool
     var isSending: Bool
     var isRecording: Bool
+    /// When true, paperclip / mic are blocked (daily media quota).
+    var isMediaDisabled: Bool = false
     var onSend: () -> Void
     var onCamera: () -> Void
     var onRecordingPressChanged: (Bool) -> Void
     var onShortMicTap: () -> Void = {}
+    var onMediaLimitTap: () -> Void = {}
     
     @State private var didArmLongPressRecording = false
     @State private var fieldHeight: CGFloat = ComposerTextMetrics.singleLineHeight
@@ -26,6 +29,10 @@ struct MessageComposerBar: View {
     
     private var hasText: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var mediaControlsDisabled: Bool {
+        isDisabled || isMediaDisabled
     }
     
     var body: some View {
@@ -70,43 +77,62 @@ struct MessageComposerBar: View {
                 .buttonStyle(.plain)
                 .disabled(isSending || isDisabled)
             } else {
-                Button(action: onCamera) {
+                Button(action: {
+                    if isMediaDisabled {
+                        onMediaLimitTap()
+                    } else {
+                        onCamera()
+                    }
+                }) {
                     Image(systemName: "paperclip")
                         .font(.system(size: 20, weight: .light))
                         .foregroundColor(SpectRoomTheme.text)
                         .frame(width: 34, height: 34)
+                        .opacity(mediaControlsDisabled && !isMediaDisabled ? 0.5 : (isMediaDisabled ? 0.45 : 1))
                 }
-                .disabled(isDisabled)
+                .disabled(isDisabled && !isMediaDisabled)
                 
-                Image(systemName: isRecording ? "mic.fill" : "mic")
-                    .font(.system(size: 20, weight: isRecording ? .regular : .light))
-                    .foregroundColor(isRecording ? .red : .primary)
-                    .frame(width: 34, height: 34)
-                    .contentShape(Rectangle())
-                    .overlay(
-                        Circle()
-                            .stroke(isRecording ? Color.red.opacity(0.4) : Color.clear, lineWidth: 2)
-                    )
-                    .opacity(isDisabled ? 0.5 : 1)
-                    .allowsHitTesting(!isDisabled)
-                    .onLongPressGesture(
-                        minimumDuration: micLongPressDuration,
-                        maximumDistance: 60,
-                        pressing: { pressing in
-                            if pressing {
-                                didArmLongPressRecording = false
-                            } else if didArmLongPressRecording {
-                                // Recording continues in the bottom sheet - stop from there.
-                                didArmLongPressRecording = false
-                            } else {
-                                onShortMicTap()
+                if isMediaDisabled {
+                    Button(action: onMediaLimitTap) {
+                        Image(systemName: "mic")
+                            .font(.system(size: 20, weight: .light))
+                            .foregroundColor(.primary)
+                            .frame(width: 34, height: 34)
+                            .opacity(0.45)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDisabled)
+                } else {
+                    Image(systemName: isRecording ? "mic.fill" : "mic")
+                        .font(.system(size: 20, weight: isRecording ? .regular : .light))
+                        .foregroundColor(isRecording ? .red : .primary)
+                        .frame(width: 34, height: 34)
+                        .contentShape(Rectangle())
+                        .overlay(
+                            Circle()
+                                .stroke(isRecording ? Color.red.opacity(0.4) : Color.clear, lineWidth: 2)
+                        )
+                        .opacity(isDisabled ? 0.5 : 1)
+                        .allowsHitTesting(!isDisabled)
+                        .onLongPressGesture(
+                            minimumDuration: micLongPressDuration,
+                            maximumDistance: 60,
+                            pressing: { pressing in
+                                if pressing {
+                                    didArmLongPressRecording = false
+                                } else if didArmLongPressRecording {
+                                    // Recording continues in the bottom sheet - stop from there.
+                                    didArmLongPressRecording = false
+                                } else {
+                                    onShortMicTap()
+                                }
+                            },
+                            perform: {
+                                didArmLongPressRecording = true
+                                onRecordingPressChanged(true)
                             }
-                        },
-                        perform: {
-                            didArmLongPressRecording = true
-                            onRecordingPressChanged(true)
-                        }
-                    )
+                        )
+                }
             }
         }
         .padding(.horizontal, 10)

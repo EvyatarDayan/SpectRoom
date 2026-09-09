@@ -18,8 +18,15 @@ struct Language: Identifiable, Hashable {
     static let swedish = Language(id: "sv", code: "sv", name: "Swedish", flag: "🇸🇪")
     static let french = Language(id: "fr", code: "fr", name: "French", flag: "🇫🇷")
     static let german = Language(id: "de", code: "de", name: "German", flag: "🇩🇪")
-    
-    static let allLanguages = [english, spanish, swedish, french, german]
+    static let danish = Language(id: "da", code: "da", name: "Danish", flag: "🇩🇰")
+    static let norwegian = Language(id: "nb", code: "nb", name: "Norwegian", flag: "🇳🇴")
+    static let finnish = Language(id: "fi", code: "fi", name: "Finnish", flag: "🇫🇮")
+    static let icelandic = Language(id: "is", code: "is", name: "Icelandic", flag: "🇮🇸")
+
+    static let allLanguages = [
+        english, spanish, swedish, french, german,
+        danish, norwegian, finnish, icelandic
+    ]
 }
 
 struct LanguageSelectionModal: View {

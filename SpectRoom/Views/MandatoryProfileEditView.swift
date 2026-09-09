@@ -516,9 +516,15 @@ struct MandatoryProfileEditView: View {
         
         if let user = appState.currentUser {
             name = user.name
-            // Convert age to date of birth (approximate)
-            let calendar = Calendar.current
-            dateOfBirth = calendar.date(byAdding: .year, value: -user.age, to: Date()) ?? Date()
+            if let savedDateOfBirth = user.dateOfBirth {
+                dateOfBirth = savedDateOfBirth
+            } else if user.age >= 18 {
+                let calendar = Calendar.current
+                dateOfBirth = calendar.date(byAdding: .year, value: -user.age, to: Date())
+                    ?? (Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date())
+            } else {
+                dateOfBirth = Calendar.current.date(byAdding: .year, value: -18, to: Date()) ?? Date()
+            }
             bio = user.bio
 
             // Load photos from app state (app state is source of truth)

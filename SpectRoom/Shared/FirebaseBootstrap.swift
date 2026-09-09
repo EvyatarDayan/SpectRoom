@@ -73,7 +73,8 @@ enum FirebaseBootstrap {
         return true
     }
 
-    /// Simulator only: skip silent APNs / reCAPTCHA so Console “Phone numbers for testing” work.
+    /// Simulator only: skip silent APNs / reCAPTCHA so Console “Phone numbers for testing” work
+    /// with MFA (requires FirebaseAuth ≥ 12.18.0 — older SDKs broke MFA under this flag).
     /// Never enable this on a real device with a live number — Firebase returns
     /// “The request does not contain a client identifier.” (MISSING_CLIENT_IDENTIFIER).
     static func applyDebugPhoneAuthSettings() {

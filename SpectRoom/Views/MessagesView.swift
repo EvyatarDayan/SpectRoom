@@ -906,6 +906,9 @@ struct ConversationRow: View {
     }
     
     private var otherUserName: String {
+        if SpectRoomSystemAccount.isSystemAccount(otherUserId) {
+            return SpectRoomSystemAccount.displayName
+        }
         if conversation.senderName == "You" {
             return conversation.recipientName
         } else {
@@ -916,9 +919,13 @@ struct ConversationRow: View {
     private var otherUserId: String {
         conversation.senderName == "You" ? conversation.recipientId : conversation.senderId
     }
+
+    private var isSpectRoomSystemConversation: Bool {
+        SpectRoomSystemAccount.isSystemAccount(otherUserId)
+    }
     
     private var isBlockedConversation: Bool {
-        appState.isMessagingBlocked(with: otherUserId)
+        !isSpectRoomSystemConversation && appState.isMessagingBlocked(with: otherUserId)
     }
     
     private var unreadCount: Int {
@@ -927,7 +934,10 @@ struct ConversationRow: View {
     
     @ViewBuilder
     private var profilePhoto: some View {
-        if let profilePhotoURL = otherUserProfilePhotoURL, !profilePhotoURL.isEmpty {
+        if isSpectRoomSystemConversation {
+            SpectRoomSystemAvatar(size: 44)
+                .frame(width: 50, height: 50)
+        } else if let profilePhotoURL = otherUserProfilePhotoURL, !profilePhotoURL.isEmpty {
             Circle()
                 .fill(Color.gray.opacity(0.1))
                 .frame(width: 50, height: 50)
@@ -999,6 +1009,11 @@ struct ConversationRow: View {
     }
 }
 
+private enum PendingMediaComposerAction {
+    case photo
+    case voice
+}
+
 struct MessageConversationModal: View {
     let message: MessageDisplay
     @Binding var conversationMessages: [MessageDisplay]
@@ -1034,6 +1049,8 @@ struct MessageConversationModal: View {
     @State private var hasMarkedAsRead = false
     @State private var showingImagePicker = false
     @State private var showingPhotoShareWarning = false
+    /// What to resume after dismissing the photo-safety reminder.
+    @State private var pendingMediaActionAfterWarning: PendingMediaComposerAction? = nil
     @State private var selectedImage: UIImage?
     @State private var showingImageReadyPreview = false
     @State private var isUploadingImage = false
@@ -1051,6 +1068,9 @@ struct MessageConversationModal: View {
     @State private var isSendingVoice = false
     @State private var showingMicrophonePermissionAlert = false
     @State private var showingMicLongPressTip = false
+    @State private var showingMediaLimitAlert = false
+    @State private var showingAccountBilling = false
+    @State private var mediaSendCount = MediaDailyLimit.currentCount()
     @State private var loadError = false
     @State private var showingPreMessageOptions = false
     @State private var currentTime: TimeInterval = 0
@@ -1097,6 +1117,9 @@ struct MessageConversationModal: View {
     }
     
     var conversationTitle: String {
+        if isSpectRoomSystemConversation {
+            return SpectRoomSystemAccount.displayName
+        }
         if let resolvedPartnerName, !isUnknownChatName(resolvedPartnerName) {
             return resolvedPartnerName
         }
@@ -1105,6 +1128,15 @@ struct MessageConversationModal: View {
     
     private var otherUserId: String {
         message.senderName == "You" ? message.recipientId : message.senderId
+    }
+
+    private var isSpectRoomSystemConversation: Bool {
+        SpectRoomSystemAccount.isSystemAccount(otherUserId)
+    }
+
+    /// Composer is hidden for blocked partners and official SpectRoom messages.
+    private var canReplyInConversation: Bool {
+        !isBlockedByRecipient && !isSpectRoomSystemConversation
     }
     
     private var otherUserName: String {
@@ -1146,25 +1178,29 @@ struct MessageConversationModal: View {
     
     @ViewBuilder
     private var chatHeaderAvatar: some View {
-        let photoURL = otherUserProfilePhotoURL
-            ?? (message.senderName == "You" ? message.recipientProfilePhotoURL : message.senderProfilePhotoURL)
-        
-        Group {
-            if let photoURL, !photoURL.isEmpty {
-                CachedAsyncImage(url: URL(string: photoURL)) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
-                } placeholder: {
+        if isSpectRoomSystemConversation {
+            SpectRoomSystemAvatar(size: 36)
+        } else {
+            let photoURL = otherUserProfilePhotoURL
+                ?? (message.senderName == "You" ? message.recipientProfilePhotoURL : message.senderProfilePhotoURL)
+            
+            Group {
+                if let photoURL, !photoURL.isEmpty {
+                    CachedAsyncImage(url: URL(string: photoURL)) { image in
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    } placeholder: {
+                        chatHeaderAvatarPlaceholder
+                    }
+                } else {
                     chatHeaderAvatarPlaceholder
                 }
-            } else {
-                chatHeaderAvatarPlaceholder
             }
+            .frame(width: 36, height: 36)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 1))
         }
-        .frame(width: 36, height: 36)
-        .clipShape(Circle())
-        .overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 1))
     }
     
     private var chatHeaderAvatarPlaceholder: some View {
@@ -1221,11 +1257,13 @@ struct MessageConversationModal: View {
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                                 
-                                Text("messages.tap.to.see.profile".localized)
-                                    .font(.caption)
-                                    .foregroundColor(SpectRoomTheme.secondaryText)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
+                                if !isSpectRoomSystemConversation {
+                                    Text("messages.tap.to.see.profile".localized)
+                                        .font(.caption)
+                                        .foregroundColor(SpectRoomTheme.secondaryText)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                }
                             }
                         }
                         // Keep the tappable header compact so trailing actions still fit.
@@ -1234,21 +1272,24 @@ struct MessageConversationModal: View {
                     }
                     // Avoid the default press fade that makes the subtitle look like it vanishes.
                     .buttonStyle(ChatHeaderButtonStyle())
+                    .disabled(isSpectRoomSystemConversation)
                 }
                 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showingPreMessageOptions = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "text.bubble")
-                            Text("matches.pre.message.button.short".localized)
-                                .font(.subheadline)
-                                .lineLimit(1)
+                    if !isSpectRoomSystemConversation {
+                        Button {
+                            showingPreMessageOptions = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "text.bubble")
+                                Text("matches.pre.message.button.short".localized)
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                            }
                         }
+                        .disabled(isBlockedByRecipient)
+                        .opacity(isBlockedByRecipient ? 0.5 : 1)
                     }
-                    .disabled(isBlockedByRecipient)
-                    .opacity(isBlockedByRecipient ? 0.5 : 1)
                 }
             }
         }
@@ -1320,16 +1361,39 @@ struct MessageConversationModal: View {
                 )
             } else if showingPhotoShareWarning {
                 PhotoShareWarningOverlay(
-                    onContinue: { dontShowAgain in
-                        PhotoShareWarningOverlay.setDontShowAgain(dontShowAgain)
+                    onContinue: {
+                        let action = pendingMediaActionAfterWarning
+                        pendingMediaActionAfterWarning = nil
                         showingPhotoShareWarning = false
-                        showingImagePicker = true
+                        switch action {
+                        case .photo:
+                            showingImagePicker = true
+                        case .voice:
+                            startRecordingAfterWarning()
+                        case .none:
+                            break
+                        }
                     },
                     onCancel: {
+                        pendingMediaActionAfterWarning = nil
                         showingPhotoShareWarning = false
                     }
                 )
+            } else if showingMediaLimitAlert {
+                MediaDailyLimitOverlay(
+                    message: MediaDailyLimit.limitMessage,
+                    onGotIt: {
+                        showingMediaLimitAlert = false
+                    },
+                    onPlans: {
+                        showingMediaLimitAlert = false
+                        showingAccountBilling = true
+                    }
+                )
             }
+        }
+        .sheet(isPresented: $showingAccountBilling) {
+            AccountBillingView()
         }
         .onAppear {
             print("💬 MessageConversationModal appeared for: \(conversationTitle)")
@@ -1342,6 +1406,7 @@ struct MessageConversationModal: View {
             print("💬 Set currentlyOpenConversationSenderId to: \(otherUserId) (from modal onAppear)")
             
             expandedLongMessageIds.removeAll()
+            mediaSendCount = MediaDailyLimit.currentCount()
             
             Task {
                 await updateConversationOpenStateInFirestore(userId: otherUserId, isOpen: true)
@@ -1391,6 +1456,7 @@ struct MessageConversationModal: View {
                 ImagePreviewReadySheet(
                     image: image,
                     isSending: isUploadingImage,
+                    remainingMediaCount: max(0, MediaDailyLimit.maxMediaPerDay - mediaSendCount),
                     onSend: {
                         showingImageReadyPreview = false
                         sendImageMessage(image: image)
@@ -1398,9 +1464,16 @@ struct MessageConversationModal: View {
                     onDiscard: {
                         selectedImage = nil
                         showingImageReadyPreview = false
+                    },
+                    onUpgrade: {
+                        selectedImage = nil
+                        showingImageReadyPreview = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            showingAccountBilling = true
+                        }
                     }
                 )
-                .presentationDetents([.height(230)])
+                .presentationDetents([.height(268)])
                 .presentationDragIndicator(.visible)
                 .interactiveDismissDisabled(isUploadingImage)
                 .presentationBackground(.regularMaterial)
@@ -1477,14 +1550,21 @@ struct MessageConversationModal: View {
                     audioURL: audioRecordingURL,
                     duration: recordingDuration,
                     isSending: isSendingVoice,
+                    remainingMediaCount: max(0, MediaDailyLimit.maxMediaPerDay - mediaSendCount),
                     onSend: {
                         sendVoiceMessage(audioURL: audioRecordingURL, duration: recordingDuration)
                     },
                     onDiscard: {
                         discardRecording()
+                    },
+                    onUpgrade: {
+                        discardRecording()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            showingAccountBilling = true
+                        }
                     }
                 )
-                .presentationDetents([.height(230)])
+                .presentationDetents([.height(268)])
                 .presentationDragIndicator(.visible)
                 .interactiveDismissDisabled(isSendingVoice)
                 .presentationBackground(.regularMaterial)
@@ -1496,7 +1576,7 @@ struct MessageConversationModal: View {
         conversationMessagesArea
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // Keep the composer mounted so opening does not jump when loading finishes.
-                if !isBlockedByRecipient {
+                if canReplyInConversation {
                     MessageComposerBar(
                         text: $replyText,
                         isFocused: $isTextFieldFocused,
@@ -1504,6 +1584,7 @@ struct MessageConversationModal: View {
                         isDisabled: isBlockedByRecipient || isLoadingMessages,
                         isSending: isSendingReply,
                         isRecording: isRecording,
+                        isMediaDisabled: mediaSendCount >= MediaDailyLimit.maxMediaPerDay,
                         onSend: { sendReply() },
                         onCamera: { requestPhotoShare() },
                         onRecordingPressChanged: { pressing in
@@ -1513,6 +1594,9 @@ struct MessageConversationModal: View {
                         },
                         onShortMicTap: {
                             showingMicLongPressTip = true
+                        },
+                        onMediaLimitTap: {
+                            showingMediaLimitAlert = true
                         }
                     )
                     .opacity(isLoadingMessages ? 0.55 : 1)
@@ -1521,6 +1605,8 @@ struct MessageConversationModal: View {
                         Color(.systemGray2)
                             .ignoresSafeArea(edges: .bottom)
                     }
+                } else if isSpectRoomSystemConversation {
+                    spectRoomNoReplyBar
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { _ in
@@ -1535,6 +1621,21 @@ struct MessageConversationModal: View {
             }
     }
     
+    private var spectRoomNoReplyBar: some View {
+        Text("messages.spectroom.no.reply".localized)
+            .font(.subheadline)
+            .foregroundColor(SpectRoomTheme.secondaryText)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .background {
+                Color(.systemGray2)
+                    .ignoresSafeArea(edges: .bottom)
+            }
+            .accessibilityLabel("messages.spectroom.no.reply".localized)
+    }
+
     private var conversationMessagesArea: some View {
         Group {
             if isLoadingMessages && conversationMessages.isEmpty {
@@ -1754,6 +1855,8 @@ struct MessageConversationModal: View {
     }
     
     private func openOtherUserProfile() {
+        guard !isSpectRoomSystemConversation else { return }
+
         // Prefer already-cached profile so the header never enters a loading state.
         if otherUserProfile != nil {
             showingOtherUserProfile = true
@@ -2350,10 +2453,15 @@ struct MessageConversationModal: View {
     }
     
     private func requestPhotoShare() {
-        guard !isBlockedByRecipient else { return }
+        guard canReplyInConversation else { return }
+        guard MediaDailyLimit.canSend else {
+            showingMediaLimitAlert = true
+            return
+        }
         isTextFieldFocused = false
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        if PhotoShareWarningOverlay.shouldShowWarning {
+        if PhotoShareWarningOverlay.registerMediaTapAndShouldShow() {
+            pendingMediaActionAfterWarning = .photo
             showingPhotoShareWarning = true
         } else {
             showingImagePicker = true
@@ -2361,7 +2469,7 @@ struct MessageConversationModal: View {
     }
     
     private func sendReply() {
-        guard !isBlockedByRecipient else { return }
+        guard canReplyInConversation else { return }
         guard !isSendingReply else { return }
         let trimmedContent = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedContent.isEmpty else { return }
@@ -2415,7 +2523,12 @@ struct MessageConversationModal: View {
     }
     
     private func sendImageMessage(image: UIImage) {
-        guard !isBlockedByRecipient else { return }
+        guard canReplyInConversation else { return }
+        guard MediaDailyLimit.canSend else {
+            selectedImage = nil
+            showingMediaLimitAlert = true
+            return
+        }
         guard let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid else {
             print("❌ Cannot send image - user not authenticated")
             return
@@ -2484,6 +2597,7 @@ struct MessageConversationModal: View {
                         updateConversationListAfterOutgoingMessage(content: imageURL, type: .image, voiceDuration: nil)
                     }
                     isUploadingImage = false
+                    mediaSendCount = MediaDailyLimit.currentCount()
                     refreshMessagesOnly()
                 }
                 
@@ -2496,13 +2610,34 @@ struct MessageConversationModal: View {
                     cachedMessagesPool.removeAll { $0.content == pendingContent }
                     localImagePreviews.removeValue(forKey: pendingContent)
                     persistConversationCache()
+                    if error is MediaDailyLimitError {
+                        showingMediaLimitAlert = true
+                    }
                 }
             }
         }
     }
     
     private func startRecording() {
-        guard !isBlockedByRecipient else { return }
+        guard canReplyInConversation else { return }
+        guard MediaDailyLimit.canSend else {
+            showingMediaLimitAlert = true
+            return
+        }
+        if PhotoShareWarningOverlay.registerMediaTapAndShouldShow() {
+            pendingMediaActionAfterWarning = .voice
+            showingPhotoShareWarning = true
+            return
+        }
+        startRecordingAfterWarning()
+    }
+
+    private func startRecordingAfterWarning() {
+        guard canReplyInConversation else { return }
+        guard MediaDailyLimit.canSend else {
+            showingMediaLimitAlert = true
+            return
+        }
         // Remove any existing preview and file before starting a new recording
         if showRecordingPreview {
             discardRecording()
@@ -2595,8 +2730,12 @@ struct MessageConversationModal: View {
     }
     
     private func sendVoiceMessage(audioURL: URL, duration: TimeInterval) {
-        guard !isBlockedByRecipient else { return }
+        guard canReplyInConversation else { return }
         guard !isSendingVoice else { return }
+        guard MediaDailyLimit.canSend else {
+            showingMediaLimitAlert = true
+            return
+        }
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
             discardRecording()
             return
@@ -2626,6 +2765,7 @@ struct MessageConversationModal: View {
                 await MainActor.run {
                     isSendingVoice = false
                     discardRecording()
+                    mediaSendCount = MediaDailyLimit.currentCount()
                     updateConversationListAfterOutgoingMessage(
                         content: remoteURL,
                         type: .voice,
@@ -2637,6 +2777,9 @@ struct MessageConversationModal: View {
                 print("❌ Error sending voice message: \(error)")
                 await MainActor.run {
                     isSendingVoice = false
+                    if error is MediaDailyLimitError {
+                        showingMediaLimitAlert = true
+                    }
                 }
             }
         }
@@ -2787,11 +2930,13 @@ struct RecordingPreviewSheet: View {
     let audioURL: URL
     let duration: TimeInterval
     let isSending: Bool
+    let remainingMediaCount: Int
     let onSend: () -> Void
     let onDiscard: () -> Void
+    let onUpgrade: () -> Void
     
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("messages.voice.ready".localized)
                     .font(.headline)
@@ -2836,6 +2981,12 @@ struct RecordingPreviewSheet: View {
                 .tint(.green)
                 .disabled(isSending)
             }
+
+            MediaRemainingUpgradeFooter(
+                remainingCount: remainingMediaCount,
+                onUpgrade: onUpgrade
+            )
+            .disabled(isSending)
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
@@ -2846,11 +2997,13 @@ struct RecordingPreviewSheet: View {
 struct ImagePreviewReadySheet: View {
     let image: UIImage
     let isSending: Bool
+    let remainingMediaCount: Int
     let onSend: () -> Void
     let onDiscard: () -> Void
+    let onUpgrade: () -> Void
 
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("messages.voice.ready".localized)
                     .font(.headline)
@@ -2890,10 +3043,37 @@ struct ImagePreviewReadySheet: View {
                 .tint(.green)
                 .disabled(isSending)
             }
+
+            MediaRemainingUpgradeFooter(
+                remainingCount: remainingMediaCount,
+                onUpgrade: onUpgrade
+            )
+            .disabled(isSending)
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 8)
+    }
+}
+
+private struct MediaRemainingUpgradeFooter: View {
+    let remainingCount: Int
+    let onUpgrade: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(String(format: "messages.media.preview.remaining".localized, remainingCount))
+                .foregroundColor(SpectRoomTheme.secondaryText)
+            Button(action: onUpgrade) {
+                Text("messages.media.preview.upgrade".localized)
+                    .foregroundColor(.blue)
+            }
+            .buttonStyle(.plain)
+        }
+        .font(.footnote)
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 2)
     }
 }
 

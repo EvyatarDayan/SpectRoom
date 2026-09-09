@@ -138,6 +138,8 @@ struct ProfileCard: Codable {
     let shareSensoryPreferences: Bool
     var energyLevel: Int
     let matchPercentage: Int
+    /// When Discover visibility boost ends (nil / past = not boosted).
+    let boostedUntil: Date?
     
     init(
         userId: String,
@@ -164,7 +166,8 @@ struct ProfileCard: Codable {
         sensoryPreferences: [String] = [],
         shareSensoryPreferences: Bool = false,
         energyLevel: Int,
-        matchPercentage: Int = 0
+        matchPercentage: Int = 0,
+        boostedUntil: Date? = nil
     ) {
         self.userId = userId
         self.name = name
@@ -191,6 +194,7 @@ struct ProfileCard: Codable {
         self.shareSensoryPreferences = shareSensoryPreferences
         self.energyLevel = energyLevel
         self.matchPercentage = matchPercentage
+        self.boostedUntil = boostedUntil
     }
     
     struct MatchBreakdown {

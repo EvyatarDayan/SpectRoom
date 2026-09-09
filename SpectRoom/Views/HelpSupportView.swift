@@ -14,7 +14,7 @@ struct HelpSupportView: View {
     @EnvironmentObject var appState: AppStateManager
 
     enum Topic: String, CaseIterable, Identifiable {
-        case safety, bug, feedback, accountFreeze, accountBan, other
+        case safety, bug, feedback, accountFreeze, accountBan, accountDeleted, other
         var id: String { rawValue }
 
         var label: String {
@@ -29,6 +29,8 @@ struct HelpSupportView: View {
                 return localizedOrFallback("support.topic.account.freeze", "Account freeze")
             case .accountBan:
                 return localizedOrFallback("support.topic.account.ban", "Account ban")
+            case .accountDeleted:
+                return localizedOrFallback("support.topic.account.deleted", "Account deleted")
             case .other:
                 return "support.topic.other".localized
             }
@@ -50,6 +52,7 @@ struct HelpSupportView: View {
             case .feedback:      return "[Feedback]"
             case .accountFreeze: return "[Account freeze]"
             case .accountBan:    return "[Account ban]"
+            case .accountDeleted: return "[Account deleted]"
             case .other:         return "[Other]"
             }
         }
@@ -57,7 +60,7 @@ struct HelpSupportView: View {
         /// Moderation topics are only offered when the sheet is opened from freeze/ban flows.
         var isModerationOnly: Bool {
             switch self {
-            case .accountFreeze, .accountBan: return true
+            case .accountFreeze, .accountBan, .accountDeleted: return true
             default: return false
             }
         }
@@ -331,7 +334,7 @@ private extension HelpSupportView {
                 showErrorAlert = true
             } else {
                 didSendSuccessfully = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                     onMessageSent?()
                     dismiss()
                 }

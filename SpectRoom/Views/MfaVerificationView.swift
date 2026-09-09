@@ -156,6 +156,7 @@ struct MfaVerificationView: View {
             .padding(.bottom, 24)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .authFlowPreferenceControls()
         .spectRoomScreenBackground()
         .overlay {
             if showingError {
@@ -224,9 +225,15 @@ struct MfaVerificationView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
             } else {
-                Text(String(format: smsFailureHelpText, phoneE164.isEmpty ? maskedPhone : phoneE164))
-                    .font(.subheadline)
+                Text("auth.mfa.error.sms.unavailable".localized)
+                    .font(.body)
                     .foregroundColor(SpectRoomTheme.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+
+                Text(String(format: "auth.mfa.phone.using".localized, displayedPhoneNumber))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(SpectRoomTheme.text)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
 
@@ -246,12 +253,8 @@ struct MfaVerificationView: View {
         }
     }
 
-    private var smsFailureHelpText: String {
-        #if targetEnvironment(simulator)
-        return "auth.mfa.error.sms.detail".localized
-        #else
-        return "auth.mfa.error.sms.device".localized
-        #endif
+    private var displayedPhoneNumber: String {
+        phoneE164.isEmpty ? maskedPhone : phoneE164
     }
 
     private var phoneMissingCard: some View {
@@ -447,7 +450,11 @@ struct MfaVerificationView: View {
     private var otpCard: some View {
         VStack(spacing: 22) {
             VStack(spacing: 8) {
-                Text("auth.mfa.code.sent.to".localized)
+                Text(
+                    (kind == .signIn && !appState.authService.hasPendingSignInMfaVerificationID && !smsSent)
+                        ? "auth.mfa.code.request.to".localized
+                        : "auth.mfa.code.sent.to".localized
+                )
                     .font(.body)
                     .foregroundColor(SpectRoomTheme.secondaryText)
                     .multilineTextAlignment(.center)
@@ -596,8 +603,14 @@ struct MfaVerificationView: View {
 
         if kind == .signIn {
             emailVerified = true
-            smsSent = true
-            markSmsResendCooldownStarted()
+            if appState.authService.hasPendingSignInMfaVerificationID {
+                smsSent = true
+                markSmsResendCooldownStarted()
+            } else {
+                // Initial SMS often fails on Simulator — retry quietly; show toast, not a popup.
+                smsSent = false
+                await resendSms(showErrorsAsToast: true)
+            }
             return
         }
 
@@ -802,6 +815,8 @@ struct MfaVerificationView: View {
                 }
             } else if rateLimited {
                 // Show on-screen message only — no popup.
+            } else if kind == .enroll {
+                // smsFailedCard shows the message — no popup.
             } else {
                 present(error)
             }
@@ -816,6 +831,15 @@ struct MfaVerificationView: View {
                 try await appState.confirmMfaSignIn(code: code)
             } else {
                 try await appState.confirmMfaEnrollment(code: code, phoneE164: phoneE164)
+            }
+        } catch let authError as SpectRoomAuthError {
+            switch authError {
+            case .mfaSendFailed, .mfaSessionExpired
+                where kind == .signIn && !appState.authService.hasPendingSignInMfaVerificationID:
+                // Prefer a recoverable hint over a dead-end "session expired" popup when SMS never landed.
+                showSmsResendToast("auth.mfa.error.send".localized)
+            default:
+                present(authError)
             }
         } catch {
             present(error)
@@ -847,7 +871,7 @@ struct MfaVerificationView: View {
         }
     }
 
-    private func resendSms() async {
+    private func resendSms(showErrorsAsToast: Bool = false) async {
         isBusy = true
         defer { isBusy = false }
         do {
@@ -860,6 +884,8 @@ struct MfaVerificationView: View {
             await MainActor.run {
                 markSmsResendCooldownStarted()
                 code = ""
+                smsSent = true
+                smsSendFailed = false
                 smsRateLimited = false
                 showSmsResendToast("auth.mfa.resend.sent".localized)
             }
@@ -870,8 +896,25 @@ struct MfaVerificationView: View {
                     smsSendFailed = true
                     smsRateLimited = true
                 }
+            } else if kind == .enroll {
+                await MainActor.run {
+                    smsSent = false
+                    smsSendFailed = true
+                }
+            } else if showErrorsAsToast {
+                // Avoid "Invalid format." Notice popups on Simulator auto-retry.
+                showSmsResendToast("auth.mfa.error.send".localized)
             } else {
-                present(error)
+                // Manual Resend: keep the OTP screen usable with a clear send message.
+                let mapped = (error as? SpectRoomAuthError) ?? error
+                let message = (mapped as? SpectRoomAuthError)?.errorDescription
+                    ?? FirebaseAuthService.humanReadableFunctionsError(error)
+                if message.localizedCaseInsensitiveContains("invalid format")
+                    || message.localizedCaseInsensitiveContains("invalid phone") {
+                    showSmsResendToast("auth.mfa.error.send".localized)
+                } else {
+                    present(error)
+                }
             }
         }
     }

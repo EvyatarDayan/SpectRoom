@@ -18,6 +18,8 @@ class FirebaseAuthService: ObservableObject {
     @Published var currentUser: SpectRoomUser?
     /// Restored synchronously from Firebase's persisted session so launch UI does not flash logged-out screens.
     @Published var isAuthenticated = false
+    /// Set when admin soft-deleted this account; AppState shows the deleted popup until acknowledged.
+    @Published private(set) var requiresDeletedAcknowledgementUID: String?
     /// Becomes true after Firebase emits the first auth-state callback.
     @Published var hasResolvedAuthState = false
     /// Becomes true after the first Firestore profile load attempt finishes for the current session.
@@ -70,6 +72,7 @@ class FirebaseAuthService: ObservableObject {
                 } else {
                     self.currentUser = nil
                     self.hasResolvedUserProfile = true
+                    // Keep requiresDeletedAcknowledgementUID so the deleted popup can still show.
                 }
             }
         }
@@ -210,23 +213,34 @@ class FirebaseAuthService: ObservableObject {
     }
     
     /// Returns whether this email belongs to a soft-deleted account still within the 14-day window.
-    private func pendingDeletionInfo(for normalizedEmail: String) async throws -> (isPending: Bool, deletedAt: Date?) {
+    private func pendingDeletionInfo(for normalizedEmail: String) async throws -> (isPending: Bool, deletedByAdmin: Bool, deletedAt: Date?) {
         let result = try await Functions.functions(region: "us-central1")
             .httpsCallable("checkEmailPendingDeletion")
             .call(["email": normalizedEmail])
         
         guard let data = result.data as? [String: Any] else {
             print("⚠️ checkEmailPendingDeletion returned unexpected payload: \(String(describing: result.data))")
-            return (false, nil)
+            return (false, false, nil)
         }
         
         let pending = boolValue(from: data, key: "pendingDeletion")
+        let deletedByAdmin = boolValue(from: data, key: "deletedByAdmin")
         let deletedAt = parseUnixDate(from: data["deletedAt"])
             ?? parseUnixDate(from: data["scheduledHardDeleteAt"]).map {
                 $0.addingTimeInterval(-14 * 24 * 60 * 60)
             }
-        print("🔍 Email pending deletion check for \(normalizedEmail): \(pending)")
-        return (pending, deletedAt)
+        print("🔍 Email pending deletion check for \(normalizedEmail): \(pending), admin=\(deletedByAdmin)")
+        return (pending, deletedByAdmin, deletedAt)
+    }
+
+    /// Blocks sign-in (including MFA) when the email is soft-deleted / admin-deleted but Auth still exists.
+    func throwIfEmailBlockedFromSignIn(_ normalizedEmail: String) async throws {
+        let info = try await pendingDeletionInfo(for: normalizedEmail)
+        guard info.isPending else { return }
+        if info.deletedByAdmin {
+            throw SpectRoomAuthError.accountDeletedByAdmin
+        }
+        throw SpectRoomAuthError.accountPendingDeletion
     }
     
     private func parseUnixDate(from value: Any?) -> Date? {
@@ -272,14 +286,24 @@ class FirebaseAuthService: ObservableObject {
         do {
             _ = try await auth.signIn(withEmail: email, password: password)
             
-            if let userData = try await fetchUserData() {
+            // Prefer server so a lifted freeze is not blocked by cached discoverFrozenUntil.
+            if let userData = try await fetchUserData(preferServer: true) {
                 if userData["isDeleted"] as? Bool == true {
+                    let uid = auth.currentUser?.uid
+                    if Self.isAdminDeletedAccount(userData), let uid {
+                        await MainActor.run {
+                            self.markRequiresDeletedAcknowledgement(userId: uid)
+                        }
+                    }
                     try auth.signOut()
                     await MainActor.run {
                         self.isVerifyingSignIn = false
                         self.isAuthenticated = false
                         self.currentUser = nil
                         self.hasResolvedUserProfile = true
+                    }
+                    if Self.isAdminDeletedAccount(userData) {
+                        throw SpectRoomAuthError.accountDeletedByAdmin
                     }
                     throw SpectRoomAuthError.accountPendingDeletion
                 }
@@ -429,6 +453,14 @@ class FirebaseAuthService: ObservableObject {
         do {
             if let userData = try await fetchUserData() {
                 if userData["isDeleted"] as? Bool == true {
+                    if Self.isAdminDeletedAccount(userData) {
+                        // Keep session briefly so the deletion acknowledgement popup can show.
+                        print("🗑️ Account \(userID) was deleted by admin — waiting for acknowledgement")
+                        await MainActor.run {
+                            self.markRequiresDeletedAcknowledgement(userId: userID)
+                        }
+                        return
+                    }
                     print("🗑️ Account \(userID) is marked deleted — signing out")
                     try? auth.signOut()
                     await MainActor.run {
@@ -555,6 +587,12 @@ class FirebaseAuthService: ObservableObject {
                 userWithPhotos.dateOfBirth = dateOfBirth
                 userWithPhotos.isOnline = isOnline
                 userWithPhotos.lastSeen = lastSeen
+                userWithPhotos.boostedUntil = Self.parseFreezeUntilValue(userData["boostedUntil"])
+                userWithPhotos.lastProfileBoostAt = Self.parseFreezeUntilValue(userData["lastProfileBoostAt"])
+                ProfileBoostLimit.syncFromRemote(
+                    lastBoostAt: userWithPhotos.lastProfileBoostAt,
+                    boostedUntil: userWithPhotos.boostedUntil
+                )
 
                 // Fetch blocked users subcollection (non-fatal)
                 do {
@@ -895,8 +933,51 @@ class FirebaseAuthService: ObservableObject {
         userWithPhotos.firebaseDocumentId = documentID
         userWithPhotos.isOnline = isOnline
         userWithPhotos.lastSeen = lastSeen
+        userWithPhotos.boostedUntil = Self.parseFreezeUntilValue(userData["boostedUntil"])
+        userWithPhotos.lastProfileBoostAt = Self.parseFreezeUntilValue(userData["lastProfileBoostAt"])
         
         return userWithPhotos
+    }
+
+    /// Activates a Discover visibility boost for the signed-in user (plan cooldown enforced).
+    @discardableResult
+    func activateProfileBoost() async throws -> Date {
+        guard let currentUserId = auth.currentUser?.uid else {
+            throw ProfileBoostError.notAuthenticated
+        }
+        guard ProfileBoostLimit.isAvailableOnPlan else {
+            throw ProfileBoostError.notAvailableOnPlan
+        }
+        if ProfileBoostLimit.isBoostActive {
+            throw ProfileBoostError.alreadyActive
+        }
+        if let next = ProfileBoostLimit.nextBoostAvailableAt, Date() < next {
+            throw ProfileBoostError.onCooldown(until: next)
+        }
+
+        let activatedAt = Date()
+        let activeUntil = activatedAt.addingTimeInterval(ProfileBoostLimit.activeDuration)
+        try await db.collection("users").document(currentUserId).setData([
+            "boostedUntil": activeUntil.timeIntervalSince1970,
+            "lastProfileBoostAt": activatedAt.timeIntervalSince1970
+        ], merge: true)
+
+        ProfileBoostLimit.recordActivation(at: activatedAt, activeUntil: activeUntil)
+
+        await MainActor.run {
+            if var user = self.currentUser {
+                user.boostedUntil = activeUntil
+                user.lastProfileBoostAt = activatedAt
+                self.currentUser = user
+            }
+            if var appUser = AppStateManager.shared.currentUser {
+                appUser.boostedUntil = activeUntil
+                appUser.lastProfileBoostAt = activatedAt
+                AppStateManager.shared.currentUser = appUser
+            }
+        }
+
+        return activeUntil
     }
     
     // MARK: - Sync Photos from Storage
@@ -1256,6 +1337,45 @@ class FirebaseAuthService: ObservableObject {
                 "acknowledged": false
             ]
         ], merge: true)
+
+        // Also deliver as an inbox message from SpectRoom (non-replyable on client).
+        try await writeSpectRoomSystemWarningMessage(
+            to: userId,
+            message: warningMessage,
+            noticeId: noticeId,
+            reportId: resolvedReportId
+        )
+    }
+
+    /// Writes an official SpectRoom warning into the user's Messages inbox.
+    func writeSpectRoomSystemWarningMessage(
+        to userId: String,
+        message: String,
+        noticeId: String,
+        reportId: String?
+    ) async throws {
+        let timestamp = Date().timeIntervalSince1970
+        var messageData: [String: Any] = [
+            "id": noticeId,
+            "senderId": SpectRoomSystemAccount.userId,
+            "recipientId": userId,
+            "content": message,
+            "type": MessageType.text.rawValue,
+            "createdAt": timestamp,
+            "isRead": false,
+            "readAt": NSNull(),
+            "kind": "admin_warning",
+            "notice_id": noticeId
+        ]
+        if let reportId, !reportId.isEmpty {
+            messageData["report_id"] = reportId
+        }
+
+        try await db.collection("users")
+            .document(userId)
+            .collection("incomingMessages")
+            .document(noticeId)
+            .setData(messageData, merge: true)
     }
 
     func freezeUserForReport(
@@ -2091,6 +2211,68 @@ class FirebaseAuthService: ObservableObject {
         ])
     }
 
+    func clearPendingAccountDeletedNotice() async throws {
+        defer { clearRequiresDeletedAcknowledgement() }
+
+        // Auth may already be revoked/deleted by admin — still clear local ack flags.
+        guard let userId = auth.currentUser?.uid else {
+            print("🗑️ clearPendingAccountDeletedNotice: no Auth user (already signed out)")
+            return
+        }
+        // Prefer server hard-wipe (Auth + Firestore + Storage). Fall back to clearing the notice only.
+        do {
+            _ = try await Functions.functions(region: "us-central1")
+                .httpsCallable("acknowledgeAccountDeleted")
+                .call([:])
+        } catch {
+            print("⚠️ acknowledgeAccountDeleted failed, clearing notice locally: \(error.localizedDescription)")
+            do {
+                try await db.collection("users").document(userId).updateData([
+                    "pendingAccountDeleted": FieldValue.delete()
+                ])
+            } catch {
+                // Permission may be gone after Auth delete — local UI dismissal is enough.
+                print("⚠️ Local pendingAccountDeleted clear failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private static let pendingAdminDeletedAckPrefix = "pendingAdminDeletedAck."
+    private static let lastAdminDeletedUidKey = "lastAdminDeletedUid"
+
+    func markRequiresDeletedAcknowledgement(userId: String) {
+        requiresDeletedAcknowledgementUID = userId
+        UserDefaults.standard.set(true, forKey: Self.pendingAdminDeletedAckPrefix + userId)
+        UserDefaults.standard.set(userId, forKey: Self.lastAdminDeletedUidKey)
+    }
+
+    func clearRequiresDeletedAcknowledgement() {
+        if let uid = requiresDeletedAcknowledgementUID {
+            UserDefaults.standard.removeObject(forKey: Self.pendingAdminDeletedAckPrefix + uid)
+        }
+        if let last = UserDefaults.standard.string(forKey: Self.lastAdminDeletedUidKey) {
+            UserDefaults.standard.removeObject(forKey: Self.pendingAdminDeletedAckPrefix + last)
+            UserDefaults.standard.removeObject(forKey: Self.lastAdminDeletedUidKey)
+        }
+        requiresDeletedAcknowledgementUID = nil
+    }
+
+    /// True when this device still owes the admin-deleted acknowledgement popup.
+    func hasPendingDeletedAcknowledgement(for userId: String? = nil) -> Bool {
+        if let uid = requiresDeletedAcknowledgementUID, !uid.isEmpty {
+            if let userId { return uid == userId }
+            return true
+        }
+        if let userId {
+            return UserDefaults.standard.bool(forKey: Self.pendingAdminDeletedAckPrefix + userId)
+        }
+        if let last = UserDefaults.standard.string(forKey: Self.lastAdminDeletedUidKey),
+           UserDefaults.standard.bool(forKey: Self.pendingAdminDeletedAckPrefix + last) {
+            return true
+        }
+        return false
+    }
+
     func clearPendingAccountUnbanNotice() async throws {
         guard let userId = auth.currentUser?.uid else { return }
         try await db.collection("users").document(userId).updateData([
@@ -2100,6 +2282,13 @@ class FirebaseAuthService: ObservableObject {
 
     func fetchPendingModerationNotice(preferServer: Bool = false) async throws -> ModerationNotice? {
         guard let userData = try await fetchUserData(preferServer: preferServer) else { return nil }
+
+        if Self.isAdminDeletedAccount(userData) {
+            if let uid = auth.currentUser?.uid {
+                markRequiresDeletedAcknowledgement(userId: uid)
+            }
+            return ModerationNotice(kind: .deletedAcknowledgement)
+        }
 
         if userData["isBanned"] as? Bool == true {
             return ModerationNotice(kind: .banAcknowledgement)
@@ -2573,6 +2762,17 @@ class FirebaseAuthService: ObservableObject {
         try await db.collection("reports").document(reportId).setData(data, merge: true)
     }
 
+    /// Admin-initiated soft delete (shows acknowledgement UI). Self-deletes omit these flags.
+    static func isAdminDeletedAccount(_ userData: [String: Any]) -> Bool {
+        guard userData["isDeleted"] as? Bool == true else { return false }
+        if userData["deletedByAdmin"] as? Bool == true { return true }
+        if let pending = userData["pendingAccountDeleted"] as? [String: Any],
+           (pending["acknowledged"] as? Bool) != true {
+            return true
+        }
+        return false
+    }
+
     static func parseDiscoverFreezeUntil(from userData: [String: Any]) -> Date? {
         if let timestamp = userData["discoverFrozenUntil"] as? Timestamp {
             return timestamp.dateValue()
@@ -2705,6 +2905,15 @@ class FirebaseAuthService: ObservableObject {
                     return
                 }
                 guard let data = snapshot?.data() else { return }
+
+                if Self.isAdminDeletedAccount(data) {
+                    print("🗑️ Pending account deleted notice for \(currentUserId)")
+                    DispatchQueue.main.async {
+                        self?.markRequiresDeletedAcknowledgement(userId: currentUserId)
+                        onNotice(ModerationNotice(kind: .deletedAcknowledgement))
+                    }
+                    return
+                }
 
                 if data["isBanned"] as? Bool == true {
                     print("🚫 Pending account ban notice for \(currentUserId)")
@@ -3518,7 +3727,8 @@ class FirebaseAuthService: ObservableObject {
             sensoryPreferences: sensoryPreferences,
             shareSensoryPreferences: shareSensoryPreferences,
             energyLevel: energyLevel,
-            matchPercentage: matchPercentage
+            matchPercentage: matchPercentage,
+            boostedUntil: Self.parseFreezeUntilValue(userData["boostedUntil"])
         )
     }
     
@@ -3674,6 +3884,21 @@ class FirebaseAuthService: ObservableObject {
                     let voiceDuration = data["voiceDuration"] as? TimeInterval
                     
                     DispatchQueue.main.async {
+                        if SpectRoomSystemAccount.isSystemAccount(senderId) {
+                            completion(
+                                senderId,
+                                SpectRoomSystemAccount.displayName,
+                                nil,
+                                messageDocId,
+                                content,
+                                messageType,
+                                voiceDuration,
+                                messageTime,
+                                true
+                            )
+                            return
+                        }
+
                         completion(
                             senderId,
                             "",
@@ -3688,6 +3913,10 @@ class FirebaseAuthService: ObservableObject {
                     }
                     
                     // Fetch sender's profile information for notifications
+                    if SpectRoomSystemAccount.isSystemAccount(senderId) {
+                        continue
+                    }
+
                     Task {
                         do {
                             let senderProfile = try await self.fetchUserProfile(for: senderId)
@@ -3736,6 +3965,14 @@ class FirebaseAuthService: ObservableObject {
         guard let currentUserId = auth.currentUser?.uid else {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
+
+        if SpectRoomSystemAccount.isSystemAccount(recipientId) {
+            throw NSError(
+                domain: "FirebaseAuthService",
+                code: 403,
+                userInfo: [NSLocalizedDescriptionKey: "You cannot reply to SpectRoom messages"]
+            )
+        }
         
         if try await isBlockedBy(userId: recipientId) {
             throw NSError(
@@ -3778,6 +4015,14 @@ class FirebaseAuthService: ObservableObject {
         guard let currentUserId = auth.currentUser?.uid else {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
+
+        if SpectRoomSystemAccount.isSystemAccount(recipientId) {
+            throw NSError(
+                domain: "FirebaseAuthService",
+                code: 403,
+                userInfo: [NSLocalizedDescriptionKey: "You cannot reply to SpectRoom messages"]
+            )
+        }
         
         if try await isBlockedBy(userId: recipientId) {
             throw NSError(
@@ -3785,6 +4030,10 @@ class FirebaseAuthService: ObservableObject {
                 code: 403,
                 userInfo: [NSLocalizedDescriptionKey: "You have been blocked by this user"]
             )
+        }
+
+        guard MediaDailyLimit.canSend else {
+            throw MediaDailyLimitError.dailyLimitReached(limit: MediaDailyLimit.maxMediaPerDay)
         }
         
         print("💬 Sending image message from \(currentUserId) to \(recipientId)")
@@ -3811,6 +4060,8 @@ class FirebaseAuthService: ObservableObject {
         // Save to recipient's "incoming" collection
         let recipientRef = db.collection("users").document(recipientId).collection("incomingMessages").document(messageId)
         try await recipientRef.setData(messageData)
+
+        MediaDailyLimit.recordSend()
         
         print("✅ Image message sent successfully with ID: \(messageId)")
         return messageId
@@ -3820,6 +4071,14 @@ class FirebaseAuthService: ObservableObject {
         guard let currentUserId = auth.currentUser?.uid else {
             throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
         }
+
+        if SpectRoomSystemAccount.isSystemAccount(recipientId) {
+            throw NSError(
+                domain: "FirebaseAuthService",
+                code: 403,
+                userInfo: [NSLocalizedDescriptionKey: "You cannot reply to SpectRoom messages"]
+            )
+        }
         
         if try await isBlockedBy(userId: recipientId) {
             throw NSError(
@@ -3827,6 +4086,10 @@ class FirebaseAuthService: ObservableObject {
                 code: 403,
                 userInfo: [NSLocalizedDescriptionKey: "You have been blocked by this user"]
             )
+        }
+
+        guard MediaDailyLimit.canSend else {
+            throw MediaDailyLimitError.dailyLimitReached(limit: MediaDailyLimit.maxMediaPerDay)
         }
         
         print("🎙️ Sending voice message from \(currentUserId) to \(recipientId)")
@@ -3851,6 +4114,8 @@ class FirebaseAuthService: ObservableObject {
         
         let recipientRef = db.collection("users").document(recipientId).collection("incomingMessages").document(messageId)
         try await recipientRef.setData(messageData)
+
+        MediaDailyLimit.recordSend()
         
         print("✅ Voice message sent successfully with ID: \(messageId)")
         return messageId
@@ -4081,6 +4346,10 @@ class FirebaseAuthService: ObservableObject {
     }
 
     func fetchSenderName(for senderId: String) async throws -> String {
+        if SpectRoomSystemAccount.isSystemAccount(senderId) {
+            return SpectRoomSystemAccount.displayName
+        }
+
         let userDoc = try await db.collection("users").document(senderId).getDocument()
         guard let userData = userDoc.data() else {
             return "Unknown User"
@@ -4105,6 +4374,10 @@ class FirebaseAuthService: ObservableObject {
     
     func fetchRecipientName(for recipientId: String) async throws -> String {
         print("💬 fetchRecipientName: Looking up recipient ID: \(recipientId)")
+
+        if SpectRoomSystemAccount.isSystemAccount(recipientId) {
+            return SpectRoomSystemAccount.displayName
+        }
         
         let userDoc = try await db.collection("users").document(recipientId).getDocument()
         
@@ -4129,6 +4402,10 @@ class FirebaseAuthService: ObservableObject {
     }
     
     func fetchUserProfilePhotoURL(for userId: String) async throws -> String? {
+        if SpectRoomSystemAccount.isSystemAccount(userId) {
+            return nil
+        }
+
         let userDoc = try await db.collection("users").document(userId).getDocument()
         guard let userData = userDoc.data() else {
             return nil
@@ -4722,9 +4999,16 @@ class FirebaseAuthService: ObservableObject {
         guard !userIds.isEmpty else { return [:] }
         
         var summaries: [String: UserSummary] = [:]
+
+        for userId in userIds where SpectRoomSystemAccount.isSystemAccount(userId) {
+            summaries[userId] = UserSummary(
+                name: SpectRoomSystemAccount.displayName,
+                photoURL: nil
+            )
+        }
         
         await withTaskGroup(of: (String, UserSummary?).self) { group in
-            for userId in userIds {
+            for userId in userIds where !SpectRoomSystemAccount.isSystemAccount(userId) {
                 group.addTask {
                     do {
                         let name = try await self.fetchSenderName(for: userId)
@@ -5176,6 +5460,7 @@ private extension FirebaseAuthService {
 
 enum SpectRoomAuthError: LocalizedError {
     case accountPendingDeletion
+    case accountDeletedByAdmin
     case accountBanned
     case accountFrozen(until: Date)
     case emailPendingDeletion(email: String, deletedAt: Date?)
@@ -5193,6 +5478,8 @@ enum SpectRoomAuthError: LocalizedError {
         switch self {
         case .accountPendingDeletion:
             return "auth.error.account.pending.deletion".localized
+        case .accountDeletedByAdmin:
+            return "admin.deleted.popup.message".localized
         case .accountBanned:
             return "auth.error.account.banned".localized
         case .accountFrozen(let until):

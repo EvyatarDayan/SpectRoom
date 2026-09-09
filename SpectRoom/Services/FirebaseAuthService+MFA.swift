@@ -1,5 +1,5 @@
 import Foundation
-import FirebaseAuth
+@preconcurrency import FirebaseAuth
 import FirebaseCore
 import FirebaseFirestore
 import FirebaseFunctions
@@ -40,25 +40,54 @@ extension FirebaseAuthService {
             self.hasResolvedUserProfile = false
         }
 
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
         do {
+            // Soft-deleted / admin-deleted accounts can still have Auth+MFA until hard wipe.
+            // Block before password/MFA so deleted users never reach the Security Code screen.
+            try await throwIfEmailBlockedFromSignIn(normalizedEmail)
+
             _ = try await auth.signIn(withEmail: email, password: password)
             try await finishVerifiedSignInChecks()
             return .completed
         } catch {
+            if error is SpectRoomAuthError {
+                await MainActor.run {
+                    self.isVerifyingSignIn = false
+                    if self.auth.currentUser == nil {
+                        self.isAuthenticated = false
+                    }
+                }
+                throw error
+            }
+
             if let resolver = Self.multiFactorResolver(from: error) {
-                Self.pendingSignInResolver = resolver
-                let hint = resolver.hints.compactMap { $0 as? PhoneMultiFactorInfo }.first
-                let masked: String
-                if let name = hint?.displayName?.nilIfEmpty {
-                    masked = name
-                } else if let phone = hint?.phoneNumber {
-                    masked = PhoneNumberE164.maskedDisplay(phone)
-                } else {
-                    masked = "auth.mfa.phone.fallback".localized
+                // Password was correct but MFA is required — re-check deletion before sending SMS.
+                do {
+                    try await throwIfEmailBlockedFromSignIn(normalizedEmail)
+                } catch {
+                    Self.clearPendingMfaSignIn()
+                    await MainActor.run {
+                        self.isVerifyingSignIn = false
+                        self.isAuthenticated = false
+                    }
+                    throw error
                 }
 
-                let verificationID = try await sendSignInMfaCode(resolver: resolver, hint: hint)
-                Self.pendingVerificationID = verificationID
+                Self.pendingSignInResolver = resolver
+                let hint = resolver.hints.compactMap { $0 as? PhoneMultiFactorInfo }.first
+                let masked = Self.maskedPhone(for: hint)
+
+                // Always open the security-code screen when the password is correct.
+                // SMS may fail on Simulator (APNs/app verification) — the MFA UI can Resend.
+                FirebaseBootstrap.applyDebugPhoneAuthSettings()
+                do {
+                    let verificationID = try await sendSignInMfaCode(resolver: resolver, hint: hint)
+                    Self.pendingVerificationID = verificationID
+                } catch {
+                    print("⚠️ Initial sign-in MFA SMS failed (continuing to code screen): \(error.localizedDescription)")
+                    Self.pendingVerificationID = nil
+                }
 
                 await MainActor.run {
                     self.isVerifyingSignIn = false
@@ -80,15 +109,25 @@ extension FirebaseAuthService {
         guard let resolver = Self.pendingSignInResolver else {
             throw SpectRoomAuthError.mfaSessionExpired
         }
+        FirebaseBootstrap.applyDebugPhoneAuthSettings()
         let hint = resolver.hints.compactMap { $0 as? PhoneMultiFactorInfo }.first
         let verificationID = try await sendSignInMfaCode(resolver: resolver, hint: hint)
         Self.pendingVerificationID = verificationID
     }
 
+    /// True when the initial MFA SMS for the pending sign-in challenge succeeded.
+    var hasPendingSignInMfaVerificationID: Bool {
+        Self.pendingVerificationID != nil
+    }
+
     func confirmSignInMfa(code: String) async throws {
-        guard let resolver = Self.pendingSignInResolver,
-              let verificationID = Self.pendingVerificationID else {
+        guard let resolver = Self.pendingSignInResolver else {
             throw SpectRoomAuthError.mfaSessionExpired
+        }
+        guard let verificationID = Self.pendingVerificationID else {
+            // Password was accepted, but no SMS verification ID exists yet
+            // (common on Simulator when APNs/app verification fails).
+            throw SpectRoomAuthError.mfaSendFailed
         }
 
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -256,14 +295,25 @@ extension FirebaseAuthService {
     // MARK: - Private helpers
 
     private func finishVerifiedSignInChecks() async throws {
-        if let userData = try await fetchUserData() {
+        // Always prefer server for moderation gates so a recently lifted freeze/ban
+        // is not blocked by a stale local cache of discoverFrozenUntil / isBanned.
+        if let userData = try await fetchUserData(preferServer: true) {
             if userData["isDeleted"] as? Bool == true {
+                let uid = auth.currentUser?.uid
+                if Self.isAdminDeletedAccount(userData), let uid {
+                    await MainActor.run {
+                        self.markRequiresDeletedAcknowledgement(userId: uid)
+                    }
+                }
                 try auth.signOut()
                 await MainActor.run {
                     self.isVerifyingSignIn = false
                     self.isAuthenticated = false
                     self.currentUser = nil
                     self.hasResolvedUserProfile = true
+                }
+                if Self.isAdminDeletedAccount(userData) {
+                    throw SpectRoomAuthError.accountDeletedByAdmin
                 }
                 throw SpectRoomAuthError.accountPendingDeletion
             }
@@ -310,12 +360,13 @@ extension FirebaseAuthService {
         guard let hint else {
             throw SpectRoomAuthError.mfaFactorUnavailable
         }
+        let session = resolver.session
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.main.async {
                 PhoneAuthProvider.provider().verifyPhoneNumber(
                     with: hint,
                     uiDelegate: SpectRoomAuthUIDelegate.shared,
-                    multiFactorSession: resolver.session
+                    multiFactorSession: session
                 ) { verificationID, error in
                     if let error {
                         continuation.resume(throwing: error)
@@ -330,7 +381,7 @@ extension FirebaseAuthService {
     }
 
     private func getMultiFactorSession(for user: User) async throws -> MultiFactorSession {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<MultiFactorSession, Error>) in
             user.multiFactor.getSessionWithCompletion { session, error in
                 if let error {
                     continuation.resume(throwing: error)
@@ -375,13 +426,44 @@ extension FirebaseAuthService {
         }
     }
 
+    /// Prefer the real phone number over MFA display names like "Phone".
+    private static func maskedPhone(for hint: PhoneMultiFactorInfo?) -> String {
+        if let phone = hint?.phoneNumber.nilIfEmpty {
+            return PhoneNumberE164.maskedDisplay(phone)
+        }
+        if let name = hint?.displayName?.nilIfEmpty {
+            let genericNames: Set<String> = ["phone", "sms", "mobile", "mfa"]
+            if !genericNames.contains(name.lowercased()) {
+                return name
+            }
+        }
+        return "auth.mfa.phone.fallback".localized
+    }
+
     private static func multiFactorResolver(from error: Error) -> MultiFactorResolver? {
         let nsError = error as NSError
-        guard nsError.domain == AuthErrorDomain,
-              nsError.code == AuthErrorCode.secondFactorRequired.rawValue else {
-            return nil
+        if nsError.domain == AuthErrorDomain,
+           nsError.code == AuthErrorCode.secondFactorRequired.rawValue,
+           let resolver = nsError.userInfo[AuthErrorUserInfoMultiFactorResolverKey] as? MultiFactorResolver {
+            return resolver
         }
-        return nsError.userInfo[AuthErrorUserInfoMultiFactorResolverKey] as? MultiFactorResolver
+
+        // Some SDK / simulator paths nest the resolver under NSUnderlyingErrorKey.
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError,
+           let resolver = multiFactorResolver(from: underlying) {
+            return resolver
+        }
+
+        for value in nsError.userInfo.values {
+            if let resolver = value as? MultiFactorResolver {
+                return resolver
+            }
+            if let nested = value as? NSError,
+               let resolver = multiFactorResolver(from: nested) {
+                return resolver
+            }
+        }
+        return nil
     }
 
     private static func clearPendingMfaSignIn() {

@@ -39,6 +39,10 @@ struct SpectRoomUser: Identifiable, Codable, Equatable {
     var sensoryPreferences: [String] = [] // Sensory preference selections (multiple)
     var shareSensoryPreferences: Bool = false // Whether to share sensory preferences
     var energyLevel: Int = 4 // 0 Low Battery, 2 Moderate Social, 4 Fully Social Mode
+    /// When Discover visibility boost ends (nil / past = not boosted).
+    var boostedUntil: Date? = nil
+    /// Last time the user activated a profile boost (drives plan cooldown).
+    var lastProfileBoostAt: Date? = nil
     
     init(name: String, age: Int, email: String, bio: String = "", interests: [String] = [], location: Location = Location(), preferences: UserPreferences = UserPreferences(), gender: String = "", interestedIn: [String] = [], lookingFor: [String] = [], preferredAgeMin: Int? = nil, preferredAgeMax: Int? = nil, lifestyle: String = "", shareLifestyle: Bool = false, bodyType: String = "", shareBodyType: Bool = false, idealFirstDate: [String] = [], shareIdealFirstDate: Bool = false, sensoryPreferences: [String] = [], shareSensoryPreferences: Bool = false, energyLevel: Int = 4) {
         self.id = UUID()

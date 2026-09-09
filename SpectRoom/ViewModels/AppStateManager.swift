@@ -26,6 +26,8 @@ class AppStateManager: ObservableObject {
     @Published var isAuthenticated = false
     @Published var hasResolvedAuthState = false
     @Published var hasResolvedUserProfile = false
+    /// True only after profile load + completion sync — use for Discover vs ProfileEdit routing.
+    @Published var hasResolvedProfileRouting = false
     @Published var hasCompletedOnboarding = false
     @Published var hasCompletedInitialProfile = false
     @Published var isNewSignup = false
@@ -120,7 +122,14 @@ class AppStateManager: ObservableObject {
         firebaseAuth.$hasResolvedUserProfile
             .receive(on: DispatchQueue.main)
             .sink { [weak self] resolved in
-                self?.hasResolvedUserProfile = resolved
+                guard let self else { return }
+                if !resolved {
+                    self.hasResolvedUserProfile = false
+                    self.hasResolvedProfileRouting = false
+                    return
+                }
+                // Sync completion flags before the root UI chooses ProfileEdit vs Discover.
+                self.finalizeProfileRoutingAfterLoad()
             }
             .store(in: &cancellables)
         
@@ -135,6 +144,7 @@ class AppStateManager: ObservableObject {
                     if !wasAuthenticated, self?.firebaseAuth.currentUser == nil {
                         // New login: keep home on the spinner until this account's profile loads.
                         self?.hasResolvedUserProfile = false
+                        self?.hasResolvedProfileRouting = false
                     }
                     // Returning session: never show the welcome wizard again.
                     if self?.hasCompletedOnboarding != true {
@@ -167,10 +177,22 @@ class AppStateManager: ObservableObject {
                     }
                     self?.firebaseAuth.stopListeningForBlockedByUsers()
                     self?.firebaseAuth.stopListeningForModerationStatus()
-                    // Keep login-blocked freeze notice so the user can still dismiss it after sign-out.
-                    if case .loginBlocked = self?.pendingModerationNotice?.kind {
-                        // leave notice
-                    } else {
+                    // If admin deleted the account and Auth was revoked before/while the popup showed,
+                    // keep or restore the deleted acknowledgement so the user can tap "I understand".
+                    if self?.firebaseAuth.hasPendingDeletedAcknowledgement() == true {
+                        switch self?.pendingModerationNotice?.kind {
+                        case .deletedAcknowledgement, .loginDeleted:
+                            break
+                        default:
+                            self?.pendingModerationNotice = ModerationNotice(kind: .deletedAcknowledgement)
+                        }
+                    }
+                    // Keep login / acknowledgement notices so the user can still dismiss after sign-out.
+                    switch self?.pendingModerationNotice?.kind {
+                    case .loginBlocked, .loginBanned, .loginDeleted,
+                            .banAcknowledgement, .deletedAcknowledgement, .freezeAcknowledgement:
+                        break
+                    default:
                         self?.pendingModerationNotice = nil
                     }
                     // Clear user data when not authenticated to prevent stale data
@@ -211,6 +233,21 @@ class AppStateManager: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        firebaseAuth.$requiresDeletedAcknowledgementUID
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] uid in
+                guard let self, let uid, !uid.isEmpty else { return }
+                guard self.isDismissingModerationNotice != true else { return }
+                switch self.pendingModerationNotice?.kind {
+                case .deletedAcknowledgement, .loginDeleted:
+                    break
+                default:
+                    self.pendingModerationNotice = ModerationNotice(kind: .deletedAcknowledgement)
+                    print("🗑️ Showing admin-deleted acknowledgement for \(uid)")
+                }
+            }
+            .store(in: &cancellables)
         
         // Note: Sound is now played when push notification is received (handled by iOS)
         
@@ -219,6 +256,12 @@ class AppStateManager: ObservableObject {
         
         // Clear any stale authentication data on app start
         clearStaleAuthData()
+
+        // If admin deleted the account while we were offline / Auth already wiped,
+        // still show the deleted popup until "I understand".
+        if firebaseAuth.hasPendingDeletedAcknowledgement() {
+            pendingModerationNotice = ModerationNotice(kind: .deletedAcknowledgement)
+        }
     }
     
     // MARK: - Authentication
@@ -267,7 +310,7 @@ class AppStateManager: ObservableObject {
             } catch let error as SpectRoomAuthError {
                 await MainActor.run {
                     self.isLoading = false
-                    // Soft-deleted accounts look like invalid credentials (don't reveal account status).
+                    // Soft-deleted (self) accounts look like invalid credentials (don't reveal account status).
                     if case .accountPendingDeletion = error {
                         let currentAttempts = UserDefaults.standard.integer(forKey: "failedSignInAttempts")
                         let newAttempts = currentAttempts + 1
@@ -277,6 +320,9 @@ class AppStateManager: ObservableObject {
                         } else {
                             self.authErrorMessage = "auth.error.credentials".localized
                         }
+                    } else if case .accountDeletedByAdmin = error {
+                        self.authErrorMessage = nil
+                        self.pendingModerationNotice = ModerationNotice(kind: .loginDeleted)
                     } else if case .accountBanned = error {
                         self.authErrorMessage = nil
                         self.pendingModerationNotice = ModerationNotice(kind: .loginBanned)
@@ -291,17 +337,36 @@ class AppStateManager: ObservableObject {
                 await MainActor.run {
                     self.isLoading = false
                     print("Sign in error: \(error.localizedDescription)")
-                    
-                    // Increment failed sign-in attempts counter
-                    let currentAttempts = UserDefaults.standard.integer(forKey: "failedSignInAttempts")
-                    let newAttempts = currentAttempts + 1
-                    UserDefaults.standard.set(newAttempts, forKey: "failedSignInAttempts")
-                    
-                    // Show extended message every 5th time (5th, 10th, 15th, etc.)
-                    if newAttempts % 5 == 0 {
-                        self.authErrorMessage = "auth.error.credentials.with.forgot".localized
+
+                    // MFA / phone-auth failures must never look like a wrong password.
+                    let ns = error as NSError
+                    let message = ns.localizedDescription
+                    if ns.domain == AuthErrorDomain,
+                       ns.code == AuthErrorCode.secondFactorRequired.rawValue
+                        || message.localizedCaseInsensitiveContains("second factor")
+                        || message.localizedCaseInsensitiveContains("multi-factor") {
+                        self.authErrorMessage = "auth.mfa.error.send".localized
+                    } else if message.localizedCaseInsensitiveContains("too many requests")
+                                || message.localizedCaseInsensitiveContains("unusual activity")
+                                || ns.code == AuthErrorCode.tooManyRequests.rawValue {
+                        self.authErrorMessage = "auth.mfa.error.rate.limited".localized
+                    } else if message.localizedCaseInsensitiveContains("apns")
+                                || message.localizedCaseInsensitiveContains("notification")
+                                || message.localizedCaseInsensitiveContains("recaptcha")
+                                || message.localizedCaseInsensitiveContains("app verification") {
+                        self.authErrorMessage = "auth.mfa.error.send".localized
                     } else {
-                        self.authErrorMessage = "auth.error.credentials".localized
+                        // Increment failed sign-in attempts counter
+                        let currentAttempts = UserDefaults.standard.integer(forKey: "failedSignInAttempts")
+                        let newAttempts = currentAttempts + 1
+                        UserDefaults.standard.set(newAttempts, forKey: "failedSignInAttempts")
+                        
+                        // Show extended message every 5th time (5th, 10th, 15th, etc.)
+                        if newAttempts % 5 == 0 {
+                            self.authErrorMessage = "auth.error.credentials.with.forgot".localized
+                        } else {
+                            self.authErrorMessage = "auth.error.credentials".localized
+                        }
                     }
                 }
             }
@@ -532,11 +597,44 @@ class AppStateManager: ObservableObject {
             && hasIdealFirstDate
     }
     
+    /// After Firestore user load: decide Discover vs mandatory profile without flashing Welcome.
+    private func finalizeProfileRoutingAfterLoad() {
+        // Combine can deliver hasResolvedUserProfile before $currentUser is mirrored.
+        // Always prefer the freshly loaded Firebase user for this gate.
+        if let user = firebaseAuth.currentUser {
+            currentUser = user
+            blockedUsers = user.blockedUsers
+            blockedByUsers = user.blockedByUsers
+        }
+
+        syncInitialProfileCompletionIfNeeded()
+
+        if isProfileComplete() {
+            hasCompletedInitialProfile = true
+            isNewSignup = false
+            if let uid = firebaseAuth.auth.currentUser?.uid {
+                CompleteProfileWelcomeOverlay.markWelcomeSeen(for: uid)
+            }
+        } else if !isNewSignup {
+            let uid = firebaseAuth.auth.currentUser?.uid
+            if uid == nil || !CompleteProfileWelcomeOverlay.shouldShowWelcome(for: uid) {
+                isNewSignup = false
+            }
+        }
+
+        hasResolvedUserProfile = true
+        hasResolvedProfileRouting = true
+        saveAppState()
+    }
+
     func syncInitialProfileCompletionIfNeeded() {
         guard !hasCompletedInitialProfile else { return }
         guard isProfileComplete() else { return }
         hasCompletedInitialProfile = true
         isNewSignup = false
+        if let uid = firebaseAuth.auth.currentUser?.uid {
+            CompleteProfileWelcomeOverlay.markWelcomeSeen(for: uid)
+        }
         saveAppState()
         print("✅ Synced initial profile completion from saved user data")
         Task {
@@ -574,6 +672,9 @@ class AppStateManager: ObservableObject {
         hasCompletedInitialProfile = true
         isNewSignup = false
         signUpName = "" // Clear the sign up name
+        if let uid = firebaseAuth.auth.currentUser?.uid {
+            CompleteProfileWelcomeOverlay.markWelcomeSeen(for: uid)
+        }
         saveAppState()
         print("✅ Initial profile completed - user can now access main app")
         Task {
@@ -890,6 +991,9 @@ class AppStateManager: ObservableObject {
                     clearMessageConversationsCache() // Clear message conversations cache
                     clearDiscoverProfilesCache()
                     DiscoverDailyLimit.reset()
+                    ProfileBoostLimit.reset()
+                    MediaDailyLimit.reset()
+                    PhotoShareWarningOverlay.reset()
                     DiscoverDistanceLimit.resetToDefault()
                     UserDefaults.standard.set(false, forKey: "dontShowWelcomeAgain")
                     saveAppState()
@@ -908,6 +1012,9 @@ class AppStateManager: ObservableObject {
                     clearMessageConversationsCache()
                     clearDiscoverProfilesCache()
                     DiscoverDailyLimit.reset()
+                    ProfileBoostLimit.reset()
+                    MediaDailyLimit.reset()
+                    PhotoShareWarningOverlay.reset()
                     DiscoverDistanceLimit.resetToDefault()
                     UserDefaults.standard.set(false, forKey: "dontShowWelcomeAgain")
                     saveAppState()
@@ -1000,10 +1107,14 @@ class AppStateManager: ObservableObject {
                 Task { @MainActor in
                     if case .loginBanned = self?.pendingModerationNotice?.kind {
                         // keep login ban notice
+                    } else if case .loginDeleted = self?.pendingModerationNotice?.kind {
+                        // keep login deleted notice
                     } else if case .loginBlocked = self?.pendingModerationNotice?.kind {
                         // keep login freeze notice
                     } else if case .banAcknowledgement = self?.pendingModerationNotice?.kind {
                         // Ban popup is showing — do not clear or force another sign-out yet.
+                    } else if case .deletedAcknowledgement = self?.pendingModerationNotice?.kind {
+                        // Delete popup is showing — do not clear or force another sign-out yet.
                     } else {
                         self?.pendingModerationNotice = nil
                         self?.signOut()
@@ -1016,7 +1127,7 @@ class AppStateManager: ObservableObject {
                     self?.pendingModerationNotice = notice
                 }
             },
-            onNoticeCleared: { [weak self] in
+                    onNoticeCleared: { [weak self] in
                 Task { @MainActor in
                     guard self?.isDismissingModerationNotice != true else { return }
                     // Never auto-clear warnings from a "cleared" snapshot — a stale cache
@@ -1026,7 +1137,7 @@ class AppStateManager: ObservableObject {
                     case .freezeAcknowledgement:
                         self?.pendingModerationNotice = nil
                     default:
-                        // Keep warnings / ban acknowledgement until the user dismisses.
+                        // Keep warnings / ban / delete acknowledgement until the user dismisses.
                         break
                     }
                 }
@@ -1061,7 +1172,8 @@ class AppStateManager: ObservableObject {
         isDismissingModerationNotice = true
 
         switch notice.kind {
-        case .loginBlocked, .loginBanned:
+        case .loginBlocked, .loginBanned, .loginDeleted:
+            firebaseAuth.clearRequiresDeletedAcknowledgement()
             pendingModerationNotice = nil
             isDismissingModerationNotice = false
 
@@ -1106,6 +1218,20 @@ class AppStateManager: ObservableObject {
                     self.pendingModerationNotice = nil
                     self.isDismissingModerationNotice = false
                     self.signOut()
+                }
+            }
+
+        case .deletedAcknowledgement:
+            // Sign out immediately on "I understand"; clear notice best-effort in background.
+            pendingModerationNotice = nil
+            isDismissingModerationNotice = false
+            firebaseAuth.clearRequiresDeletedAcknowledgement()
+            signOut()
+            Task {
+                do {
+                    try await firebaseAuth.clearPendingAccountDeletedNotice()
+                } catch {
+                    print("⚠️ Failed to clear account deleted notice: \(error.localizedDescription)")
                 }
             }
 

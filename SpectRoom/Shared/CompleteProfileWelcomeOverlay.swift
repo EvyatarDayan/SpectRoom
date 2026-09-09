@@ -56,26 +56,24 @@ struct CompleteProfileWelcomeOverlay: View {
         }
     }
 
-    private static let legacyKey = "dontShowCompleteProfileWelcome"
-
-    private static func storageKey(for userId: String?) -> String {
-        guard let userId, !userId.isEmpty else { return legacyKey }
-        return "dontShowCompleteProfileWelcome.\(userId)"
+    /// Opt-in only: set in `prepareForNewSignup`, cleared in `markWelcomeSeen`.
+    /// Returning logins must never inherit a default “show” state.
+    private static func pendingKey(for userId: String) -> String {
+        "pendingCompleteProfileWelcome.\(userId)"
     }
 
     static func shouldShowWelcome(for userId: String?) -> Bool {
-        guard let userId, !userId.isEmpty else {
-            return !UserDefaults.standard.bool(forKey: legacyKey)
-        }
-        return !UserDefaults.standard.bool(forKey: storageKey(for: userId))
+        guard let userId, !userId.isEmpty else { return false }
+        return UserDefaults.standard.bool(forKey: pendingKey(for: userId))
     }
 
     static func markWelcomeSeen(for userId: String?) {
-        UserDefaults.standard.set(true, forKey: storageKey(for: userId))
+        guard let userId, !userId.isEmpty else { return }
+        UserDefaults.standard.set(false, forKey: pendingKey(for: userId))
     }
 
-    /// Each new account should see the welcome popup once when opening profile setup.
+    /// Call only from signup — arms the one-time welcome for that account.
     static func prepareForNewSignup(userId: String) {
-        UserDefaults.standard.removeObject(forKey: storageKey(for: userId))
+        UserDefaults.standard.set(true, forKey: pendingKey(for: userId))
     }
 }

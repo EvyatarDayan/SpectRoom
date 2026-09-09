@@ -13,6 +13,10 @@ struct ModerationNotice: Equatable {
         case loginBanned
         /// Ban was lifted by admin — acknowledge, stay signed in / free to log in.
         case banLifted
+        /// User is online when admin deletes the account — must acknowledge, then sign out.
+        case deletedAcknowledgement
+        /// Shown after a login attempt while the account was deleted by admin.
+        case loginDeleted
     }
 
     let kind: Kind
@@ -27,6 +31,8 @@ struct ModerationNotice: Equatable {
             return "admin.ban.popup.title".localized
         case .banLifted:
             return "admin.ban.lifted.popup.title".localized
+        case .deletedAcknowledgement, .loginDeleted:
+            return "admin.deleted.popup.title".localized
         }
     }
 
@@ -51,12 +57,14 @@ struct ModerationNotice: Equatable {
             return "admin.ban.popup.message".localized
         case .banLifted:
             return "admin.ban.lifted.popup.message".localized
+        case .deletedAcknowledgement, .loginDeleted:
+            return "admin.deleted.popup.message".localized
         }
     }
 
     var signsOutOnDismiss: Bool {
         switch kind {
-        case .freezeAcknowledgement, .banAcknowledgement:
+        case .freezeAcknowledgement, .banAcknowledgement, .deletedAcknowledgement:
             return true
         default:
             return false
@@ -71,7 +79,8 @@ struct ModerationNotice: Equatable {
     /// Freeze and ban notices can open Help & Support (same sheet) before logout / after blocked login.
     var showsContactSupport: Bool {
         switch kind {
-        case .freezeAcknowledgement, .loginBlocked, .banAcknowledgement, .loginBanned:
+        case .freezeAcknowledgement, .loginBlocked, .banAcknowledgement, .loginBanned,
+                .deletedAcknowledgement, .loginDeleted:
             return true
         default:
             return false
@@ -88,6 +97,8 @@ struct ModerationNotice: Equatable {
             return "admin.ban.popup.accept".localized
         case .banLifted:
             return "admin.ban.lifted.popup.accept".localized
+        case .deletedAcknowledgement, .loginDeleted:
+            return "admin.deleted.popup.accept".localized
         }
     }
 
@@ -100,6 +111,8 @@ struct ModerationNotice: Equatable {
         switch kind {
         case .banAcknowledgement, .loginBanned:
             return .accountBan
+        case .deletedAcknowledgement, .loginDeleted:
+            return .accountDeleted
         default:
             return .accountFreeze
         }

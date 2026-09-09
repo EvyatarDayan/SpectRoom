@@ -25,220 +25,223 @@ struct AuthenticationView: View {
     @FocusState private var focusedField: AuthFormField?
     
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(spacing: 20) {
-                    // App logo and title
-                    VStack(spacing: 16) {
-                        Text("app.name".localized)
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
-                            .foregroundColor(SpectRoomTheme.text)
-                    }
+        VStack(spacing: 0) {
+            // Fixed header — does not scroll with the form.
+            VStack(spacing: 0) {
+                Text("app.name".localized)
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                    .foregroundColor(SpectRoomTheme.text)
                     .padding(.top, 24)
-                    
-                    // Toggle between login and signup
-                    Picker("Mode", selection: $isLoginMode) {
-                        Text("auth.sign.in".localized).tag(true)
-                        Text("auth.sign.up".localized).tag(false)
-                    }
-                    .pickerStyle(SegmentedPickerStyle())
-                    .padding(.horizontal)
-                    .padding(.vertical, -4)
-                    
-                    // Form fields
+                    .padding(.bottom, 28)
+
+                Picker("Mode", selection: $isLoginMode) {
+                    Text("auth.sign.in".localized).tag(true)
+                    Text("auth.sign.up".localized).tag(false)
+                }
+                .pickerStyle(SegmentedPickerStyle())
+                .padding(.horizontal)
+                .padding(.bottom, 24)
+            }
+
+            ScrollViewReader { proxy in
+                ScrollView {
                     VStack(spacing: 20) {
-                        if !isLoginMode {
+                        // Form fields
+                        VStack(spacing: 20) {
+                            if !isLoginMode {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("auth.full.name".localized)
+                                        .font(.headline)
+                                        .foregroundColor(SpectRoomTheme.text)
+
+                                    TextField("auth.name.placeholder".localized, text: $name)
+                                        .textFieldStyle(CustomTextFieldStyle())
+                                        .autocorrectionDisabled(true)
+                                        .textInputAutocapitalization(.words)
+                                        .focused($focusedField, equals: .name)
+                                        .submitLabel(.next)
+                                        .onSubmit { focusedField = .email }
+                                }
+                                .id(AuthFormField.name)
+                            }
+
+                            // Email field
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("auth.full.name".localized)
+                                Text("auth.email".localized)
                                     .font(.headline)
                                     .foregroundColor(SpectRoomTheme.text)
-                                
-                                TextField("auth.name.placeholder".localized, text: $name)
+
+                                TextField("auth.email.placeholder".localized, text: $email)
                                     .textFieldStyle(CustomTextFieldStyle())
+                                    .keyboardType(.emailAddress)
+                                    .textContentType(.emailAddress)
                                     .autocorrectionDisabled(true)
-                                    .textInputAutocapitalization(.words)
-                                    .focused($focusedField, equals: .name)
+                                    .textInputAutocapitalization(.never)
+                                    .focused($focusedField, equals: .email)
                                     .submitLabel(.next)
-                                    .onSubmit { focusedField = .email }
+                                    .onSubmit { focusedField = isLoginMode ? .password : .phone }
                             }
-                            .id(AuthFormField.name)
-                        }
-                        
-                        // Email field
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("auth.email".localized)
-                                .font(.headline)
-                                .foregroundColor(SpectRoomTheme.text)
-                            
-                            TextField("auth.email.placeholder".localized, text: $email)
-                                .textFieldStyle(CustomTextFieldStyle())
-                                .keyboardType(.emailAddress)
-                                .textContentType(.emailAddress)
-                                .autocorrectionDisabled(true)
-                                .textInputAutocapitalization(.never)
-                                .focused($focusedField, equals: .email)
-                                .submitLabel(.next)
-                                .onSubmit { focusedField = isLoginMode ? .password : .phone }
-                        }
-                        .id(AuthFormField.email)
+                            .id(AuthFormField.email)
 
-                        if !isLoginMode {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("auth.phone".localized)
-                                    .font(.headline)
-                                    .foregroundColor(SpectRoomTheme.text)
+                            if !isLoginMode {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("auth.phone".localized)
+                                        .font(.headline)
+                                        .foregroundColor(SpectRoomTheme.text)
 
-                                PhoneNumberInputView(
-                                    country: $phoneCountry,
-                                    nationalNumber: $phoneNumber,
-                                    isFocused: $focusedField,
-                                    focusValue: .phone
-                                )
+                                    PhoneNumberInputView(
+                                        country: $phoneCountry,
+                                        nationalNumber: $phoneNumber,
+                                        isFocused: $focusedField,
+                                        focusValue: .phone
+                                    )
 
-                                Text("auth.phone.helper".localized)
-                                    .font(.caption)
-                                    .foregroundColor(SpectRoomTheme.secondaryText)
-                            }
-                            .id(AuthFormField.phone)
-                        }
-                        
-                        // Password field
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("auth.password".localized)
-                                .font(.headline)
-                                .foregroundColor(SpectRoomTheme.text)
-                            
-                            PasswordField(
-                                text: $password,
-                                placeholder: "auth.password.placeholder".localized,
-                                isVisible: $isPasswordVisible,
-                                focusedField: $focusedField,
-                                focusValue: .password,
-                                submitLabel: isLoginMode ? .go : .next,
-                                onSubmit: {
-                                    if isLoginMode {
-                                        handleAuthentication()
-                                    } else {
-                                        focusedField = .confirmPassword
-                                    }
+                                    Text("auth.phone.helper".localized)
+                                        .font(.caption)
+                                        .foregroundColor(SpectRoomTheme.secondaryText)
                                 }
-                            )
-                        }
-                        .id(AuthFormField.password)
-                        
-                        if !isLoginMode {
+                                .id(AuthFormField.phone)
+                            }
+
+                            // Password field
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("auth.confirm.password".localized)
+                                Text("auth.password".localized)
                                     .font(.headline)
                                     .foregroundColor(SpectRoomTheme.text)
-                                
+
                                 PasswordField(
-                                    text: $confirmPassword,
-                                    placeholder: "auth.confirm.password.placeholder".localized,
-                                    isVisible: $isConfirmPasswordVisible,
+                                    text: $password,
+                                    placeholder: "auth.password.placeholder".localized,
+                                    isVisible: $isPasswordVisible,
                                     focusedField: $focusedField,
-                                    focusValue: .confirmPassword,
-                                    submitLabel: .go,
-                                    onSubmit: { handleAuthentication() }
+                                    focusValue: .password,
+                                    submitLabel: isLoginMode ? .go : .next,
+                                    onSubmit: {
+                                        if isLoginMode {
+                                            handleAuthentication()
+                                        } else {
+                                            focusedField = .confirmPassword
+                                        }
+                                    }
                                 )
                             }
-                            .id(AuthFormField.confirmPassword)
-                        }
-                    }
-                    .padding(.horizontal)
-                    
-                    // Action button
-                    Button(action: {
-                        handleAuthentication()
-                    }) {
-                        HStack {
-                            if appState.isLoading {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                    .scaleEffect(0.8)
-                            }
-                            Text(isLoginMode ? "auth.sign.in".localized : "auth.sign.up".localized)
-                                .font(.headline)
-                                .foregroundColor(.white)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(buttonBackgroundColor)
-                        .cornerRadius(12)
-                    }
-                    .disabled(buttonIsDisabled)
-                    .padding(.horizontal)
-                    
-                    // Additional options
-                    VStack(spacing: 12) {
-                        if isLoginMode {
-                            Button("auth.forgot.password".localized) {
-                                handleForgotPassword()
-                            }
-                            .font(.subheadline)
-                            .foregroundColor(.blue)
-                            
-                            HStack {
-                                Text("auth.no.account".localized)
-                                    .foregroundColor(SpectRoomTheme.secondaryText)
-                                
-                                Button("auth.sign.up".localized) {
-                                    isLoginMode = false
+                            .id(AuthFormField.password)
+
+                            if !isLoginMode {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("auth.confirm.password".localized)
+                                        .font(.headline)
+                                        .foregroundColor(SpectRoomTheme.text)
+
+                                    PasswordField(
+                                        text: $confirmPassword,
+                                        placeholder: "auth.confirm.password.placeholder".localized,
+                                        isVisible: $isConfirmPasswordVisible,
+                                        focusedField: $focusedField,
+                                        focusValue: .confirmPassword,
+                                        submitLabel: .go,
+                                        onSubmit: { handleAuthentication() }
+                                    )
                                 }
-                                .foregroundColor(.blue)
-                            }
-                        } else {
-                            HStack {
-                                Text("auth.have.account".localized)
-                                    .foregroundColor(SpectRoomTheme.secondaryText)
-                                
-                                Button("auth.sign.in".localized) {
-                                    isLoginMode = true
-                                }
-                                .foregroundColor(.blue)
+                                .id(AuthFormField.confirmPassword)
                             }
                         }
+                        .padding(.horizontal)
+
+                        // Action button
+                        Button(action: {
+                            handleAuthentication()
+                        }) {
+                            HStack {
+                                if appState.isLoading {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(0.8)
+                                }
+                                Text(isLoginMode ? "auth.sign.in".localized : "auth.sign.up".localized)
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(buttonBackgroundColor)
+                            .cornerRadius(12)
+                        }
+                        .disabled(buttonIsDisabled)
+                        .padding(.horizontal)
+
+                        // Additional options
+                        VStack(spacing: 12) {
+                            if isLoginMode {
+                                Button("auth.forgot.password".localized) {
+                                    handleForgotPassword()
+                                }
+                                .font(.subheadline)
+                                .foregroundColor(.blue)
+
+                                HStack {
+                                    Text("auth.no.account".localized)
+                                        .foregroundColor(SpectRoomTheme.secondaryText)
+
+                                    Button("auth.sign.up".localized) {
+                                        isLoginMode = false
+                                    }
+                                    .foregroundColor(.blue)
+                                }
+                            } else {
+                                HStack {
+                                    Text("auth.have.account".localized)
+                                        .foregroundColor(SpectRoomTheme.secondaryText)
+
+                                    Button("auth.sign.in".localized) {
+                                        isLoginMode = true
+                                    }
+                                    .foregroundColor(.blue)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom, 20)
                     }
-                    .padding(.horizontal)
-                    .padding(.bottom, 20)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    // Extra room so the focused field can scroll fully above the keyboard.
+                    .padding(.bottom, keyboardHeight > 0 ? keyboardHeight + 24 : 24)
                 }
-                .frame(maxWidth: .infinity, alignment: .top)
-                // Extra room so the focused field can scroll fully above the keyboard.
-                .padding(.bottom, keyboardHeight > 0 ? keyboardHeight + 24 : 24)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: focusedField) { _, field in
-                scrollFocusedField(field, using: proxy)
-            }
-            .onChange(of: keyboardHeight) { _, height in
-                guard height > 0 else { return }
-                scrollFocusedField(focusedField, using: proxy)
-            }
-            .onChange(of: isLoginMode) { _, _ in
-                focusedField = nil
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                guard
-                    let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-                    let window = UIApplication.shared.connectedScenes
-                        .compactMap({ $0 as? UIWindowScene })
-                        .flatMap(\.windows)
-                        .first(where: \.isKeyWindow)
-                else { return }
-                let overlap = max(0, window.bounds.maxY - frame.origin.y)
-                withAnimation(.easeOut(duration: 0.25)) {
-                    keyboardHeight = overlap
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: focusedField) { _, field in
+                    scrollFocusedField(field, using: proxy)
                 }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                withAnimation(.easeOut(duration: 0.25)) {
-                    keyboardHeight = 0
+                .onChange(of: keyboardHeight) { _, height in
+                    guard height > 0 else { return }
+                    scrollFocusedField(focusedField, using: proxy)
+                }
+                .onChange(of: isLoginMode) { _, _ in
+                    focusedField = nil
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+                    guard
+                        let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+                        let window = UIApplication.shared.connectedScenes
+                            .compactMap({ $0 as? UIWindowScene })
+                            .flatMap(\.windows)
+                            .first(where: \.isKeyWindow)
+                    else { return }
+                    let overlap = max(0, window.bounds.maxY - frame.origin.y)
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        keyboardHeight = overlap
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        keyboardHeight = 0
+                    }
                 }
             }
         }
         // Fill the screen so the parent cannot vertically center a short ScrollView.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .authFlowPreferenceControls()
         .spectRoomScreenBackground()
         .alert(isPresented: $showingError) {
             Alert(
@@ -283,7 +286,7 @@ struct AuthenticationView: View {
                 showingError = true
                 return
             }
-            appState.signUp(name: name, age: 0, email: email, password: password, phoneE164: phoneE164)
+            appState.signUp(name: name, age: 18, email: email, password: password, phoneE164: phoneE164)
         }
     }
     

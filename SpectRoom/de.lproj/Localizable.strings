@@ -616,6 +616,8 @@
 "search.pass" = "Überspringen";
 "search.like" = "Gefällt Mir";
 "search.undo" = "Letzten Swipe rückgängig";
+"search.undo.limit.title" = "Tägliches Undo-Limit ist 1/3";
+"search.undo.limit.message" = "Für mehr Undos pro Tag schau dir die anderen Pläne an";
 "search.view.profile" = "Profil Anzeigen";
 "search.new.message" = "Neue Nachricht";
 "search.distance.km" = "%@ km entfernt";
@@ -821,7 +823,7 @@
 "billing.section.current.plan" = "Aktueller Plan";
 "billing.section.change.plan" = "Upgrade / Plan wechseln";
 "billing.section.payment.methods" = "Zahlungsmethoden";
-"billing.section.invoices" = "Abrechnungsverlauf";
+"billing.section.invoices" = "Abrechnungshistorie";
 "billing.plan.free" = "Free";
 "billing.plan.pro" = "Pro";
 "billing.plan.premium" = "Premium";
@@ -838,7 +840,8 @@
 "billing.interval.monthly" = "Monatlich";
 "billing.interval.yearly" = "Jährlich";
 "billing.save.percent" = "20 % sparen";
-"billing.per.month" = "/ Mon.";
+"billing.price.no.charge" = "Kostenlos";
+"billing.per.month" = "/ Monat";
 "billing.per.year" = "/ Jahr";
 "billing.badge.current" = "Aktuell";
 "billing.badge.default" = "Standard";
@@ -892,7 +895,14 @@
 "billing.invoices.empty" = "Noch kein Abrechnungsverlauf.";
 "billing.invoices.show.more" = "Mehr anzeigen";
 "billing.invoices.download" = "PDF herunterladen";
+"billing.invoices.export" = "PDF exportieren";
+"billing.invoices.export.title" = "SpectRoom Abrechnungshistorie";
+"billing.invoices.export.exported.at" = "Exportiert: %@";
+"billing.invoices.export.account" = "Konto: %@";
+"billing.invoices.export.range" = "Zahlungen der letzten 3 Jahre";
+"billing.invoices.export.error" = "Abrechnungshistorie konnte nicht exportiert werden. Bitte versuche es erneut.";
 "billing.filter.all" = "Alle";
+"billing.invoice.title.plan" = "Plan";
 "billing.invoice.status.paid" = "Bezahlt";
 "billing.invoice.status.refunded" = "Erstattet";
 "billing.invoice.status.pending" = "Ausstehend";

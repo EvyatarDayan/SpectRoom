@@ -1,7 +1,9 @@
 import SwiftUI
 
 struct MediaDailyLimitOverlay: View {
+    var title: String = "messages.media.limit.title".localized
     let message: String
+    var showsPlansButton: Bool = true
     let onGotIt: () -> Void
     let onPlans: () -> Void
 
@@ -26,7 +28,7 @@ struct MediaDailyLimitOverlay: View {
                 .onTapGesture(perform: onGotIt)
 
             VStack(alignment: .leading, spacing: 14) {
-                Text("messages.media.limit.title".localized)
+                Text(title)
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(primaryText)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -50,16 +52,18 @@ struct MediaDailyLimitOverlay: View {
                     }
                     .buttonStyle(.plain)
 
-                    Button(action: onPlans) {
-                        Text("messages.media.limit.plans".localized)
-                            .font(.body.weight(.semibold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 13)
-                            .background(Color.blue)
-                            .clipShape(Capsule())
+                    if showsPlansButton {
+                        Button(action: onPlans) {
+                            Text("messages.media.limit.plans".localized)
+                                .font(.body.weight(.semibold))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
+                                .background(Color.blue)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
                 .padding(.top, 4)
             }

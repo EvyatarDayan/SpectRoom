@@ -10,7 +10,7 @@ import Foundation
 
 /// Tracks how many discover like/pass actions each account has used today (local day).
 enum DiscoverDailyLimit {
-    private static let planTierDefaultsKey = "billingCurrentPlanTier"
+    static let planTierDefaultsKey = "billingCurrentPlanTier"
 
     /// Keep Discover quota in sync when the user changes plan in Account & Billing.
     static func syncPlanTier(_ tier: PlanTier) {
@@ -107,6 +107,15 @@ enum DiscoverDailyLimit {
     static var hasReachedUndoLimit: Bool {
         guard let max = maxUndosPerDay else { return false }
         return currentUndoCount() >= max
+    }
+
+    /// Copy for the undo-limit overlay.
+    static var undoLimitMessage: String {
+        "search.undo.limit.message".localized
+    }
+
+    static var undoLimitTitle: String {
+        "search.undo.limit.title".localized
     }
 
     @discardableResult
@@ -236,6 +245,7 @@ struct SearchView: View {
     @State private var showingProfileModal = false
     @State private var selectedProfile: ProfileCard?
     @State private var showingAccountBilling = false
+    @State private var showingUndoLimitAlert = false
     @State private var showingNewMessageModal = false
     @State private var matchCheckTimer: Timer?
     @State private var hasCompletedDiscoverLoad = false
@@ -247,6 +257,7 @@ struct SearchView: View {
     @State private var cachedSwipeFilter: FirebaseAuthService.SwipeFilterState?
     @State private var pendingDiscoverProfiles: [ProfileCard] = []
     @State private var dailySwipeCount = DiscoverDailyLimit.currentCount()
+    @AppStorage(DiscoverDailyLimit.planTierDefaultsKey) private var planTierRawValue = PlanTier.free.rawValue
     @State private var hasUsedSecondThoughtsToday = DiscoverDailyLimit.hasUsedSecondThoughtsToday()
     @State private var isReviewingTodaysPasses = false
     @State private var isLoadingSecondThoughts = false
@@ -273,8 +284,12 @@ struct SearchView: View {
     /// Top-card block: play the pass fly-off instead of splicing the array (which desyncs the UI).
     @State private var blockPassInProgressUserId: String?
     
+    private var activePlanTier: PlanTier {
+        PlanTier(rawValue: planTierRawValue) ?? .free
+    }
+
     private var hasReachedDailyLimit: Bool {
-        dailySwipeCount >= DiscoverDailyLimit.maxSwipesPerDay
+        dailySwipeCount >= activePlanTier.dailyDiscoverSwipeLimit
     }
     
     /// Locked overlay on the top card (not while reviewing today's passes).
@@ -282,12 +297,15 @@ struct SearchView: View {
         hasReachedDailyLimit && !isReviewingTodaysPasses
     }
 
-    private var canUndoLastSwipe: Bool {
+    private var canOfferUndoInteraction: Bool {
         canUseUndoButton
             && lastUndoableSwipe != nil
             && !isUndoingSwipe
             && !showsDailyLimitOverlay
-            && !DiscoverDailyLimit.hasReachedUndoLimit
+    }
+
+    private var canUndoLastSwipe: Bool {
+        canOfferUndoInteraction && !DiscoverDailyLimit.hasReachedUndoLimit
     }
     
     private var needsProfileCompletion: Bool {
@@ -459,15 +477,15 @@ struct SearchView: View {
                                 
                                 // Undo last swipe (center, smaller)
                                 Button(action: {
-                                    undoLastSwipeIfPossible()
+                                    handleUndoButtonTap()
                                 }) {
                                     Image(systemName: "arrow.uturn.backward")
                                         .font(.system(size: 18, weight: .semibold))
                                         .foregroundColor(SpectRoomTheme.text)
                                         .floatingCircleButtonStyle(colorScheme: colorScheme, size: 52)
                                 }
-                                .disabled(!canUndoLastSwipe)
-                                .opacity(canUndoLastSwipe ? 1 : 0.4)
+                                .disabled(!canOfferUndoInteraction)
+                                .opacity(canOfferUndoInteraction ? 1 : 0.4)
                                 .accessibilityLabel("search.undo".localized)
                                 
                                 // Like button (right side)
@@ -581,6 +599,22 @@ struct SearchView: View {
                 .padding(.top, 8)
                 .padding(.trailing, 16)
         }
+        .overlay {
+            if showingUndoLimitAlert {
+                MediaDailyLimitOverlay(
+                    title: DiscoverDailyLimit.undoLimitTitle,
+                    message: DiscoverDailyLimit.undoLimitMessage,
+                    showsPlansButton: DiscoverDailyLimit.currentPlanTier != .premium,
+                    onGotIt: {
+                        showingUndoLimitAlert = false
+                    },
+                    onPlans: {
+                        showingUndoLimitAlert = false
+                        showingAccountBilling = true
+                    }
+                )
+            }
+        }
     }
     
     private func applyDiscoverLifecycle<Content: View>(to content: Content) -> some View {
@@ -658,7 +692,9 @@ struct SearchView: View {
                         .environmentObject(appState)
                 }
             }
-            .sheet(isPresented: $showingAccountBilling) {
+            .sheet(isPresented: $showingAccountBilling, onDismiss: {
+                refreshDiscoverStateAfterBillingChange()
+            }) {
                 AccountBillingView()
             }
             .sheet(isPresented: $showingNewMessageModal) {
@@ -677,6 +713,27 @@ struct SearchView: View {
         if !appState.hasValidDiscoverProfilesCache
             && !isLoading
             && DiscoverDailyLimit.currentCount() < DiscoverDailyLimit.maxSwipesPerDay {
+            reloadDiscoverDeck()
+        }
+    }
+
+    /// Plan upgrades update UserDefaults while Discover may already be on screen; refresh limit UI immediately.
+    private func refreshDiscoverStateAfterBillingChange() {
+        let wasAtLimit = dailySwipeCount >= activePlanTier.dailyDiscoverSwipeLimit
+        // Keep @AppStorage in sync if the sheet updated defaults while we were covered.
+        planTierRawValue = DiscoverDailyLimit.currentPlanTier.rawValue
+        dailySwipeCount = DiscoverDailyLimit.currentCount()
+        hasUsedSecondThoughtsToday = DiscoverDailyLimit.hasUsedSecondThoughtsToday()
+
+        let nowAtLimit = dailySwipeCount >= activePlanTier.dailyDiscoverSwipeLimit
+        guard wasAtLimit, !nowAtLimit else { return }
+
+        if DiscoverDistanceLimit.hasPendingDeckRefresh {
+            DiscoverDistanceLimit.hasPendingDeckRefresh = false
+            appState.invalidateDiscoverDeckAfterProfileUpdate()
+        }
+
+        if profiles.isEmpty || currentCardIndex >= profiles.count {
             reloadDiscoverDeck()
         }
     }
@@ -1394,10 +1451,8 @@ struct SearchView: View {
         undoEnableWorkItem?.cancel()
         canUseUndoButton = false
         let work = DispatchWorkItem {
-            // Only arm undo once the fly-off has finished and the next card is showing.
-            if lastUndoableSwipe != nil, !DiscoverDailyLimit.hasReachedUndoLimit {
-                canUseUndoButton = true
-            }
+            // Arm undo once the fly-off finished — even at undo limit so the popup can open.
+            canUseUndoButton = lastUndoableSwipe != nil
         }
         undoEnableWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
@@ -1534,10 +1589,22 @@ struct SearchView: View {
         }
     }
     
+    private func handleUndoButtonTap() {
+        guard canOfferUndoInteraction else { return }
+        if DiscoverDailyLimit.hasReachedUndoLimit {
+            showingUndoLimitAlert = true
+            return
+        }
+        undoLastSwipeIfPossible()
+    }
+
     private func undoLastSwipeIfPossible() {
-        guard canUseUndoButton else { return }
+        guard canUndoLastSwipe else { return }
         guard let undo = lastUndoableSwipe, !isUndoingSwipe, !showsDailyLimitOverlay else { return }
-        guard !DiscoverDailyLimit.hasReachedUndoLimit else { return }
+        guard !DiscoverDailyLimit.hasReachedUndoLimit else {
+            showingUndoLimitAlert = true
+            return
+        }
         
         isUndoingSwipe = true
         canUseUndoButton = false

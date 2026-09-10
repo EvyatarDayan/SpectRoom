@@ -620,6 +620,8 @@
 "search.pass" = "Pass";
 "search.like" = "Eins og";
 "search.undo" = "Afturkalla síðasta strok";
+"search.undo.limit.title" = "Dagleg afturköllunarmörk eru 1/3";
+"search.undo.limit.message" = "Til að fá fleiri afturkallanir á dag skoðaðu hinar áætlanirnar";
 "search.view.profile" = "Skoða prófíl";
 "search.new.message" = "Ný skilaboð";
 "search.distance.km" = "%@ km í burtu";
@@ -848,8 +850,9 @@
 "billing.interval.monthly" = "Mánaðarlega";
 "billing.interval.yearly" = "Árlega";
 "billing.save.percent" = "Sparaðu 20 %";
-"billing.per.month" = "/ mán.";
-"billing.per.year" = "/ ár";
+"billing.price.no.charge" = "Engin gjaldtaka";
+"billing.per.month" = "/ Mánuður";
+"billing.per.year" = "/ Ár";
 "billing.badge.current" = "Núverandi";
 "billing.badge.default" = "Sjálfgefið";
 "billing.action.current" = "Núverandi áætlun";
@@ -902,7 +905,14 @@
 "billing.invoices.empty" = "Engin reikningasaga ennþá.";
 "billing.invoices.show.more" = "Sýna meira";
 "billing.invoices.download" = "Sækja PDF";
+"billing.invoices.export" = "Flytja út PDF";
+"billing.invoices.export.title" = "SpectRoom reikningasaga";
+"billing.invoices.export.exported.at" = "Útflutt: %@";
+"billing.invoices.export.account" = "Reikningur: %@";
+"billing.invoices.export.range" = "Greiðslur síðustu 3 ára";
+"billing.invoices.export.error" = "Ekki tókst að flytja út reikningasögu. Vinsamlegast reyndu aftur.";
 "billing.filter.all" = "Allt";
+"billing.invoice.title.plan" = "áskrift";
 "billing.invoice.status.paid" = "Greiddur";
 "billing.invoice.status.refunded" = "Endurgreiddur";
 "billing.invoice.status.pending" = "Í bið";

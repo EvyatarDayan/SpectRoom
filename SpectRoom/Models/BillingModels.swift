@@ -169,11 +169,20 @@ struct SubscriptionPlan: Identifiable, Equatable, Hashable, Codable {
 
     func formattedPrice(for interval: BillingInterval, locale: Locale = .current) -> String {
         let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = currencyCode
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
         formatter.locale = locale
         let value = NSDecimalNumber(decimal: price(for: interval))
-        return formatter.string(from: value) ?? "\(price(for: interval))"
+        let amount = formatter.string(from: value) ?? "\(price(for: interval))"
+        return "\(amount) \(currencyCode)"
+    }
+
+    func formattedPriceWithInterval(for interval: BillingInterval, locale: Locale = .current) -> String {
+        let period = interval == .yearly
+            ? "billing.per.year".localized
+            : "billing.per.month".localized
+        return "\(formattedPrice(for: interval, locale: locale)) \(period)"
     }
 
     /// Yearly discount vs paying monthly for 12 months (0…1).
@@ -394,6 +403,7 @@ struct Invoice: Identifiable, Equatable, Codable {
     let date: Date
     let description: String
     let planTier: PlanTier?
+    let interval: BillingInterval
     let amount: Decimal
     let currencyCode: String
     let status: InvoiceStatus
@@ -405,6 +415,16 @@ struct Invoice: Identifiable, Equatable, Codable {
         formatter.currencyCode = currencyCode
         formatter.locale = locale
         return formatter.string(from: NSDecimalNumber(decimal: amount)) ?? "\(amount)"
+    }
+
+    /// Lowercased plan name used in titles: free / pro / premium.
+    var planNameLowercased: String {
+        (planTier ?? .free).rawValue
+    }
+
+    /// Plain title e.g. "Monthly pro plan".
+    var displayTitle: String {
+        "\(interval.titleKey.localized) \(planNameLowercased) \("billing.invoice.title.plan".localized)"
     }
 }
 

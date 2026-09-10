@@ -18,6 +18,8 @@ protocol BillingServicing {
 final class MockBillingService: BillingServicing {
     static let shared = MockBillingService()
 
+    private static let persistedSubscriptionKey = "mockBillingCurrentSubscription"
+
     private var snapshot: BillingSnapshot
     private let delayNanoseconds: UInt64 = 650_000_000
 
@@ -53,6 +55,7 @@ final class MockBillingService: BillingServicing {
             cancelledAt: nil,
             usageSummary: plan.usageSummary
         )
+        Self.persistSubscription(snapshot.subscription)
         DiscoverDailyLimit.syncPlanTier(plan.tier)
         return snapshot.subscription
     }
@@ -64,6 +67,7 @@ final class MockBillingService: BillingServicing {
         }
         snapshot.subscription.status = .cancelled
         snapshot.subscription.cancelledAt = Date()
+        Self.persistSubscription(snapshot.subscription)
         // Cancelled paid plans keep remaining access for the period; swipe quota stays on current tier.
         return snapshot.subscription
     }
@@ -224,8 +228,7 @@ final class MockBillingService: BillingServicing {
             )
         ]
 
-        let renews = Calendar.current.date(byAdding: .month, value: 1, to: Date())
-        let subscription = CurrentSubscription(
+        let defaultSubscription = CurrentSubscription(
             planId: "plan_free",
             tier: .free,
             status: .none,
@@ -234,6 +237,11 @@ final class MockBillingService: BillingServicing {
             cancelledAt: nil,
             usageSummary: PlanTier.free.usageSummaryKey
         )
+        var subscription = loadPersistedSubscription(validPlanIds: Set(plans.map(\.id)))
+            ?? defaultSubscription
+        if let plan = plans.first(where: { $0.id == subscription.planId }) {
+            subscription.usageSummary = plan.usageSummary
+        }
 
         let methods: [PaymentMethod] = [
             PaymentMethod(
@@ -267,6 +275,7 @@ final class MockBillingService: BillingServicing {
                 date: calendar.date(byAdding: .month, value: -1, to: Date()) ?? Date(),
                 description: "SpectRoom Pro — Monthly",
                 planTier: .pro,
+                interval: .monthly,
                 amount: Decimal(string: "9.99")!,
                 currencyCode: "USD",
                 status: .paid,
@@ -277,6 +286,7 @@ final class MockBillingService: BillingServicing {
                 date: calendar.date(byAdding: .month, value: -2, to: Date()) ?? Date(),
                 description: "SpectRoom Pro — Monthly",
                 planTier: .pro,
+                interval: .monthly,
                 amount: Decimal(string: "9.99")!,
                 currencyCode: "USD",
                 status: .paid,
@@ -287,6 +297,7 @@ final class MockBillingService: BillingServicing {
                 date: calendar.date(byAdding: .month, value: -3, to: Date()) ?? Date(),
                 description: "SpectRoom Pro — Monthly",
                 planTier: .pro,
+                interval: .monthly,
                 amount: Decimal(string: "9.99")!,
                 currencyCode: "USD",
                 status: .refunded,
@@ -297,6 +308,7 @@ final class MockBillingService: BillingServicing {
                 date: calendar.date(byAdding: .month, value: -4, to: Date()) ?? Date(),
                 description: "SpectRoom Premium — Monthly",
                 planTier: .premium,
+                interval: .yearly,
                 amount: Decimal(string: "19.99")!,
                 currencyCode: "USD",
                 status: .paid,
@@ -307,6 +319,7 @@ final class MockBillingService: BillingServicing {
                 date: calendar.date(byAdding: .month, value: -5, to: Date()) ?? Date(),
                 description: "SpectRoom Pro — Monthly",
                 planTier: .pro,
+                interval: .monthly,
                 amount: Decimal(string: "9.99")!,
                 currencyCode: "USD",
                 status: .pending,
@@ -317,14 +330,25 @@ final class MockBillingService: BillingServicing {
                 date: calendar.date(byAdding: .month, value: -6, to: Date()) ?? Date(),
                 description: "SpectRoom Pro — Monthly",
                 planTier: .pro,
+                interval: .monthly,
                 amount: Decimal(string: "9.99")!,
                 currencyCode: "USD",
                 status: .paid,
                 pdfURL: URL(string: "https://example.com/invoices/inv_0998.pdf")
+            ),
+            Invoice(
+                id: "inv_old",
+                date: calendar.date(byAdding: .year, value: -4, to: Date()) ?? Date(),
+                description: "SpectRoom Pro — Monthly",
+                planTier: .pro,
+                interval: .monthly,
+                amount: Decimal(string: "9.99")!,
+                currencyCode: "USD",
+                status: .paid,
+                pdfURL: nil
             )
         ]
 
-        _ = renews
         return BillingSnapshot(
             subscription: subscription,
             availablePlans: plans,
@@ -333,6 +357,41 @@ final class MockBillingService: BillingServicing {
             applePayEnabled: true,
             googlePayEnabled: false
         )
+    }
+
+    private static func persistSubscription(_ subscription: CurrentSubscription) {
+        guard let data = try? JSONEncoder().encode(subscription) else { return }
+        UserDefaults.standard.set(data, forKey: persistedSubscriptionKey)
+    }
+
+    private static func loadPersistedSubscription(validPlanIds: Set<String>) -> CurrentSubscription? {
+        if let data = UserDefaults.standard.data(forKey: persistedSubscriptionKey),
+           let subscription = try? JSONDecoder().decode(CurrentSubscription.self, from: data),
+           validPlanIds.contains(subscription.planId) {
+            return subscription
+        }
+
+        // Fallback for upgrades made before subscription persistence existed.
+        let tier = DiscoverDailyLimit.currentPlanTier
+        guard tier != .free else { return nil }
+        let planId: String
+        switch tier {
+        case .free: planId = "plan_free"
+        case .pro: planId = "plan_pro"
+        case .premium: planId = "plan_premium"
+        }
+        guard validPlanIds.contains(planId) else { return nil }
+        let restored = CurrentSubscription(
+            planId: planId,
+            tier: tier,
+            status: .renewing,
+            interval: .monthly,
+            renewsOn: Calendar.current.date(byAdding: .month, value: 1, to: Date()),
+            cancelledAt: nil,
+            usageSummary: tier.usageSummaryKey
+        )
+        persistSubscription(restored)
+        return restored
     }
 }
 

@@ -25,6 +25,7 @@ struct SettingsView: View {
     @State private var showingHelpSupport = false
     @State private var showingAbout = false
     @State private var showingAccountBilling = false
+    @AppStorage(DiscoverDailyLimit.planTierDefaultsKey) private var planTierRawValue = PlanTier.free.rawValue
     @State private var showingDeleteAccountConfirmation = false
     @State private var deleteConfirmationStep: DeleteAccountConfirmationStep = .sure
     @State private var deleteConfirmationText = ""
@@ -245,10 +246,11 @@ struct SettingsView: View {
                                 Text("settings.account.billing.description".localized)
                                     .font(.caption)
                                     .foregroundColor(SpectRoomTheme.secondaryText)
-                                    .lineLimit(2)
+                                    .lineLimit(1)
                                     .minimumScaleFactor(0.8)
                             }
                             Spacer()
+                            PlanTierBadgeLabel(tier: PlanTier(rawValue: planTierRawValue) ?? .free)
                             Image(systemName: "chevron.right")
                                 .foregroundColor(SpectRoomTheme.secondaryText)
                                 .font(.caption)
@@ -269,7 +271,7 @@ struct SettingsView: View {
                                 Text("settings.export.messages.description".localized)
                                     .font(.caption)
                                     .foregroundColor(SpectRoomTheme.secondaryText)
-                                    .lineLimit(2)
+                                    .lineLimit(1)
                                     .minimumScaleFactor(0.8)
                             }
                             Spacer()
@@ -297,12 +299,7 @@ struct SettingsView: View {
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.85)
                                     .foregroundColor(SpectRoomTheme.text)
-                                Text(
-                                    String(
-                                        format: "settings.authentication.signout.subtitle".localized,
-                                        FirebaseAuthService.shared.auth.currentUser?.email ?? ""
-                                    )
-                                )
+                                Text(FirebaseAuthService.shared.auth.currentUser?.email ?? "")
                                     .font(.caption)
                                     .foregroundColor(SpectRoomTheme.secondaryText)
                                     .lineLimit(1)
@@ -335,7 +332,7 @@ struct SettingsView: View {
                                 Text("settings.delete.account.subtitle".localized)
                                     .font(.caption)
                                     .foregroundColor(SpectRoomTheme.secondaryText)
-                                    .lineLimit(2)
+                                    .lineLimit(1)
                                     .minimumScaleFactor(0.8)
                             }
                             Spacer()

@@ -620,6 +620,8 @@
 "search.pass" = "Syöttö";
 "search.like" = "Pitää";
 "search.undo" = "Kumoa viimeinen pyyhkäisy";
+"search.undo.limit.title" = "Päivittäinen peruutusraja on 1/3";
+"search.undo.limit.message" = "Saadaksesi enemmän peruutuksia päivässä, tutustu muihin tilauksiin";
 "search.view.profile" = "Näytä profiili";
 "search.new.message" = "Uusi viesti";
 "search.distance.km" = "%@ km päässä";
@@ -848,8 +850,9 @@
 "billing.interval.monthly" = "Kuukausittain";
 "billing.interval.yearly" = "Vuosittain";
 "billing.save.percent" = "Säästä 20 %";
-"billing.per.month" = "/ kk";
-"billing.per.year" = "/ vuosi";
+"billing.price.no.charge" = "Ei veloitusta";
+"billing.per.month" = "/ Kuukausi";
+"billing.per.year" = "/ Vuosi";
 "billing.badge.current" = "Nykyinen";
 "billing.badge.default" = "Oletus";
 "billing.action.current" = "Nykyinen paketti";
@@ -902,7 +905,14 @@
 "billing.invoices.empty" = "Ei vielä laskutushistoriaa.";
 "billing.invoices.show.more" = "Näytä lisää";
 "billing.invoices.download" = "Lataa PDF";
+"billing.invoices.export" = "Vie PDF";
+"billing.invoices.export.title" = "SpectRoom-laskutushistoria";
+"billing.invoices.export.exported.at" = "Viety: %@";
+"billing.invoices.export.account" = "Tili: %@";
+"billing.invoices.export.range" = "Maksut viimeiseltä 3 vuodelta";
+"billing.invoices.export.error" = "Laskutushistoriaa ei voitu viedä. Yritä uudelleen.";
 "billing.filter.all" = "Kaikki";
+"billing.invoice.title.plan" = "tilaus";
 "billing.invoice.status.paid" = "Maksettu";
 "billing.invoice.status.refunded" = "Hyvitetty";
 "billing.invoice.status.pending" = "Odottaa";

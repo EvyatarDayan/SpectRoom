@@ -616,6 +616,8 @@
 "search.pass" = "Pasar";
 "search.like" = "Me Gusta";
 "search.undo" = "Deshacer el último swipe";
+"search.undo.limit.title" = "El límite diario de deshacer es 1/3";
+"search.undo.limit.message" = "Para más deshacer al día, mira los otros planes";
 "search.view.profile" = "Ver Perfil";
 "search.new.message" = "Nuevo Mensaje";
 "search.distance.km" = "%@ km de distancia";
@@ -838,8 +840,9 @@
 "billing.interval.monthly" = "Mensual";
 "billing.interval.yearly" = "Anual";
 "billing.save.percent" = "Ahorra un 20 %";
-"billing.per.month" = "/ mes";
-"billing.per.year" = "/ año";
+"billing.price.no.charge" = "Sin cargo";
+"billing.per.month" = "/ Mes";
+"billing.per.year" = "/ Año";
 "billing.badge.current" = "Actual";
 "billing.badge.default" = "Predeterminado";
 "billing.action.current" = "Plan actual";
@@ -892,7 +895,14 @@
 "billing.invoices.empty" = "Aún no hay historial de facturación.";
 "billing.invoices.show.more" = "Mostrar más";
 "billing.invoices.download" = "Descargar PDF";
+"billing.invoices.export" = "Exportar PDF";
+"billing.invoices.export.title" = "Historial de facturación de SpectRoom";
+"billing.invoices.export.exported.at" = "Exportado: %@";
+"billing.invoices.export.account" = "Cuenta: %@";
+"billing.invoices.export.range" = "Pagos de los últimos 3 años";
+"billing.invoices.export.error" = "No se pudo exportar el historial de facturación. Inténtalo de nuevo.";
 "billing.filter.all" = "Todas";
+"billing.invoice.title.plan" = "plan";
 "billing.invoice.status.paid" = "Pagada";
 "billing.invoice.status.refunded" = "Reembolsada";
 "billing.invoice.status.pending" = "Pendiente";

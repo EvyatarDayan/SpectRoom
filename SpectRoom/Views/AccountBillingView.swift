@@ -12,10 +12,8 @@ final class AccountBillingViewModel: ObservableObject {
     @Published var invoices: [Invoice] = []
     @Published var applePayEnabled = false
     @Published var googlePayEnabled = false
-    @Published var invoiceQuery = ""
-    @Published var invoiceStatusFilter: InvoiceStatus?
-    @Published var visibleInvoiceCount = 5
     @Published var isBusy = false
+    @Published var isExportingBillingHistory = false
 
     @Published var pendingPlanChange: SubscriptionPlan?
     @Published var showingCancelConfirm = false
@@ -62,25 +60,11 @@ final class AccountBillingViewModel: ObservableObject {
             ?? plans.first(where: { $0.tier == subscription?.tier })
     }
 
-    var filteredInvoices: [Invoice] {
-        let query = invoiceQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return invoices.filter { invoice in
-            if let invoiceStatusFilter, invoice.status != invoiceStatusFilter {
-                return false
-            }
-            guard !query.isEmpty else { return true }
-            return invoice.description.lowercased().contains(query)
-                || invoice.id.lowercased().contains(query)
-                || invoice.formattedAmount().lowercased().contains(query)
-        }
-    }
-
-    var visibleInvoices: [Invoice] {
-        Array(filteredInvoices.prefix(visibleInvoiceCount))
-    }
-
-    var canShowMoreInvoices: Bool {
-        filteredInvoices.count > visibleInvoiceCount
+    var recentInvoices: [Invoice] {
+        let cutoff = Calendar.current.date(byAdding: .year, value: -3, to: Date()) ?? .distantPast
+        return invoices
+            .filter { $0.date >= cutoff }
+            .sorted { $0.date > $1.date }
     }
 
     func load() async {
@@ -154,6 +138,25 @@ final class AccountBillingViewModel: ObservableObject {
     func cancelDeletePaymentMethod() {
         paymentMethodPendingDelete = nil
         showingDeleteCardConfirm = false
+    }
+
+    func exportBillingHistoryPDF() async -> URL? {
+        guard !recentInvoices.isEmpty else {
+            showToast("billing.invoices.empty".localized)
+            return nil
+        }
+        isExportingBillingHistory = true
+        defer { isExportingBillingHistory = false }
+        do {
+            let email = FirebaseAuthService.shared.auth.currentUser?.email ?? ""
+            return try BillingHistoryExport.writePDFFile(
+                accountEmail: email,
+                invoices: recentInvoices
+            )
+        } catch {
+            showToast("billing.invoices.export.error".localized)
+            return nil
+        }
     }
 
     func addCard() async {
@@ -322,6 +325,7 @@ struct AccountBillingView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @StateObject private var viewModel = AccountBillingViewModel()
     @State private var showingCVCHelp = false
+    @State private var billingExportURL: URL?
     @FocusState private var cardFormFocus: CardFormFocus?
 
     var body: some View {
@@ -396,6 +400,14 @@ struct AccountBillingView: View {
             }
             .sheet(item: $viewModel.pendingPlanChange) { plan in
                 planChangeSheet(plan)
+            }
+            .sheet(isPresented: Binding(
+                get: { billingExportURL != nil },
+                set: { if !$0 { billingExportURL = nil } }
+            )) {
+                if let billingExportURL {
+                    ActivityShareSheet(items: [billingExportURL])
+                }
             }
         }
         .interactiveDismissDisabled(true)
@@ -533,13 +545,19 @@ struct AccountBillingView: View {
                 }
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(plan.formattedPrice(for: viewModel.selectedInterval))
+            if plan.tier == .free {
+                Text("billing.price.no.charge".localized)
                     .font(.title3.weight(.bold))
                     .foregroundColor(SpectRoomTheme.text)
-                Text(viewModel.selectedInterval == .yearly ? "billing.per.year".localized : "billing.per.month".localized)
-                    .font(.caption)
-                    .foregroundColor(SpectRoomTheme.secondaryText)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(plan.formattedPrice(for: viewModel.selectedInterval))
+                        .font(.title3.weight(.bold))
+                        .foregroundColor(SpectRoomTheme.text)
+                    Text(viewModel.selectedInterval == .yearly ? "billing.per.year".localized : "billing.per.month".localized)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(SpectRoomTheme.text)
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -729,97 +747,73 @@ struct AccountBillingView: View {
         )
     }
 
-    // MARK: D. Invoices
+    // MARK: D. Invoices / billing history
 
     private var invoicesSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            sectionHeader("billing.section.invoices".localized, systemImage: "doc.text.fill")
-
             HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(SpectRoomTheme.secondaryText)
-                TextField("billing.invoices.search".localized, text: $viewModel.invoiceQuery)
-                    .textInputAutocapitalization(.never)
-                    .disableAutocorrection(true)
-            }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(SpectRoomTheme.background)
-            )
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    filterChip(title: "billing.filter.all".localized, selected: viewModel.invoiceStatusFilter == nil) {
-                        viewModel.invoiceStatusFilter = nil
-                        viewModel.visibleInvoiceCount = 5
-                    }
-                    ForEach(InvoiceStatus.allCases, id: \.self) { status in
-                        filterChip(
-                            title: status.titleKey.localized,
-                            selected: viewModel.invoiceStatusFilter == status
-                        ) {
-                            viewModel.invoiceStatusFilter = status
-                            viewModel.visibleInvoiceCount = 5
+                sectionHeader("billing.section.invoices".localized, systemImage: "doc.text.fill")
+                Spacer()
+                Button {
+                    Task {
+                        if let url = await viewModel.exportBillingHistoryPDF() {
+                            billingExportURL = url
                         }
                     }
+                } label: {
+                    if viewModel.isExportingBillingHistory {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("billing.invoices.export".localized, systemImage: "square.and.arrow.up")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.blue)
+                    }
                 }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isExportingBillingHistory || viewModel.recentInvoices.isEmpty)
+                .accessibilityLabel("billing.invoices.export".localized)
             }
 
-            if viewModel.filteredInvoices.isEmpty {
+            if viewModel.recentInvoices.isEmpty {
                 emptyInline(message: "billing.invoices.empty".localized)
             } else {
-                VStack(spacing: 0) {
-                    ForEach(viewModel.visibleInvoices) { invoice in
-                        invoiceRow(invoice)
-                        if invoice.id != viewModel.visibleInvoices.last?.id {
-                            Divider().padding(.leading, 4)
+                let rowHeight: CGFloat = 62
+                let maxVisibleRows = 6
+                let visibleCount = min(viewModel.recentInvoices.count, maxVisibleRows)
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(viewModel.recentInvoices) { invoice in
+                            invoiceRow(invoice)
+                            if invoice.id != viewModel.recentInvoices.last?.id {
+                                Divider().padding(.leading, 4)
+                            }
                         }
                     }
                 }
-
-                if viewModel.canShowMoreInvoices {
-                    Button {
-                        viewModel.visibleInvoiceCount += 5
-                    } label: {
-                        Text("billing.invoices.show.more".localized)
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                    }
-                    .buttonStyle(.plain)
-                }
+                .frame(height: CGFloat(visibleCount) * rowHeight)
+                .scrollIndicators(.visible)
             }
         }
         .billingCardStyle()
     }
 
     private func invoiceRow(_ invoice: Invoice) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(invoice.date.formatted(date: .abbreviated, time: .omitted))
                     .font(.caption)
                     .foregroundColor(SpectRoomTheme.secondaryText)
-                Text(invoice.description)
+                Text(invoice.displayTitle)
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(SpectRoomTheme.text)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(invoice.status.titleKey.localized)
-                    .font(.caption2.weight(.bold))
-                    .foregroundColor(invoiceStatusColor(invoice.status))
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 8) {
-                Text(invoice.formattedAmount())
-                    .font(.subheadline.weight(.bold))
-                    .foregroundColor(SpectRoomTheme.text)
-                if invoice.pdfURL != nil {
-                    Button("billing.invoices.download".localized) {
-                        viewModel.toastMessage = "billing.toast.invoice.mock".localized
-                    }
-                    .font(.caption.weight(.semibold))
-                }
-            }
+            Spacer(minLength: 8)
+            Text(invoice.formattedAmount())
+                .font(.subheadline.weight(.bold))
+                .foregroundColor(SpectRoomTheme.text)
+                .multilineTextAlignment(.trailing)
         }
         .padding(.vertical, 12)
     }
@@ -1192,26 +1186,6 @@ struct AccountBillingView: View {
         Label(title, systemImage: systemImage)
             .font(.headline)
             .foregroundColor(SpectRoomTheme.text)
-    }
-
-    private func invoiceStatusColor(_ status: InvoiceStatus) -> Color {
-        switch status {
-        case .paid: return .green
-        case .refunded: return .orange
-        case .pending: return .blue
-        }
-    }
-
-    private func filterChip(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .foregroundColor(selected ? .white : SpectRoomTheme.text)
-                .background(Capsule().fill(selected ? Color.blue : SpectRoomTheme.background))
-        }
-        .buttonStyle(.plain)
     }
 
     private func emptyInline(message: String) -> some View {

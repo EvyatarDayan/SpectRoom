@@ -620,6 +620,8 @@
 "search.pass" = "Passere";
 "search.like" = "Ligesom";
 "search.undo" = "Fortryd sidste swipe";
+"search.undo.limit.title" = "Daglig fortrydelsesgrænse er 1/3";
+"search.undo.limit.message" = "For flere fortrydelser pr. dag, se de andre planer";
 "search.view.profile" = "Se profil";
 "search.new.message" = "Ny besked";
 "search.distance.km" = "%@ km væk";
@@ -848,8 +850,9 @@
 "billing.interval.monthly" = "Månedlig";
 "billing.interval.yearly" = "Årlig";
 "billing.save.percent" = "Spar 20 %";
-"billing.per.month" = "/ md.";
-"billing.per.year" = "/ år";
+"billing.price.no.charge" = "Ingen betaling";
+"billing.per.month" = "/ Måned";
+"billing.per.year" = "/ År";
 "billing.badge.current" = "Nuværende";
 "billing.badge.default" = "Standard";
 "billing.action.current" = "Nuværende plan";
@@ -902,7 +905,14 @@
 "billing.invoices.empty" = "Ingen fakturahistorik endnu.";
 "billing.invoices.show.more" = "Vis mere";
 "billing.invoices.download" = "Download PDF";
+"billing.invoices.export" = "Eksporter PDF";
+"billing.invoices.export.title" = "SpectRoom fakturahistorik";
+"billing.invoices.export.exported.at" = "Eksporteret: %@";
+"billing.invoices.export.account" = "Konto: %@";
+"billing.invoices.export.range" = "Betalinger fra de seneste 3 år";
+"billing.invoices.export.error" = "Kunne ikke eksportere fakturahistorikken. Prøv venligst igen.";
 "billing.filter.all" = "Alle";
+"billing.invoice.title.plan" = "plan";
 "billing.invoice.status.paid" = "Betalt";
 "billing.invoice.status.refunded" = "Refunderet";
 "billing.invoice.status.pending" = "Afventer";

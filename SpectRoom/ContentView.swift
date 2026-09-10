@@ -155,6 +155,7 @@ struct CustomFooterMenu: View {
     @Binding var selectedTab: Int
     @EnvironmentObject var appState: AppStateManager
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(DiscoverDailyLimit.planTierDefaultsKey) private var planTierRawValue = PlanTier.free.rawValue
     
     private var displayMatchCount: Int {
         appState.cachedMatches.filter { !appState.isHiddenByBlock($0.otherUser.userId) }.count
@@ -162,6 +163,10 @@ struct CustomFooterMenu: View {
     
     private var displayUnreadMessageCount: Int {
         max(0, appState.unreadMessageCount)
+    }
+
+    private var currentPlanTier: PlanTier {
+        PlanTier(rawValue: planTierRawValue) ?? .free
     }
     
     var body: some View {
@@ -272,6 +277,11 @@ struct CustomFooterMenu: View {
                         .frame(width: 34, height: 34)
                         .foregroundColor(selectedTab == 2 ? .blue : .gray)
                         .floatingCircleButtonStyle(colorScheme: colorScheme)
+                }
+                .overlay(alignment: .bottom) {
+                    PlanTierBadgeLabel(tier: currentPlanTier)
+                        .offset(y: 28)
+                        .allowsHitTesting(false)
                 }
                 .offset(y: -34) // Elevated to extend partially outside menu borders
                 

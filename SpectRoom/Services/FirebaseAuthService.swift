@@ -31,6 +31,7 @@ class FirebaseAuthService: ObservableObject {
     private var matchesListener: ListenerRegistration?
     private var blockedByListener: ListenerRegistration?
     private var moderationListener: ListenerRegistration?
+    private var billingPlanListener: ListenerRegistration?
     private var authStateListenerHandle: AuthStateDidChangeListenerHandle?
     private var didStartAuthListening = false
     /// Keeps the app on the login screen while we verify the account isn't soft-deleted.
@@ -589,20 +590,21 @@ class FirebaseAuthService: ObservableObject {
                 userWithPhotos.lastSeen = lastSeen
                 userWithPhotos.boostedUntil = Self.parseFreezeUntilValue(userData["boostedUntil"])
                 userWithPhotos.lastProfileBoostAt = Self.parseFreezeUntilValue(userData["lastProfileBoostAt"])
-                // Billing plan: Firestore is source of truth on startup.
-                if let raw = userData["planTier"] as? String, let remoteTier = PlanTier(rawValue: raw) {
-                    userWithPhotos.planTier = remoteTier
-                    DiscoverDailyLimit.applyLocalPlanTier(remoteTier)
-                    await MainActor.run {
-                        MockBillingService.shared.applyRemotePlanTier(remoteTier)
-                    }
-                } else {
-                    // Legacy accounts without planTier — keep local and backfill once.
-                    let localTier = DiscoverDailyLimit.currentPlanTier
-                    userWithPhotos.planTier = localTier
-                    DiscoverDailyLimit.syncPlanTier(localTier)
-                    await MainActor.run {
-                        MockBillingService.shared.applyRemotePlanTier(localTier)
+                // Billing plan: Firestore is source of truth (Android + iOS both write planTier).
+                let parsed = PlanTierCloudSync.parseBillingPlan(from: userData)
+                let hadPlanTierField = (userData["planTier"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                let hadIntervalField: Bool = {
+                    guard let raw = userData["billingInterval"] as? String else { return false }
+                    return !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                }()
+                userWithPhotos.planTier = parsed.tier
+                userWithPhotos.billingInterval = parsed.interval
+                await MainActor.run {
+                    PlanTierCloudSync.applyRemoteBillingPlan(tier: parsed.tier, interval: parsed.interval)
+                    // Ensure the fields always exist in DB (parity with Android).
+                    if !hadPlanTierField || (parsed.tier != .free && !hadIntervalField) {
+                        DiscoverDailyLimit.syncPlanTier(parsed.tier, interval: parsed.interval)
                     }
                 }
                 ProfileBoostLimit.syncFromRemote(
@@ -652,6 +654,7 @@ class FirebaseAuthService: ObservableObject {
                 let resolvedUser = userWithPhotos
                 await MainActor.run {
                     self.currentUser = resolvedUser
+                    self.listenForBillingPlan()
                 }
 
                 // Backfill / refresh profileStatus for admin incomplete-account filters.
@@ -951,7 +954,9 @@ class FirebaseAuthService: ObservableObject {
         userWithPhotos.lastSeen = lastSeen
         userWithPhotos.boostedUntil = Self.parseFreezeUntilValue(userData["boostedUntil"])
         userWithPhotos.lastProfileBoostAt = Self.parseFreezeUntilValue(userData["lastProfileBoostAt"])
-        userWithPhotos.planTier = PlanTier(rawValue: userData["planTier"] as? String ?? "") ?? .free
+        let billing = PlanTierCloudSync.parseBillingPlan(from: userData)
+        userWithPhotos.planTier = billing.tier
+        userWithPhotos.billingInterval = billing.interval
         
         return userWithPhotos
     }
@@ -2906,6 +2911,39 @@ class FirebaseAuthService: ObservableObject {
         moderationListener = nil
     }
 
+    func stopListeningForBillingPlan() {
+        billingPlanListener?.remove()
+        billingPlanListener = nil
+    }
+
+    /// Live updates when Android (or another client) changes planTier / billingInterval.
+    func listenForBillingPlan() {
+        guard let currentUserId = auth.currentUser?.uid else { return }
+        stopListeningForBillingPlan()
+        billingPlanListener = db.collection("users").document(currentUserId)
+            .addSnapshotListener { snapshot, error in
+                if let error {
+                    print("⚠️ Error listening for billing plan: \(error.localizedDescription)")
+                    return
+                }
+                guard let data = snapshot?.data() else { return }
+                let parsed = PlanTierCloudSync.parseBillingPlan(from: data)
+                Task { @MainActor in
+                    if PlanTierCloudSync.isWithinLocalPlanWriteGrace { return }
+                    let localTier = DiscoverDailyLimit.currentPlanTier
+                    let localInterval = MockBillingService.shared.currentSubscription.interval
+                    let tierChanged = parsed.tier != localTier
+                    let intervalChanged =
+                        parsed.tier != .free
+                        && parsed.interval != nil
+                        && parsed.interval != localInterval
+                    guard tierChanged || intervalChanged else { return }
+                    PlanTierCloudSync.applyRemoteBillingPlan(tier: parsed.tier, interval: parsed.interval)
+                    print("✅ Billing plan updated from Firestore: \(parsed.tier.rawValue)")
+                }
+            }
+    }
+
     /// Live updates for ban / warning / freeze notice on the signed-in user.
     func listenForModerationStatus(
         onBanned: @escaping () -> Void,
@@ -3746,7 +3784,7 @@ class FirebaseAuthService: ObservableObject {
             energyLevel: energyLevel,
             matchPercentage: matchPercentage,
             boostedUntil: Self.parseFreezeUntilValue(userData["boostedUntil"]),
-            planTier: PlanTier(rawValue: userData["planTier"] as? String ?? "") ?? .free
+            planTier: PlanTierCloudSync.parseBillingPlan(from: userData).tier
         )
     }
     

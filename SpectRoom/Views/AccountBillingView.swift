@@ -39,6 +39,7 @@ final class AccountBillingViewModel: ObservableObject {
         isLoading = true
         loadError = nil
         do {
+            await service.refreshPlanFromFirestore()
             let snap = try await service.fetchBillingSnapshot()
             apply(snap)
         } catch {
@@ -357,8 +358,14 @@ struct AccountBillingView: View {
     // MARK: A. Billing interval
 
     private var billingIntervalSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             billingIntervalToggle
+            Text(String(format: "billing.current.plan.label".localized, viewModel.currentPlanLabel()))
+                .font(.subheadline)
+                .foregroundColor(SpectRoomTheme.secondaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
         .billingCardStyle()
     }

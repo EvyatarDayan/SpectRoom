@@ -854,6 +854,7 @@
 "billing.status.free.detail" = "Du er på Free-planen";
 "billing.cycle.summary" = "Faktureringssyklus: %@";
 "billing.interval.monthly" = "Månedlig";
+"billing.current.plan.label" = "Din gjeldende plan er %@";
 "billing.interval.yearly" = "Årlig";
 "billing.interval.yearly.adj" = "årlig";
 "billing.interval.monthly.adj" = "månedlig";

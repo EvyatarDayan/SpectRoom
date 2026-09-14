@@ -854,6 +854,7 @@
 "billing.status.free.detail" = "Þú ert á Free-áætluninni";
 "billing.cycle.summary" = "Innheimtulota: %@";
 "billing.interval.monthly" = "Mánaðarlega";
+"billing.current.plan.label" = "Núverandi áætlun þín er %@";
 "billing.interval.yearly" = "Árlega";
 "billing.interval.yearly.adj" = "árlega";
 "billing.interval.monthly.adj" = "mánaðarlega";

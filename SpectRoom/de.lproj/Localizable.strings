@@ -844,6 +844,7 @@
 "billing.status.free.detail" = "Du nutzt den Free-Plan";
 "billing.cycle.summary" = "Abrechnungszyklus: %@";
 "billing.interval.monthly" = "Monatlich";
+"billing.current.plan.label" = "Dein aktueller Plan ist %@";
 "billing.interval.yearly" = "Jährlich";
 "billing.interval.yearly.adj" = "jährlich";
 "billing.interval.monthly.adj" = "monatlich";

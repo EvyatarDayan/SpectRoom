@@ -854,6 +854,7 @@
 "billing.status.free.detail" = "Olet Free-paketissa";
 "billing.cycle.summary" = "Laskutusjakso: %@";
 "billing.interval.monthly" = "Kuukausittain";
+"billing.current.plan.label" = "Nykyinen pakettisi on %@";
 "billing.interval.yearly" = "Vuosittain";
 "billing.interval.yearly.adj" = "vuosittainen";
 "billing.interval.monthly.adj" = "kuukausittainen";

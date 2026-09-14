@@ -5,6 +5,7 @@ import FirebaseFunctions
 @MainActor
 protocol BillingServicing {
     func fetchBillingSnapshot() async throws -> BillingSnapshot
+    func refreshPlanFromFirestore() async
     func changePlan(to planId: String, interval: BillingInterval) async throws -> CurrentSubscription
     func cancelSubscription() async throws -> CurrentSubscription
     func setDefaultPaymentMethod(id: String) async throws -> [PaymentMethod]
@@ -91,34 +92,59 @@ final class MockBillingService: BillingServicing {
 
     private init() {
         snapshot = Self.makeInitialSnapshot()
-        DiscoverDailyLimit.applyLocalPlanTier(snapshot.subscription.tier)
+        // Do not write UserDefaults here — Firestore hydrate owns the displayed plan.
     }
 
-    /// Align mock billing with the plan stored on the user document (startup / profile load).
-    func applyRemotePlanTier(_ tier: PlanTier) {
+    /// Align mock billing with the plan stored on the user document (startup / profile load / live sync).
+    func applyRemotePlanTier(_ tier: PlanTier, interval: BillingInterval? = nil) {
         guard let plan = snapshot.availablePlans.first(where: { $0.tier == tier }) else { return }
+        let resolvedInterval: BillingInterval = {
+            if tier == .free { return .monthly }
+            return interval ?? snapshot.subscription.interval
+        }()
         let renews = Calendar.current.date(
-            byAdding: snapshot.subscription.interval == .yearly ? .year : .month,
+            byAdding: resolvedInterval == .yearly ? .year : .month,
             value: 1,
             to: Date()
         )
+        // When tier/interval change from cloud, clear cancelled state unless we already match.
+        let keepCancelled =
+            snapshot.subscription.status == .cancelled
+            && snapshot.subscription.tier == tier
+            && snapshot.subscription.interval == resolvedInterval
+            && tier != .free
         snapshot.subscription = CurrentSubscription(
             planId: plan.id,
             tier: plan.tier,
-            status: plan.tier == .free ? .none : (snapshot.subscription.status == .cancelled ? .cancelled : .renewing),
-            interval: snapshot.subscription.interval,
-            renewsOn: plan.tier == .free ? nil : (snapshot.subscription.renewsOn ?? renews),
-            cancelledAt: plan.tier == .free ? nil : snapshot.subscription.cancelledAt,
+            status: plan.tier == .free ? .none : (keepCancelled ? .cancelled : .renewing),
+            interval: resolvedInterval,
+            renewsOn: plan.tier == .free ? nil : (keepCancelled ? snapshot.subscription.renewsOn : (snapshot.subscription.renewsOn ?? renews)),
+            cancelledAt: plan.tier == .free ? nil : (keepCancelled ? snapshot.subscription.cancelledAt : nil),
             usageSummary: plan.usageSummary
         )
         Self.persistSubscription(snapshot.subscription)
         DiscoverDailyLimit.applyLocalPlanTier(tier)
     }
 
+    var currentSubscription: CurrentSubscription { snapshot.subscription }
+
     func fetchBillingSnapshot() async throws -> BillingSnapshot {
         try await Task.sleep(nanoseconds: delayNanoseconds)
-        DiscoverDailyLimit.applyLocalPlanTier(snapshot.subscription.tier)
+        // Keep mock display aligned with the hydrated local plan cache (Firestore SoT).
+        let cached = DiscoverDailyLimit.currentPlanTier
+        if snapshot.subscription.tier != cached {
+            applyRemotePlanTier(cached, interval: snapshot.subscription.interval)
+        }
         return snapshot
+    }
+
+    /// Pull latest `planTier` / `billingInterval` from Firestore and apply locally.
+    func refreshPlanFromFirestore() async {
+        guard let data = try? await FirebaseAuthService.shared.fetchUserData(preferServer: true) else { return }
+        let parsed = PlanTierCloudSync.parseBillingPlan(from: data)
+        await MainActor.run {
+            PlanTierCloudSync.applyRemoteBillingPlan(tier: parsed.tier, interval: parsed.interval)
+        }
     }
 
     func changePlan(to planId: String, interval: BillingInterval) async throws -> CurrentSubscription {
@@ -144,7 +170,7 @@ final class MockBillingService: BillingServicing {
             usageSummary: plan.usageSummary
         )
         Self.persistSubscription(snapshot.subscription)
-        DiscoverDailyLimit.syncPlanTier(plan.tier)
+        DiscoverDailyLimit.syncPlanTier(plan.tier, interval: plan.tier == .free ? nil : interval)
 
         let next = snapshot.subscription
         let changed =

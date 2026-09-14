@@ -20,10 +20,10 @@ enum DiscoverDailyLimit {
     }
 
     /// Update local plan cache and publish to the user document (plan upgrades / changes).
-    static func syncPlanTier(_ tier: PlanTier) {
+    static func syncPlanTier(_ tier: PlanTier, interval: BillingInterval? = nil) {
         applyLocalPlanTier(tier)
         Task { @MainActor in
-            await PlanTierCloudSync.pushToFirestoreIfNeeded(tier)
+            await PlanTierCloudSync.pushToFirestoreIfNeeded(tier, interval: interval)
         }
     }
 

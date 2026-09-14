@@ -844,6 +844,7 @@
 "billing.status.free.detail" = "Vous êtes sur le forfait Free";
 "billing.cycle.summary" = "Cycle de facturation : %@";
 "billing.interval.monthly" = "Mensuel";
+"billing.current.plan.label" = "Votre forfait actuel est %@";
 "billing.interval.yearly" = "Annuel";
 "billing.interval.yearly.adj" = "annuel";
 "billing.interval.monthly.adj" = "mensuel";

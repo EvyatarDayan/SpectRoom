@@ -879,6 +879,7 @@
 "billing.status.free.detail" = "You are on the Free plan";
 "billing.cycle.summary" = "Billing cycle: %@";
 "billing.interval.monthly" = "Monthly";
+"billing.current.plan.label" = "Your current plan is %@";
 "billing.interval.yearly" = "Yearly";
 "billing.interval.yearly.adj" = "yearly";
 "billing.interval.monthly.adj" = "monthly";

@@ -166,6 +166,7 @@ class AppStateManager: ObservableObject {
                     self?.startListeningForNewMessages()
                     self?.startListeningForBlockedByUsers()
                     self?.startListeningForModerationStatus()
+                    self?.startListeningForBillingPlan()
                     self?.refreshUnreadMessageCount()
                 } else {
                     self?.pendingMfaSignIn = false
@@ -177,6 +178,7 @@ class AppStateManager: ObservableObject {
                     }
                     self?.firebaseAuth.stopListeningForBlockedByUsers()
                     self?.firebaseAuth.stopListeningForModerationStatus()
+                    self?.firebaseAuth.stopListeningForBillingPlan()
                     // If admin deleted the account and Auth was revoked before/while the popup showed,
                     // keep or restore the deleted acknowledgement so the user can tap "I understand".
                     if self?.firebaseAuth.hasPendingDeletedAcknowledgement() == true {
@@ -1098,6 +1100,11 @@ class AppStateManager: ObservableObject {
                 self?.applyBlockedByUsers(users)
             }
         }
+    }
+
+    func startListeningForBillingPlan() {
+        guard isAuthenticated else { return }
+        firebaseAuth.listenForBillingPlan()
     }
 
     func startListeningForModerationStatus() {

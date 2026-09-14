@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SpectRoom — Email verification</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #f2f2f7;
+      color: #1c1c1e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 16px;
+      -webkit-text-size-adjust: 100%;
+    }
+    .card {
+      width: 100%;
+      max-width: 560px;
+      background: #fff;
+      border: 1px solid #e5e5ea;
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 28px 24px 20px;
+      border-bottom: 1px solid #e5e5ea;
+    }
+    .header img {
+      display: block;
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+    }
+    .header-title {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.4px;
+      line-height: 40px;
+    }
+    .body {
+      padding: 32px 28px 8px;
+      text-align: center;
+    }
+    .body-compact {
+      padding: 28px 28px 32px;
+      text-align: center;
+    }
+    h1 {
+      margin: 0 0 16px;
+      font-size: 24px;
+      line-height: 1.3;
+      font-weight: 700;
+      color: #1c1c1e;
+    }
+    p {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.6;
+      color: #3a3a3c;
+    }
+    .muted {
+      margin-top: 20px;
+      font-size: 14px;
+      line-height: 1.6;
+      color: #8e8e93;
+    }
+    .checkmark-wrap {
+      margin: 8px auto 20px;
+      width: 72px;
+      height: 72px;
+    }
+    .checkmark-wrap svg {
+      display: block;
+      width: 72px;
+      height: 72px;
+    }
+    .cta {
+      display: inline-block;
+      margin: 28px auto;
+      padding: 14px 32px;
+      background: #007aff;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 600;
+      text-decoration: none;
+      border-radius: 12px;
+    }
+    .cta:hover {
+      background: #0066d6;
+    }
+    .footer {
+      padding: 20px 28px 28px;
+      border-top: 1px solid #e5e5ea;
+      text-align: center;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #8e8e93;
+    }
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 3px solid #e5e5ea;
+      border-top-color: #007aff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <img src="/assets/Logo1.png" width="40" height="40" alt="SpectRoom">
+      <span class="header-title">SpectRoom</span>
+    </div>
+
+    <div id="state-loading" class="body-compact">
+      <div class="spinner" aria-hidden="true"></div>
+      <p>Verifying your email…</p>
+    </div>
+
+    <div id="state-success" class="hidden">
+      <div class="body">
+        <div class="checkmark-wrap" aria-hidden="true">
+          <svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="36" cy="36" r="36" fill="#34C759"/>
+            <path d="M22 36.5L31.5 46L50 27.5" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <h1>Email Verified!</h1>
+        <p>Your email is confirmed. Head back to the<br>SpectRoom app to complete phone verification.</p>
+        <a class="cta" href="spectroom://open">Open SpectRoom App</a>
+        <p class="muted">You can safely close this window.</p>
+      </div>
+    </div>
+
+    <div id="state-error" class="hidden">
+      <div class="body-compact">
+        <h1>Couldn’t verify your email</h1>
+        <p id="error-message">This link may have expired or already been used. Open the SpectRoom app and request a new verification email.</p>
+        <a class="cta" href="spectroom://open">Open SpectRoom App</a>
+      </div>
+    </div>
+
+    <div class="footer">© <span id="year"></span> SpectRoom. All rights reserved.</div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode');
+    const oobCode = params.get('oobCode');
+    const apiKey = params.get('apiKey');
+
+    const loadingEl = document.getElementById('state-loading');
+    const successEl = document.getElementById('state-success');
+    const errorEl = document.getElementById('state-error');
+    const errorMessageEl = document.getElementById('error-message');
+
+    function showSuccess() {
+      loadingEl.classList.add('hidden');
+      successEl.classList.remove('hidden');
+    }
+
+    function showError(message) {
+      loadingEl.classList.add('hidden');
+      if (message) errorMessageEl.textContent = message;
+      errorEl.classList.remove('hidden');
+    }
+
+    async function run() {
+      if (mode !== 'verifyEmail' || !oobCode || !apiKey) {
+        showError('This link is invalid. Open the SpectRoom app and request a new verification email.');
+        return;
+      }
+
+      try {
+        firebase.initializeApp({
+          apiKey: apiKey,
+          authDomain: 'spectroom-553a0.firebaseapp.com',
+          projectId: 'spectroom-553a0',
+        });
+        await firebase.auth().applyActionCode(oobCode);
+        showSuccess();
+      } catch (error) {
+        console.error('Email verification failed', error);
+        showError('This link may have expired or already been used. Open the SpectRoom app and request a new verification email.');
+      }
+    }
+
+    run();
+  </script>
+</body>
+</html>

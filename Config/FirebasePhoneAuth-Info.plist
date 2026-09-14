@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Merged with generated Info.plist. Required for Firebase Phone / SMS MFA reCAPTCHA. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>Firebase Auth Phone</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<!-- Encoded App ID from GOOGLE_APP_ID 1:83359339695:ios:7ffa1ba3ad4c66fa53305a -->
+				<string>app-1-83359339695-ios-7ffa1ba3ad4c66fa53305a</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>Google / Firebase reCAPTCHA</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<!-- REVERSED_CLIENT_ID from GoogleService-Info.plist (required for MFA reCAPTCHA) -->
+				<string>com.googleusercontent.apps.83359339695-9eio3d6aj8v8b11mv3gmaqs94l54i1gr</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>SpectRoom Deep Link</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>spectroom</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

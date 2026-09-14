@@ -4,6 +4,8 @@ struct MediaDailyLimitOverlay: View {
     var title: String = "messages.media.limit.title".localized
     let message: String
     var showsPlansButton: Bool = true
+    var dismissButtonTitle: String = "messages.media.limit.not.now".localized
+    var plansButtonTitle: String = "messages.media.limit.view.plans".localized
     let onGotIt: () -> Void
     let onPlans: () -> Void
 
@@ -42,7 +44,7 @@ struct MediaDailyLimitOverlay: View {
 
                 HStack(spacing: 10) {
                     Button(action: onGotIt) {
-                        Text("common.got.it".localized)
+                        Text(dismissButtonTitle)
                             .font(.body.weight(.semibold))
                             .foregroundColor(primaryText)
                             .frame(maxWidth: .infinity)
@@ -54,7 +56,7 @@ struct MediaDailyLimitOverlay: View {
 
                     if showsPlansButton {
                         Button(action: onPlans) {
-                            Text("messages.media.limit.plans".localized)
+                            Text(plansButtonTitle)
                                 .font(.body.weight(.semibold))
                                 .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)

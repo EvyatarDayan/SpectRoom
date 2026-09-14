@@ -14,6 +14,14 @@ enum BillingInterval: String, CaseIterable, Identifiable, Codable {
         case .yearly: return "billing.interval.yearly"
         }
     }
+
+    /// Lowercase adjective used in CTAs (“Change to yearly Pro”).
+    var adjectiveKey: String {
+        switch self {
+        case .monthly: return "billing.interval.monthly.adj"
+        case .yearly: return "billing.interval.yearly.adj"
+        }
+    }
 }
 
 enum PlanTier: String, CaseIterable, Identifiable, Codable {
@@ -35,8 +43,8 @@ enum PlanTier: String, CaseIterable, Identifiable, Codable {
     /// Daily Discover swipe undos. `nil` means unlimited (Premium).
     var dailyDiscoverUndoLimit: Int? {
         switch self {
-        case .free: return 1
-        case .pro: return 3
+        case .free: return 3
+        case .pro: return 6
         case .premium: return nil
         }
     }
@@ -75,17 +83,36 @@ enum PlanTier: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// Gold star count shown next to the plan title (Free 1, Pro 2, Premium 3).
-    var titleStarCount: Int {
+    /// Label on profile photos (“Free Plan”, “Pro Plan”, “Premium Plan”).
+    var profilePlanLabelKey: String {
         switch self {
-        case .free: return 1
-        case .pro: return 2
-        case .premium: return 3
+        case .free: return "profile.plan.free"
+        case .pro: return "profile.plan.pro"
+        case .premium: return "profile.plan.premium"
         }
     }
 
+    /// Icon after the profile plan label (Free none, Pro star, Premium crown).
+    var profilePlanSymbol: String {
+        switch self {
+        case .free: return ""
+        case .pro: return "⭐️"
+        case .premium: return "👑"
+        }
+    }
+
+    /// Icon next to plan titles (Free none, Pro star, Premium crown).
     var titleStars: String {
-        String(repeating: "⭐️", count: titleStarCount)
+        profilePlanSymbol
+    }
+
+    /// Gold star count kept for any legacy call sites that need a numeric count.
+    var titleStarCount: Int {
+        switch self {
+        case .free: return 0
+        case .pro: return 1
+        case .premium: return 1
+        }
     }
 
     var accentSystemImage: String {
@@ -102,7 +129,7 @@ enum PlanTier: String, CaseIterable, Identifiable, Codable {
         case .free:
             return [
                 "billing.feature.swipes.10",
-                "billing.feature.undos.1",
+                "billing.feature.undos.3",
                 "billing.feature.match.basic",
                 "billing.feature.boost.none",
                 "billing.feature.media.5"
@@ -110,7 +137,7 @@ enum PlanTier: String, CaseIterable, Identifiable, Codable {
         case .pro:
             return [
                 "billing.feature.swipes.15",
-                "billing.feature.undos.3",
+                "billing.feature.undos.6",
                 "billing.feature.match.full",
                 "billing.feature.boost.14",
                 "billing.feature.media.20"

@@ -4,6 +4,7 @@ import Foundation
 struct ProfileView: View {
     @EnvironmentObject var appState: AppStateManager
     @Environment(\.colorScheme) var colorScheme
+    @AppStorage(DiscoverDailyLimit.planTierDefaultsKey) private var planTierRawValue = PlanTier.free.rawValue
     @State private var showingEditView = false
     @State private var showingPhotoViewer = false
     @State private var selectedPhotoIndex = 0
@@ -11,6 +12,9 @@ struct ProfileView: View {
     @State private var boostToastMessage: String?
     @State private var boostStatusTick = Date()
     
+    private var currentPlanTier: PlanTier {
+        PlanTier(rawValue: planTierRawValue) ?? .free
+    }
     var body: some View {
         NavigationView {
             ScrollView {
@@ -198,6 +202,7 @@ struct ProfileView: View {
     private var profileHeaderSection: some View {
         ProfileMainPhotoCard(
             imageURL: appState.currentUser?.profilePhotoURL,
+            planBadge: currentPlanTier,
             onTap: {
                 guard let user = appState.currentUser else { return }
                 let hasProfilePhoto = user.profilePhotoURL != nil && !(user.profilePhotoURL?.isEmpty ?? true)
@@ -432,8 +437,7 @@ struct ProfileView: View {
                             .font(.body)
                             .foregroundColor(SpectRoomTheme.text)
                             .italic()
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     
                     // Divider between looking for and preferred age

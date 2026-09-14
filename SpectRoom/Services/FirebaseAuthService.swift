@@ -589,6 +589,22 @@ class FirebaseAuthService: ObservableObject {
                 userWithPhotos.lastSeen = lastSeen
                 userWithPhotos.boostedUntil = Self.parseFreezeUntilValue(userData["boostedUntil"])
                 userWithPhotos.lastProfileBoostAt = Self.parseFreezeUntilValue(userData["lastProfileBoostAt"])
+                // Billing plan: Firestore is source of truth on startup.
+                if let raw = userData["planTier"] as? String, let remoteTier = PlanTier(rawValue: raw) {
+                    userWithPhotos.planTier = remoteTier
+                    DiscoverDailyLimit.applyLocalPlanTier(remoteTier)
+                    await MainActor.run {
+                        MockBillingService.shared.applyRemotePlanTier(remoteTier)
+                    }
+                } else {
+                    // Legacy accounts without planTier — keep local and backfill once.
+                    let localTier = DiscoverDailyLimit.currentPlanTier
+                    userWithPhotos.planTier = localTier
+                    DiscoverDailyLimit.syncPlanTier(localTier)
+                    await MainActor.run {
+                        MockBillingService.shared.applyRemotePlanTier(localTier)
+                    }
+                }
                 ProfileBoostLimit.syncFromRemote(
                     lastBoostAt: userWithPhotos.lastProfileBoostAt,
                     boostedUntil: userWithPhotos.boostedUntil
@@ -935,6 +951,7 @@ class FirebaseAuthService: ObservableObject {
         userWithPhotos.lastSeen = lastSeen
         userWithPhotos.boostedUntil = Self.parseFreezeUntilValue(userData["boostedUntil"])
         userWithPhotos.lastProfileBoostAt = Self.parseFreezeUntilValue(userData["lastProfileBoostAt"])
+        userWithPhotos.planTier = PlanTier(rawValue: userData["planTier"] as? String ?? "") ?? .free
         
         return userWithPhotos
     }
@@ -3728,7 +3745,8 @@ class FirebaseAuthService: ObservableObject {
             shareSensoryPreferences: shareSensoryPreferences,
             energyLevel: energyLevel,
             matchPercentage: matchPercentage,
-            boostedUntil: Self.parseFreezeUntilValue(userData["boostedUntil"])
+            boostedUntil: Self.parseFreezeUntilValue(userData["boostedUntil"]),
+            planTier: PlanTier(rawValue: userData["planTier"] as? String ?? "") ?? .free
         )
     }
     

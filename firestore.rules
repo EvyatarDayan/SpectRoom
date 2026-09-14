@@ -1,0 +1,122 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Keep in sync with SpectRoomAdmin/Shared/AdminAccess.swift and SpectRoomAdmin/firestore.rules
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() in [
+          'admin1@yopmail.com',
+          'admin2@yopmail.com',
+          'admin3@yopmail.com'
+        ];
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Allow users to read/write their own user document
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+
+      // Allow authenticated users to read other users' basic info for discovery
+      allow read: if isSignedIn();
+
+      // Admin moderation (warn / freeze / ban fields on any user)
+      allow update: if isAdmin();
+
+      // Swipes subcollection - users can write their own swipes and read others' swipes for matching
+      match /swipes/{swipeId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+        // Allow reading other users' swipes for match checking
+        allow read: if isSignedIn();
+      }
+
+      // Matches subcollection - users can read/write their own matches
+      // Also allow any authenticated user to write matches (for mutual match creation)
+      match /matches/{matchId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+        // Allow any authenticated user to write matches (needed for mutual match creation)
+        allow write: if isSignedIn();
+      }
+
+      // Sent messages — owner full access; admin can read for All profiles moderation
+      match /sentMessages/{messageId} {
+        allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+        allow write: if isSignedIn() && request.auth.uid == userId;
+      }
+
+      // Incoming messages — owner read; any signed-in user can write (delivery);
+      // admin can read for All profiles moderation
+      match /incomingMessages/{messageId} {
+        allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+        allow write: if isSignedIn();
+      }
+
+      // Profile photos subcollection
+      match /profile_photos/{photoId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+
+      // Gallery photos subcollection
+      match /gallery_photos/{photoId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+
+      // Blocked users — only the owner can manage their block list
+      match /blockedUsers/{blockedUserId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+
+      // Blocked-by mirror — blocked user reads; blocker writes when blocking/unblocking
+      match /blockedBy/{blockerId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow create, update, delete: if isSignedIn() && request.auth.uid == blockerId;
+      }
+    }
+
+    // Support messages — any authenticated user can create; admin can read/update
+    match /supportMessages/{docId} {
+      allow create: if isSignedIn();
+      allow read, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Reports — users create/read their own; admin can read all and update status/actions
+    match /reports/{reportId} {
+      allow create: if isSignedIn()
+        && request.resource.data.reporter_user_id == request.auth.uid
+        && request.resource.data.status == "pending";
+      allow read: if isSignedIn()
+        && (resource.data.reporter_user_id == request.auth.uid || isAdmin());
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Freeze history — admin Frozen profiles (Frozen / History tabs)
+    match /moderationFreezes/{freezeId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Ban history — admin Banned profiles
+    match /moderationBans/{banId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Warning history — admin All profiles → History
+    match /moderationWarnings/{warningId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Soft-deleted emails — owner can register their email on delete;
+    // signup checks this via Cloud Function (Admin SDK). Admin can clear on revive.
+    match /deletedEmails/{email} {
+      allow create, update: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if isAdmin();
+      allow read: if false;
+    }
+  }
+}

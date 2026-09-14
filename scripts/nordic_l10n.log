@@ -1,0 +1,101 @@
+/Users/evyatardayan/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+Parsed 774 English keys
+
+=== Norwegian (nb) ===
+  unique 25/681
+  unique 50/681
+  unique 75/681
+  unique 100/681
+  unique 125/681
+  unique 150/681
+  unique 175/681
+  unique 200/681
+  unique 225/681
+  unique 250/681
+  unique 275/681
+  unique 300/681
+  unique 325/681
+  unique 350/681
+  unique 375/681
+  unique 400/681
+  unique 425/681
+  unique 450/681
+  unique 475/681
+  unique 500/681
+  unique 525/681
+  unique 550/681
+  unique 575/681
+  unique 600/681
+  unique 625/681
+  unique 650/681
+  unique 675/681
+  unique 681/681
+Wrote /Users/evyatardayan/Desktop/My projects/swift/SpectRoom/SpectRoom/nb.lproj/Localizable.strings (774 keys)
+
+=== Finnish (fi) ===
+  unique 25/681
+  unique 50/681
+  unique 75/681
+  unique 100/681
+  unique 125/681
+  unique 150/681
+  unique 175/681
+  unique 200/681
+  unique 225/681
+  unique 250/681
+  retry (No ban history --> No translation was found using the current translator. Try another translator?)
+  unique 275/681
+  unique 300/681
+  unique 325/681
+  unique 350/681
+  unique 375/681
+  unique 400/681
+  unique 425/681
+  unique 450/681
+  unique 475/681
+  unique 500/681
+  unique 525/681
+  unique 550/681
+  unique 575/681
+  unique 600/681
+  unique 625/681
+  unique 650/681
+  unique 675/681
+  unique 681/681
+Wrote /Users/evyatardayan/Desktop/My projects/swift/SpectRoom/SpectRoom/fi.lproj/Localizable.strings (774 keys)
+
+=== Icelandic (is) ===
+  unique 25/681
+  unique 50/681
+  unique 75/681
+  retry (20 km --> No translation was found using the current translator. Try another translator?)
+  unique 100/681
+  unique 125/681
+  unique 150/681
+  unique 175/681
+  unique 200/681
+  unique 225/681
+  unique 250/681
+  retry (Remove ban --> No translation was found using the current translator. Try another translator?)
+  unique 275/681
+  unique 300/681
+  unique 325/681
+  unique 350/681
+  unique 375/681
+  unique 400/681
+  unique 425/681
+  unique 450/681
+  unique 475/681
+  unique 500/681
+  unique 525/681
+  unique 550/681
+  unique 575/681
+  unique 600/681
+  unique 625/681
+  unique 650/681
+  unique 675/681
+  unique 681/681
+Wrote /Users/evyatardayan/Desktop/My projects/swift/SpectRoom/SpectRoom/is.lproj/Localizable.strings (774 keys)
+
+Done.

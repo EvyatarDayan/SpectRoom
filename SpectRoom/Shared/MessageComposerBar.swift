@@ -30,10 +30,6 @@ struct MessageComposerBar: View {
     private var hasText: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
-
-    private var mediaControlsDisabled: Bool {
-        isDisabled || isMediaDisabled
-    }
     
     var body: some View {
         HStack(alignment: isSingleLineHeight ? .center : .bottom, spacing: 8) {
@@ -88,7 +84,7 @@ struct MessageComposerBar: View {
                         .font(.system(size: 20, weight: .light))
                         .foregroundColor(SpectRoomTheme.text)
                         .frame(width: 34, height: 34)
-                        .opacity(mediaControlsDisabled && !isMediaDisabled ? 0.5 : (isMediaDisabled ? 0.45 : 1))
+                        .opacity(isDisabled ? 0.5 : 1)
                 }
                 .disabled(isDisabled && !isMediaDisabled)
                 
@@ -98,10 +94,10 @@ struct MessageComposerBar: View {
                             .font(.system(size: 20, weight: .light))
                             .foregroundColor(.primary)
                             .frame(width: 34, height: 34)
-                            .opacity(0.45)
                     }
                     .buttonStyle(.plain)
                     .disabled(isDisabled)
+                    .opacity(isDisabled ? 0.5 : 1)
                 } else {
                     Image(systemName: isRecording ? "mic.fill" : "mic")
                         .font(.system(size: 20, weight: isRecording ? .regular : .light))

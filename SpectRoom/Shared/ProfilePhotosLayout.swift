@@ -38,6 +38,7 @@ struct ProfileMainPhotoCard: View {
     var placeholderSystemName: String = "person.fill"
     var showsCameraBadge: Bool = false
     var usesDashedAddPlaceholder: Bool = false
+    var planBadge: PlanTier? = nil
     var onTap: (() -> Void)?
     
     init(
@@ -46,6 +47,7 @@ struct ProfileMainPhotoCard: View {
         placeholderSystemName: String = "person.fill",
         showsCameraBadge: Bool = false,
         usesDashedAddPlaceholder: Bool = false,
+        planBadge: PlanTier? = nil,
         onTap: (() -> Void)? = nil
     ) {
         self.imageURL = imageURL
@@ -53,6 +55,7 @@ struct ProfileMainPhotoCard: View {
         self.placeholderSystemName = placeholderSystemName
         self.showsCameraBadge = showsCameraBadge
         self.usesDashedAddPlaceholder = usesDashedAddPlaceholder
+        self.planBadge = planBadge
         self.onTap = onTap
     }
     
@@ -62,20 +65,37 @@ struct ProfileMainPhotoCard: View {
     
     var body: some View {
         Button(action: { onTap?() }) {
-            ZStack(alignment: .bottomTrailing) {
+            ZStack {
                 Color.clear
                     .frame(maxWidth: .infinity)
                     .frame(height: ProfilePhotoStyle.mainPhotoHeight)
                     .overlay { photoContent }
                     .clipped()
                 
+                if let planBadge {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            ProfilePlanPhotoBadge(tier: planBadge)
+                                .padding(12)
+                            Spacer(minLength: 48)
+                        }
+                    }
+                }
+                
                 if showsCameraBadge && hasPhoto {
-                    Image(systemName: "camera.circle.fill")
-                        .font(.system(size: 34))
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, Color.blue)
-                        .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
-                        .padding(14)
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Image(systemName: "camera.circle.fill")
+                                .font(.system(size: 34))
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.white, Color.blue)
+                                .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
+                                .padding(14)
+                        }
+                    }
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: ProfilePhotoStyle.cardCorner, style: .continuous))

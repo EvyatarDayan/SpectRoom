@@ -21,11 +21,16 @@ struct ProfileEditView: View {
     @EnvironmentObject var appState: AppStateManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) var colorScheme
+    @AppStorage(DiscoverDailyLimit.planTierDefaultsKey) private var planTierRawValue = PlanTier.free.rawValue
     
     // MARK: - Parameters
     let isMandatoryCompletion: Bool
     let embedsInTabBar: Bool
     @Binding var selectedTab: Int
+    
+    private var currentPlanTier: PlanTier {
+        PlanTier(rawValue: planTierRawValue) ?? .free
+    }
     
     init(
         isMandatoryCompletion: Bool = false,
@@ -445,6 +450,7 @@ struct ProfileEditView: View {
                 localImage: profilePhoto,
                 showsCameraBadge: true,
                 usesDashedAddPlaceholder: true,
+                planBadge: currentPlanTier,
                 onTap: {
                     isEditingProfilePhoto = true
                     showingImagePicker = true

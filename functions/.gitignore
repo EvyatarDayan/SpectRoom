@@ -1,0 +1,4 @@
+# Firebase Admin private keys — never commit
+serviceAccountKey.json
+service-account.json
+*-firebase-adminsdk-*.json

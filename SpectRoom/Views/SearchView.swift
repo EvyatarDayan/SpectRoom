@@ -7,14 +7,24 @@
 
 import SwiftUI
 import Foundation
+import Photos
+import UIKit
 
 /// Tracks how many discover like/pass actions each account has used today (local day).
 enum DiscoverDailyLimit {
     static let planTierDefaultsKey = "billingCurrentPlanTier"
 
-    /// Keep Discover quota in sync when the user changes plan in Account & Billing.
-    static func syncPlanTier(_ tier: PlanTier) {
+    /// Update local plan cache only (no cloud write). Use when applying a tier loaded from Firestore.
+    static func applyLocalPlanTier(_ tier: PlanTier) {
         UserDefaults.standard.set(tier.rawValue, forKey: planTierDefaultsKey)
+    }
+
+    /// Update local plan cache and publish to the user document (plan upgrades / changes).
+    static func syncPlanTier(_ tier: PlanTier) {
+        applyLocalPlanTier(tier)
+        Task { @MainActor in
+            await PlanTierCloudSync.pushToFirestoreIfNeeded(tier)
+        }
     }
 
     static var currentPlanTier: PlanTier {
@@ -605,6 +615,8 @@ struct SearchView: View {
                     title: DiscoverDailyLimit.undoLimitTitle,
                     message: DiscoverDailyLimit.undoLimitMessage,
                     showsPlansButton: DiscoverDailyLimit.currentPlanTier != .premium,
+                    dismissButtonTitle: "search.undo.limit.not.now".localized,
+                    plansButtonTitle: "search.undo.limit.view.plans".localized,
                     onGotIt: {
                         showingUndoLimitAlert = false
                     },
@@ -1198,7 +1210,8 @@ struct SearchView: View {
             shareSensoryPreferences: user.shareSensoryPreferences,
             energyLevel: user.energyLevel,
             matchPercentage: matchPercentage,
-            boostedUntil: user.boostedUntil
+            boostedUntil: user.boostedUntil,
+            planTier: user.planTier
         )
     }
     
@@ -2842,7 +2855,7 @@ struct UserProfileModal: View {
     @State private var pendingReportReason: ProfileReportReason?
     @State private var pendingReportDetails: String?
     @State private var showingMatchDetails = false
-    @State private var showingLookingForDetails = false
+    @State private var showingAccountBilling = false
     
     init(profile: ProfileCard) {
         self.profile = profile
@@ -3001,7 +3014,8 @@ struct UserProfileModal: View {
             if !allPhotos.isEmpty {
                 PhotoViewerModal(
                     photos: allPhotos,
-                    selectedIndex: $selectedPhotoIndex
+                    selectedIndex: $selectedPhotoIndex,
+                    allowsSaving: true
                 )
                 .presentationBackground(.clear)
             }
@@ -3075,14 +3089,16 @@ struct UserProfileModal: View {
                         return formattedLifestyle(lifestyle)
                     }(),
                     localizedIdealFirstDate: formattedIdealFirstDate(resolvedMatchBreakdown?.commonIdealFirstDates ?? []),
-                    onDismiss: { showingMatchDetails = false }
-                )
-            } else if showingLookingForDetails {
-                LookingForDetailsOverlay(
-                    items: lookingForPopupItems(displayProfile.lookingFor).map { formatPreference($0) },
-                    onDismiss: { showingLookingForDetails = false }
+                    onDismiss: { showingMatchDetails = false },
+                    onUpgrade: {
+                        showingMatchDetails = false
+                        showingAccountBilling = true
+                    }
                 )
             }
+        }
+        .sheet(isPresented: $showingAccountBilling) {
+            AccountBillingView()
         }
     }
     
@@ -3154,7 +3170,8 @@ struct UserProfileModal: View {
                 shareSensoryPreferences: refreshed.shareSensoryPreferences,
                 energyLevel: refreshed.energyLevel,
                 matchPercentage: matchPercentage,
-                boostedUntil: refreshed.boostedUntil
+                boostedUntil: refreshed.boostedUntil,
+                planTier: refreshed.planTier
             )
             
             await MainActor.run {
@@ -3176,6 +3193,7 @@ struct UserProfileModal: View {
             
             ProfileMainPhotoCard(
                 imageURL: displayProfile.imageURL,
+                planBadge: displayProfile.planTier ?? .free,
                 onTap: {
                     let hasProfilePhoto = displayProfile.imageURL != nil && !(displayProfile.imageURL?.isEmpty ?? true)
                     let hasGalleryPhotos = !displayProfile.photos.isEmpty
@@ -3390,31 +3408,13 @@ struct UserProfileModal: View {
                     }
                     
                     if hasLookingFor {
-                        let lookingForText = "profile.looking.for".localized + ": \(formatLookingFor(displayProfile.lookingFor))"
-                        let hasMultipleLookingFor = displayProfile.lookingFor.count > 1
-                        
-                        HStack(alignment: .center, spacing: 8) {
-                            Text(lookingForText)
-                                .font(.body)
-                                .foregroundColor(SpectRoomTheme.text)
-                                .italic()
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            
-                            if hasMultipleLookingFor {
-                                Image(systemName: "info.circle")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(.blue)
-                            }
-                        }
-                        .blueFieldStyle()
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if hasMultipleLookingFor {
-                                showingLookingForDetails = true
-                            }
-                        }
+                        Text("profile.looking.for".localized + ": \(formatLookingFor(displayProfile.lookingFor))")
+                            .font(.body)
+                            .foregroundColor(SpectRoomTheme.text)
+                            .italic()
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .blueFieldStyle()
                     }
                     
                     if hasCustomPreferredAge {
@@ -3524,11 +3524,6 @@ struct UserProfileModal: View {
             }
         }
         return formatted.joined(separator: ", ")
-    }
-    
-    private func lookingForPopupItems(_ lookingFor: [String]) -> [String] {
-        let definiteOptions = lookingFor.filter { $0 != "Not sure yet" && $0 != "Not Sure Yet" }
-        return definiteOptions.isEmpty ? lookingFor : definiteOptions
     }
     
     private func formatPreference(_ preference: String) -> String {
@@ -4130,6 +4125,7 @@ private struct MatchDetailsOverlay: View {
     let localizedLifestyle: String
     let localizedIdealFirstDate: String
     let onDismiss: () -> Void
+    var onUpgrade: () -> Void = {}
     @Environment(\.colorScheme) private var colorScheme
     
     private var isLight: Bool { colorScheme == .light }
@@ -4194,19 +4190,53 @@ private struct MatchDetailsOverlay: View {
                             )
                         }
                     }
+                } else {
+                    Text("search.match.details.upgrade.message".localized)
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundColor(secondaryText)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 
-                Button(action: onDismiss) {
-                    Text("common.got.it".localized)
-                        .font(.body.weight(.medium))
-                        .foregroundColor(primaryText)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color(.systemGray5))
-                        .clipShape(Capsule())
+                if showsFullBreakdown {
+                    Button(action: onDismiss) {
+                        Text("common.got.it".localized)
+                            .font(.body.weight(.medium))
+                            .foregroundColor(primaryText)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(Color(.systemGray5))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
+                } else {
+                    HStack(spacing: 10) {
+                        Button(action: onDismiss) {
+                            Text("search.match.details.not.now".localized)
+                                .font(.body.weight(.semibold))
+                                .foregroundColor(primaryText)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
+                                .background(Color(.systemGray5))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+
+                        Button(action: onUpgrade) {
+                            Text("search.match.details.view.plans".localized)
+                                .font(.body.weight(.semibold))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
+                                .background(Color.blue)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.top, 4)
                 }
-                .buttonStyle(.plain)
-                .padding(.top, 4)
             }
             .padding(24)
             .frame(maxWidth: 340)
@@ -4246,64 +4276,14 @@ private struct MatchDetailsOverlay: View {
     }
 }
 
-private struct LookingForDetailsOverlay: View {
-    let items: [String]
-    let onDismiss: () -> Void
-    
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.6)
-                .ignoresSafeArea()
-                .onTapGesture(perform: onDismiss)
-            
-            VStack(alignment: .leading, spacing: 16) {
-                Text("profile.looking.for.details.title".localized)
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(.white)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(items, id: \.self) { item in
-                        HStack(alignment: .top, spacing: 8) {
-                            Text("•")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white)
-                            Text(item)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                
-                Button(action: onDismiss) {
-                    Text("common.got.it".localized)
-                        .font(.headline)
-                        .foregroundColor(.black)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color.white)
-                        .cornerRadius(10)
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 4)
-            }
-            .padding(24)
-            .frame(maxWidth: 340)
-            .background(Color.black.opacity(0.85))
-            .cornerRadius(16)
-            .padding(.horizontal, 28)
-        }
-    }
-}
-
 struct PhotoViewerModal: View {
     let photos: [String]
     @Binding var selectedIndex: Int
+    var allowsSaving: Bool = false
     @Environment(\.dismiss) private var dismiss
-    @State private var dragOffset = CGSize.zero
+    @State private var isSaving = false
+    @State private var showingSaveSuccessPopup = false
+    @State private var showingSaveFailedAlert = false
     
     var body: some View {
         ZStack {
@@ -4311,6 +4291,7 @@ struct PhotoViewerModal: View {
             Color.black.opacity(0.8)
                 .ignoresSafeArea()
                 .onTapGesture {
+                    guard !showingSaveSuccessPopup else { return }
                     dismiss()
                 }
             
@@ -4352,10 +4333,32 @@ struct PhotoViewerModal: View {
                 }
             }
             
-            // Done button
+            // Save (left) + Done (right)
             VStack {
                 HStack {
+                    if allowsSaving && !photos.isEmpty {
+                        Button {
+                            guard !isSaving,
+                                  selectedIndex >= 0,
+                                  selectedIndex < photos.count else { return }
+                            saveImageToPhotoLibrary(imageURL: photos[selectedIndex])
+                        } label: {
+                            if isSaving {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            } else {
+                                Text("common.save".localized)
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                            }
+                        }
+                        .disabled(isSaving)
+                        .padding(.leading, 35)
+                        .padding(.top, 24)
+                    }
+                    
                     Spacer()
+                    
                     Button("common.done".localized) {
                         dismiss()
                     }
@@ -4365,6 +4368,83 @@ struct PhotoViewerModal: View {
                     .padding(.top, 24)
                 }
                 Spacer()
+            }
+            
+            if showingSaveSuccessPopup {
+                PhotoSavedToGalleryPopup {
+                    showingSaveSuccessPopup = false
+                }
+            }
+        }
+        .alert("messages.image.saved".localized, isPresented: $showingSaveFailedAlert) {
+            Button("common.done".localized, role: .cancel) {}
+        } message: {
+            Text("messages.image.saved.failed".localized)
+        }
+    }
+    
+    private func saveImageToPhotoLibrary(imageURL: String) {
+        guard let url = URL(string: imageURL) else {
+            showingSaveFailedAlert = true
+            return
+        }
+        
+        isSaving = true
+        Task {
+            do {
+                let image: UIImage
+                if let cached = ImageCacheService.shared.image(for: imageURL) {
+                    image = cached
+                } else {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    guard let downloaded = UIImage(data: data) else {
+                        await MainActor.run {
+                            isSaving = false
+                            showingSaveFailedAlert = true
+                        }
+                        return
+                    }
+                    ImageCacheService.shared.insert(downloaded, for: imageURL)
+                    image = downloaded
+                }
+                
+                let currentStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+                let status: PHAuthorizationStatus
+                if currentStatus == .notDetermined {
+                    status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+                } else {
+                    status = currentStatus
+                }
+                
+                guard status == .authorized || status == .limited else {
+                    await MainActor.run {
+                        isSaving = false
+                        showingSaveFailedAlert = true
+                    }
+                    return
+                }
+                
+                PHPhotoLibrary.shared().performChanges({
+                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                }, completionHandler: { success, error in
+                    DispatchQueue.main.async {
+                        self.isSaving = false
+                        if success {
+                            self.showingSaveSuccessPopup = true
+                        } else {
+                            self.showingSaveFailedAlert = true
+                            if let error {
+                                print("❌ Error saving image: \(error.localizedDescription)")
+                            }
+                        }
+                    }
+                })
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    showingSaveFailedAlert = true
+                    print("❌ Error downloading image: \(error.localizedDescription)")
+                }
             }
         }
     }
@@ -4391,6 +4471,50 @@ struct PhotoViewerModal: View {
                     }
                 }
             }
+        }
+    }
+}
+
+private struct PhotoSavedToGalleryPopup: View {
+    let onDone: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+    
+    private var panelBackground: Color {
+        colorScheme == .light ? Color.white.opacity(0.94) : Color(.systemGray6).opacity(0.95)
+    }
+    
+    private var primaryText: Color {
+        colorScheme == .light ? .black : .white
+    }
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(colorScheme == .light ? 0.28 : 0.55)
+                .ignoresSafeArea()
+            
+            VStack(alignment: .leading, spacing: 18) {
+                Text("profile.photo.saved.title".localized)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(primaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                Button(action: onDone) {
+                    Text("common.done".localized)
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                        .background(Color.blue)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(22)
+            .frame(maxWidth: 340)
+            .background(panelBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: Color.black.opacity(0.18), radius: 20, x: 0, y: 10)
+            .padding(.horizontal, 28)
         }
     }
 }

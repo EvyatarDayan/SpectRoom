@@ -25,7 +25,6 @@ struct SettingsView: View {
     @State private var showingHelpSupport = false
     @State private var showingAbout = false
     @State private var showingAccountBilling = false
-    @AppStorage(DiscoverDailyLimit.planTierDefaultsKey) private var planTierRawValue = PlanTier.free.rawValue
     @State private var showingDeleteAccountConfirmation = false
     @State private var deleteConfirmationStep: DeleteAccountConfirmationStep = .sure
     @State private var deleteConfirmationText = ""
@@ -250,7 +249,6 @@ struct SettingsView: View {
                                     .minimumScaleFactor(0.8)
                             }
                             Spacer()
-                            PlanTierBadgeLabel(tier: PlanTier(rawValue: planTierRawValue) ?? .free)
                             Image(systemName: "chevron.right")
                                 .foregroundColor(SpectRoomTheme.secondaryText)
                                 .font(.caption)

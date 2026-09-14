@@ -1,4 +1,6 @@
 import Foundation
+import FirebaseAuth
+import FirebaseFunctions
 
 @MainActor
 protocol BillingServicing {
@@ -13,6 +15,70 @@ protocol BillingServicing {
     func toggleGooglePay(enabled: Bool) async throws -> Bool
 }
 
+/// Best-effort branded plan-change emails (same Cloud Function template as welcome mail).
+enum PlanChangeEmailNotifier {
+    static func notifyChanged(
+        from previous: CurrentSubscription,
+        to next: CurrentSubscription
+    ) async {
+        await send([
+            "changeType": "changed",
+            "fromPlan": previous.tier.emailPlanName,
+            "fromInterval": previous.tier == .free ? "" : previous.interval.emailIntervalName,
+            "toPlan": next.tier.emailPlanName,
+            "toInterval": next.tier == .free ? "" : next.interval.emailIntervalName,
+        ])
+    }
+
+    static func notifyCancelled(_ subscription: CurrentSubscription) async {
+        var payload: [String: Any] = [
+            "changeType": "cancelled",
+            "fromPlan": subscription.tier.emailPlanName,
+            "fromInterval": subscription.interval.emailIntervalName,
+            "toPlan": "Free",
+            "toInterval": "",
+        ]
+        if let renewsOn = subscription.renewsOn {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_GB_POSIX")
+            formatter.dateFormat = "dd/MM/yyyy"
+            payload["accessUntil"] = formatter.string(from: renewsOn)
+        }
+        await send(payload)
+    }
+
+    private static func send(_ data: [String: Any]) async {
+        guard Auth.auth().currentUser != nil else { return }
+        do {
+            _ = try await Functions.functions(region: "us-central1")
+                .httpsCallable("sendSpectRoomPlanChangeEmail")
+                .call(data)
+            print("✅ Plan change email requested")
+        } catch {
+            print("⚠️ Plan change email failed: \(error.localizedDescription)")
+        }
+    }
+}
+
+private extension PlanTier {
+    var emailPlanName: String {
+        switch self {
+        case .free: return "Free"
+        case .pro: return "Pro"
+        case .premium: return "Premium"
+        }
+    }
+}
+
+private extension BillingInterval {
+    var emailIntervalName: String {
+        switch self {
+        case .monthly: return "monthly"
+        case .yearly: return "yearly"
+        }
+    }
+}
+
 /// Local mock billing backend until StoreKit / Stripe is wired.
 @MainActor
 final class MockBillingService: BillingServicing {
@@ -25,12 +91,33 @@ final class MockBillingService: BillingServicing {
 
     private init() {
         snapshot = Self.makeInitialSnapshot()
-        DiscoverDailyLimit.syncPlanTier(snapshot.subscription.tier)
+        DiscoverDailyLimit.applyLocalPlanTier(snapshot.subscription.tier)
+    }
+
+    /// Align mock billing with the plan stored on the user document (startup / profile load).
+    func applyRemotePlanTier(_ tier: PlanTier) {
+        guard let plan = snapshot.availablePlans.first(where: { $0.tier == tier }) else { return }
+        let renews = Calendar.current.date(
+            byAdding: snapshot.subscription.interval == .yearly ? .year : .month,
+            value: 1,
+            to: Date()
+        )
+        snapshot.subscription = CurrentSubscription(
+            planId: plan.id,
+            tier: plan.tier,
+            status: plan.tier == .free ? .none : (snapshot.subscription.status == .cancelled ? .cancelled : .renewing),
+            interval: snapshot.subscription.interval,
+            renewsOn: plan.tier == .free ? nil : (snapshot.subscription.renewsOn ?? renews),
+            cancelledAt: plan.tier == .free ? nil : snapshot.subscription.cancelledAt,
+            usageSummary: plan.usageSummary
+        )
+        Self.persistSubscription(snapshot.subscription)
+        DiscoverDailyLimit.applyLocalPlanTier(tier)
     }
 
     func fetchBillingSnapshot() async throws -> BillingSnapshot {
         try await Task.sleep(nanoseconds: delayNanoseconds)
-        DiscoverDailyLimit.syncPlanTier(snapshot.subscription.tier)
+        DiscoverDailyLimit.applyLocalPlanTier(snapshot.subscription.tier)
         return snapshot
     }
 
@@ -40,6 +127,7 @@ final class MockBillingService: BillingServicing {
             throw BillingServiceError.planNotFound
         }
 
+        let previous = snapshot.subscription
         let renews = Calendar.current.date(
             byAdding: interval == .yearly ? .year : .month,
             value: 1,
@@ -57,7 +145,16 @@ final class MockBillingService: BillingServicing {
         )
         Self.persistSubscription(snapshot.subscription)
         DiscoverDailyLimit.syncPlanTier(plan.tier)
-        return snapshot.subscription
+
+        let next = snapshot.subscription
+        let changed =
+            previous.tier != next.tier
+            || previous.interval != next.interval
+            || previous.status == .cancelled
+        if changed {
+            Task { await PlanChangeEmailNotifier.notifyChanged(from: previous, to: next) }
+        }
+        return next
     }
 
     func cancelSubscription() async throws -> CurrentSubscription {
@@ -67,9 +164,18 @@ final class MockBillingService: BillingServicing {
         }
         snapshot.subscription.status = .cancelled
         snapshot.subscription.cancelledAt = Date()
+        if snapshot.subscription.renewsOn == nil {
+            snapshot.subscription.renewsOn = Calendar.current.date(
+                byAdding: snapshot.subscription.interval == .yearly ? .year : .month,
+                value: 1,
+                to: Date()
+            )
+        }
         Self.persistSubscription(snapshot.subscription)
+        let cancelled = snapshot.subscription
+        Task { await PlanChangeEmailNotifier.notifyCancelled(cancelled) }
         // Cancelled paid plans keep remaining access for the period; swipe quota stays on current tier.
-        return snapshot.subscription
+        return cancelled
     }
 
     func setDefaultPaymentMethod(id: String) async throws -> [PaymentMethod] {

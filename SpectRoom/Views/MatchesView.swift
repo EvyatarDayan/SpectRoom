@@ -552,15 +552,16 @@ struct MatchGridCard: View {
         let title = String(format: "matches.energy.today".localized, option.title)
         // Hidden trailing emoji balances the leading one so only the text is
         // optically centered; visible emoji sits slightly left of the text.
-        return HStack(alignment: .center, spacing: 6) {
+        return HStack(alignment: .center, spacing: 10) {
             Text(option.emoji)
                 .font(.system(size: 18))
-                .offset(x: 12)
+                .offset(x: 6)
             Text(title)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(option.color)
                 .multilineTextAlignment(.center)
-                .lineLimit(2)
+                .lineLimit(3)
+                .minimumScaleFactor(0.85)
                 .frame(maxWidth: max(0, infoWidth - 40))
             Text(option.emoji)
                 .font(.system(size: 18))

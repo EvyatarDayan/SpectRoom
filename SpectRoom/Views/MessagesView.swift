@@ -1070,6 +1070,9 @@ struct MessageConversationModal: View {
     @State private var showingMicLongPressTip = false
     @State private var showingMediaLimitAlert = false
     @State private var showingAccountBilling = false
+    /// Keep pending image/voice across Account & Billing so Send can resume after upgrade.
+    @State private var restoreImagePreviewAfterBilling = false
+    @State private var restoreVoicePreviewAfterBilling = false
     @State private var mediaSendCount = MediaDailyLimit.currentCount()
     @State private var loadError = false
     @State private var showingPreMessageOptions = false
@@ -1382,6 +1385,8 @@ struct MessageConversationModal: View {
             } else if showingMediaLimitAlert {
                 MediaDailyLimitOverlay(
                     message: MediaDailyLimit.limitMessage,
+                    dismissButtonTitle: "messages.media.limit.not.now".localized,
+                    plansButtonTitle: "messages.media.limit.view.plans".localized,
                     onGotIt: {
                         showingMediaLimitAlert = false
                     },
@@ -1392,7 +1397,21 @@ struct MessageConversationModal: View {
                 )
             }
         }
-        .sheet(isPresented: $showingAccountBilling) {
+        .sheet(isPresented: $showingAccountBilling, onDismiss: {
+            mediaSendCount = MediaDailyLimit.currentCount()
+            let shouldRestoreImage = restoreImagePreviewAfterBilling && selectedImage != nil
+            let shouldRestoreVoice = restoreVoicePreviewAfterBilling && audioRecordingURL != nil
+            restoreImagePreviewAfterBilling = false
+            restoreVoicePreviewAfterBilling = false
+            guard shouldRestoreImage || shouldRestoreVoice else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                if shouldRestoreImage {
+                    showingImageReadyPreview = true
+                } else if shouldRestoreVoice {
+                    showRecordingPreview = true
+                }
+            }
+        }) {
             AccountBillingView()
         }
         .onAppear {
@@ -1466,7 +1485,8 @@ struct MessageConversationModal: View {
                         showingImageReadyPreview = false
                     },
                     onUpgrade: {
-                        selectedImage = nil
+                        // Keep the selected image; reopen this ready sheet after billing closes.
+                        restoreImagePreviewAfterBilling = true
                         showingImageReadyPreview = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                             showingAccountBilling = true
@@ -1539,7 +1559,11 @@ struct MessageConversationModal: View {
             get: { showRecordingPreview },
             set: { newValue in
                 if !newValue, !isSendingVoice {
-                    discardRecording()
+                    if restoreVoicePreviewAfterBilling {
+                        showRecordingPreview = false
+                    } else {
+                        discardRecording()
+                    }
                 } else if newValue {
                     showRecordingPreview = true
                 }
@@ -1558,7 +1582,9 @@ struct MessageConversationModal: View {
                         discardRecording()
                     },
                     onUpgrade: {
-                        discardRecording()
+                        // Keep the recording; reopen this ready sheet after billing closes.
+                        restoreVoicePreviewAfterBilling = true
+                        showRecordingPreview = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                             showingAccountBilling = true
                         }

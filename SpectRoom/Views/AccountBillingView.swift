@@ -8,51 +8,19 @@ final class AccountBillingViewModel: ObservableObject {
     @Published var selectedInterval: BillingInterval = .monthly
     @Published var subscription: CurrentSubscription?
     @Published var plans: [SubscriptionPlan] = []
-    @Published var paymentMethods: [PaymentMethod] = []
     @Published var invoices: [Invoice] = []
-    @Published var applePayEnabled = false
-    @Published var googlePayEnabled = false
     @Published var isBusy = false
     @Published var isExportingBillingHistory = false
 
     @Published var pendingPlanChange: SubscriptionPlan?
+    @Published var planChangeSuccessLabel: String?
     @Published var showingCancelConfirm = false
-    @Published var paymentMethodPendingDelete: PaymentMethod?
-    @Published var showingDeleteCardConfirm = false
-    @Published var editingPaymentMethod: PaymentMethod?
-    @Published var showingAddCard = false
-    @Published var newCard = NewCardDraft()
-    @Published var didAttemptCardSave = false
-    /// Edit mode: card number shows `**** **** **** 1234` until the field is focused.
-    @Published var cardNumberIsMasked = false
-    /// Edit mode: CVC shows `***` until the field is focused.
-    @Published var cvcIsMasked = false
+    @Published var cancelSuccessPlanLabel: String?
 
     private let service: BillingServicing
 
     init(service: BillingServicing? = nil) {
         self.service = service ?? MockBillingService.shared
-    }
-
-    var isShowingCardForm: Bool {
-        showingAddCard || editingPaymentMethod != nil
-    }
-
-    var isEditingCard: Bool {
-        editingPaymentMethod != nil
-    }
-
-    var isCardFormValid: Bool {
-        if isEditingCard {
-            return newCard.isCardNameValid
-                && newCard.isExpiryValid
-                && (newCard.cardholderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || newCard.isCardholderNameValid)
-                && (cardNumberIsMasked || newCard.cardNumber.isEmpty || newCard.isCardNumberLengthValid)
-                && (cvcIsMasked || newCard.cvc.isEmpty || newCard.isCVCValid)
-                && (newCard.postalCode.isEmpty || newCard.isPostalCodeValid)
-        }
-        return newCard.isValid
     }
 
     var currentPlan: SubscriptionPlan? {
@@ -79,65 +47,37 @@ final class AccountBillingViewModel: ObservableObject {
         isLoading = false
     }
 
-    func confirmPlanChange() async {
-        guard let plan = pendingPlanChange else { return }
+    /// Call after capturing/clearing `pendingPlanChange` so the confirm alert dismisses immediately.
+    func performPlanChange(_ plan: SubscriptionPlan) async {
+        let targetLabel = changeTargetLabel(for: plan)
         isBusy = true
         defer { isBusy = false }
         do {
             subscription = try await service.changePlan(to: plan.id, interval: selectedInterval)
-            pendingPlanChange = nil
-            showToast(String(format: "billing.toast.plan.updated".localized, plan.name))
+            planChangeSuccessLabel = targetLabel
         } catch {
             showToast(error.localizedDescription)
         }
     }
 
-    func cancelSubscription() async {
+    func dismissPlanChangeDialog() {
+        pendingPlanChange = nil
+        planChangeSuccessLabel = nil
+    }
+
+    func performCancelSubscription(planLabel: String) async {
         isBusy = true
         defer { isBusy = false }
         do {
             subscription = try await service.cancelSubscription()
-            showingCancelConfirm = false
-            showToast("billing.toast.subscription.cancelled".localized)
+            cancelSuccessPlanLabel = planLabel
         } catch {
             showToast(error.localizedDescription)
         }
     }
 
-    func setDefault(_ method: PaymentMethod) async {
-        isBusy = true
-        defer { isBusy = false }
-        do {
-            paymentMethods = try await service.setDefaultPaymentMethod(id: method.id)
-            showToast("billing.toast.default.updated".localized)
-        } catch {
-            showToast(error.localizedDescription)
-        }
-    }
-
-    func deletePaymentMethod() async {
-        guard let method = paymentMethodPendingDelete else { return }
-        let methodId = method.id
-        isBusy = true
-        defer { isBusy = false }
-        do {
-            paymentMethods = try await service.deletePaymentMethod(id: methodId)
-            paymentMethodPendingDelete = nil
-            showingDeleteCardConfirm = false
-            showToast("billing.toast.card.removed".localized)
-        } catch {
-            showToast(error.localizedDescription)
-        }
-    }
-
-    func requestDeletePaymentMethod(_ method: PaymentMethod) {
-        paymentMethodPendingDelete = method
-        showingDeleteCardConfirm = true
-    }
-
-    func cancelDeletePaymentMethod() {
-        paymentMethodPendingDelete = nil
-        showingDeleteCardConfirm = false
+    func cancelSuccessMessage(planLabel: String) -> String {
+        String(format: "billing.cancel.success.message".localized, planLabel)
     }
 
     func exportBillingHistoryPDF() async -> URL? {
@@ -159,147 +99,98 @@ final class AccountBillingViewModel: ObservableObject {
         }
     }
 
-    func addCard() async {
-        didAttemptCardSave = true
-        guard newCard.isValid else {
-            showToast("billing.error.invalid.card".localized)
-            return
-        }
-        isBusy = true
-        defer { isBusy = false }
-        do {
-            paymentMethods = try await service.addCard(newCard)
-            dismissCardForm()
-            showToast("billing.toast.card.added".localized)
-        } catch {
-            showToast(error.localizedDescription)
-        }
-    }
-
-    func beginEditingCard(_ method: PaymentMethod) {
-        editingPaymentMethod = method
-        showingAddCard = false
-        didAttemptCardSave = false
-        newCard = NewCardDraft.draft(forEditing: method)
-        if let last4 = method.last4, last4.count == 4 {
-            newCard.cardNumber = "**** **** **** \(last4)"
-            cardNumberIsMasked = true
-        } else {
-            newCard.cardNumber = ""
-            cardNumberIsMasked = false
-        }
-        newCard.cvc = "***"
-        cvcIsMasked = true
-    }
-
-    func clearMaskedCardNumberIfNeeded() {
-        guard cardNumberIsMasked else { return }
-        newCard.cardNumber = ""
-        cardNumberIsMasked = false
-    }
-
-    func clearMaskedCVCIfNeeded() {
-        guard cvcIsMasked else { return }
-        newCard.cvc = ""
-        cvcIsMasked = false
-    }
-
-    func dismissCardForm() {
-        showingAddCard = false
-        editingPaymentMethod = nil
-        newCard = NewCardDraft()
-        didAttemptCardSave = false
-        cardNumberIsMasked = false
-        cvcIsMasked = false
-    }
-
-    func saveCardForm() async {
-        if isEditingCard {
-            await updateCard()
-        } else {
-            await addCard()
-        }
-    }
-
-    func updateCard() async {
-        guard let method = editingPaymentMethod else { return }
-        didAttemptCardSave = true
-        var draft = newCard
-        if cardNumberIsMasked {
-            draft.cardNumber = ""
-        }
-        if cvcIsMasked {
-            draft.cvc = ""
-        }
-        guard draft.isValidForEdit else {
-            showToast("billing.error.invalid.card".localized)
-            return
-        }
-        isBusy = true
-        defer { isBusy = false }
-        do {
-            paymentMethods = try await service.updateCard(id: method.id, draft: draft)
-            dismissCardForm()
-            showToast("billing.toast.card.updated".localized)
-        } catch {
-            showToast(error.localizedDescription)
-        }
-    }
-
-    func toggleApplePay(_ enabled: Bool) async {
-        do {
-            applePayEnabled = try await service.toggleApplePay(enabled: enabled)
-        } catch {
-            applePayEnabled = !enabled
-            showToast(error.localizedDescription)
-        }
-    }
-
-    func toggleGooglePay(_ enabled: Bool) async {
-        do {
-            googlePayEnabled = try await service.toggleGooglePay(enabled: enabled)
-        } catch {
-            googlePayEnabled = !enabled
-            showToast(error.localizedDescription)
-        }
-    }
-
     func actionTitle(for plan: SubscriptionPlan) -> String {
-        guard let current = subscription else { return "billing.action.select".localized }
-        if plan.id == current.planId || plan.tier == current.tier {
+        guard let current = subscription else {
+            return String(format: "billing.action.change.to".localized, changeTargetLabel(for: plan))
+        }
+        if isCurrent(plan) {
+            if plan.tier != .free, current.status == .cancelled {
+                return String(
+                    format: "billing.action.renew.interval".localized,
+                    selectedInterval.adjectiveKey.localized
+                )
+            }
+            if canCancelCurrentPlan(plan) {
+                return "billing.action.cancel.plan".localized
+            }
+            if plan.tier != .free, current.status != .cancelled, current.interval != selectedInterval {
+                return String(format: "billing.action.change.to".localized, changeTargetLabel(for: plan))
+            }
             return "billing.action.current".localized
         }
-        let order: [PlanTier] = [.free, .pro, .premium]
-        let currentIndex = order.firstIndex(of: current.tier) ?? 0
-        let nextIndex = order.firstIndex(of: plan.tier) ?? 0
-        return nextIndex > currentIndex
-            ? "billing.action.upgrade".localized
-            : "billing.action.downgrade".localized
+        return String(format: "billing.action.change.to".localized, changeTargetLabel(for: plan))
+    }
+
+    /// Current paid plan that can still be cancelled (same billing interval selected).
+    func canCancelCurrentPlan(_ plan: SubscriptionPlan) -> Bool {
+        guard isCurrent(plan), plan.tier != .free else { return false }
+        guard let subscription, subscription.status != .cancelled else { return false }
+        return subscription.interval == selectedInterval
+    }
+
+    /// Cancelled paid plan that can be renewed for the selected interval.
+    func canRenewCancelledPlan(_ plan: SubscriptionPlan) -> Bool {
+        guard isCurrent(plan), plan.tier != .free else { return false }
+        return subscription?.status == .cancelled
+    }
+
+    /// Same tier + interval as the live subscription (Free ignores interval).
+    /// Cancelled plans are never treated as exact current so renew stays tappable.
+    func isExactCurrentSelection(_ plan: SubscriptionPlan) -> Bool {
+        guard isCurrent(plan) else { return false }
+        if plan.tier == .free { return true }
+        guard subscription?.status != .cancelled else { return false }
+        return subscription?.interval == selectedInterval
+    }
+
+    private func changeTargetLabel(for plan: SubscriptionPlan) -> String {
+        let planName = plan.tier.displayNameKey.localized
+        guard plan.tier != .free else { return planName }
+        return "\(selectedInterval.adjectiveKey.localized) \(planName)"
+    }
+
+    func currentPlanLabel() -> String {
+        guard let current = subscription else { return "billing.plan.free".localized }
+        let planName = current.tier.displayNameKey.localized
+        guard current.tier != .free else { return planName }
+        return "\(current.interval.adjectiveKey.localized) \(planName)"
+    }
+
+    func planChangeAlertTitle(for plan: SubscriptionPlan) -> String {
+        String(format: "billing.action.change.to".localized, changeTargetLabel(for: plan))
+    }
+
+    func planChangeAlertMessage(for plan: SubscriptionPlan) -> String {
+        let confirm = String(
+            format: "billing.change.confirm.message".localized,
+            currentPlanLabel(),
+            changeTargetLabel(for: plan)
+        )
+        return "\(confirm)\n\n\(billingOutcomeExplanation(for: plan))"
+    }
+
+    func planChangeSuccessMessage(planLabel: String) -> String {
+        String(format: "billing.change.success.message".localized, planLabel)
+    }
+
+    /// Charge / proration outcome shown under the confirm question.
+    func billingOutcomeExplanation(for plan: SubscriptionPlan) -> String {
+        if plan.tier == .free {
+            return "billing.modal.downgrade.free".localized
+        }
+        let price = plan.formattedPrice(for: selectedInterval)
+        let cycle = selectedInterval.titleKey.localized
+        return String(format: "billing.modal.proration".localized, price, cycle)
     }
 
     func isCurrent(_ plan: SubscriptionPlan) -> Bool {
         subscription?.planId == plan.id || subscription?.tier == plan.tier
     }
 
-    func prorationSummary(for plan: SubscriptionPlan) -> String {
-        let price = plan.formattedPrice(for: selectedInterval)
-        let cycle = selectedInterval.titleKey.localized
-        if isCurrent(plan) {
-            return "billing.modal.already.current".localized
-        }
-        if plan.tier == .free {
-            return "billing.modal.downgrade.free".localized
-        }
-        return String(format: "billing.modal.proration".localized, price, cycle)
-    }
-
     private func apply(_ snap: BillingSnapshot) {
         subscription = snap.subscription
         plans = snap.availablePlans
-        paymentMethods = snap.paymentMethods
         invoices = snap.invoices.sorted { $0.date > $1.date }
-        applePayEnabled = snap.applePayEnabled
-        googlePayEnabled = snap.googlePayEnabled
         selectedInterval = snap.subscription.interval
     }
 
@@ -315,18 +206,11 @@ final class AccountBillingViewModel: ObservableObject {
 }
 
 struct AccountBillingView: View {
-    private enum CardFormFocus: Hashable {
-        case cardNumber
-        case cvc
-    }
-
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @StateObject private var viewModel = AccountBillingViewModel()
-    @State private var showingCVCHelp = false
     @State private var billingExportURL: URL?
-    @FocusState private var cardFormFocus: CardFormFocus?
 
     var body: some View {
         NavigationView {
@@ -367,39 +251,72 @@ struct AccountBillingView: View {
                 }
             }
             .task { await viewModel.load() }
-            .sheet(isPresented: Binding(
-                get: { viewModel.isShowingCardForm },
-                set: { if !$0 { viewModel.dismissCardForm() } }
-            )) {
-                addCardSheet
-            }
-            .confirmationDialog(
-                "billing.cancel.confirm.title".localized,
-                isPresented: $viewModel.showingCancelConfirm,
-                titleVisibility: .visible
+            .alert(
+                String(
+                    format: "billing.cancel.confirm.title".localized,
+                    (viewModel.subscription?.tier.displayNameKey.localized ?? "billing.plan.pro".localized)
+                ),
+                isPresented: $viewModel.showingCancelConfirm
             ) {
-                Button("billing.cancel.confirm.action".localized, role: .destructive) {
-                    Task { await viewModel.cancelSubscription() }
+                Button("billing.cancel.confirm.yes".localized, role: .destructive) {
+                    let planLabel = viewModel.subscription?.tier.displayNameKey.localized
+                        ?? "billing.plan.pro".localized
+                    viewModel.showingCancelConfirm = false
+                    Task { await viewModel.performCancelSubscription(planLabel: planLabel) }
                 }
-                Button("common.cancel".localized, role: .cancel) {}
+                Button("billing.cancel.confirm.no".localized, role: .cancel) {}
             } message: {
                 Text("billing.cancel.confirm.message".localized)
             }
             .alert(
-                "billing.delete.card.title".localized,
-                isPresented: $viewModel.showingDeleteCardConfirm
+                "billing.cancel.success.title".localized,
+                isPresented: Binding(
+                    get: { viewModel.cancelSuccessPlanLabel != nil },
+                    set: { if !$0 { viewModel.cancelSuccessPlanLabel = nil } }
+                )
             ) {
-                Button("common.cancel".localized, role: .cancel) {
-                    viewModel.cancelDeletePaymentMethod()
-                }
-                Button("common.delete".localized, role: .destructive) {
-                    Task { await viewModel.deletePaymentMethod() }
+                Button("common.ok".localized, role: .cancel) {
+                    viewModel.cancelSuccessPlanLabel = nil
                 }
             } message: {
-                Text("billing.delete.card.message".localized)
+                if let label = viewModel.cancelSuccessPlanLabel {
+                    Text(viewModel.cancelSuccessMessage(planLabel: label))
+                }
             }
-            .sheet(item: $viewModel.pendingPlanChange) { plan in
-                planChangeSheet(plan)
+            .alert(
+                viewModel.pendingPlanChange.map { viewModel.planChangeAlertTitle(for: $0) } ?? "",
+                isPresented: Binding(
+                    get: { viewModel.pendingPlanChange != nil },
+                    set: { if !$0 { viewModel.pendingPlanChange = nil } }
+                )
+            ) {
+                Button("billing.modal.confirm".localized) {
+                    guard let plan = viewModel.pendingPlanChange else { return }
+                    viewModel.pendingPlanChange = nil
+                    Task { await viewModel.performPlanChange(plan) }
+                }
+                Button("common.cancel".localized, role: .cancel) {
+                    viewModel.dismissPlanChangeDialog()
+                }
+            } message: {
+                if let plan = viewModel.pendingPlanChange {
+                    Text(viewModel.planChangeAlertMessage(for: plan))
+                }
+            }
+            .alert(
+                "billing.change.success.title".localized,
+                isPresented: Binding(
+                    get: { viewModel.planChangeSuccessLabel != nil },
+                    set: { if !$0 { viewModel.planChangeSuccessLabel = nil } }
+                )
+            ) {
+                Button("common.ok".localized, role: .cancel) {
+                    viewModel.planChangeSuccessLabel = nil
+                }
+            } message: {
+                if let label = viewModel.planChangeSuccessLabel {
+                    Text(viewModel.planChangeSuccessMessage(planLabel: label))
+                }
             }
             .sheet(isPresented: Binding(
                 get: { billingExportURL != nil },
@@ -416,17 +333,24 @@ struct AccountBillingView: View {
     // MARK: - Content
 
     private var billingContent: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
-                billingIntervalSection
-                changePlanSection
-                paymentMethodsSection
-                invoicesSection
+        VStack(spacing: 0) {
+            billingIntervalSection
+                .padding(.horizontal, 16)
+                .padding(.top, 20)
+                .padding(.bottom, 12)
+                .frame(maxWidth: horizontalSizeClass == .regular ? 720 : .infinity)
+                .frame(maxWidth: .infinity)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    changePlanSection
+                    invoicesSection
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 20)
+                .frame(maxWidth: horizontalSizeClass == .regular ? 720 : .infinity)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 20)
-            .frame(maxWidth: horizontalSizeClass == .regular ? 720 : .infinity)
-            .frame(maxWidth: .infinity)
         }
     }
 
@@ -448,31 +372,6 @@ struct AccountBillingView: View {
                     planCard(plan)
                 }
             }
-
-            if let subscription = viewModel.subscription,
-               subscription.tier != .free,
-               subscription.status != .cancelled {
-                Button {
-                    viewModel.showingCancelConfirm = true
-                } label: {
-                    Text(
-                        subscription.status == .renewing
-                            ? "billing.action.manage.renewal".localized
-                            : "billing.action.cancel".localized
-                    )
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .foregroundColor(.red)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.red.opacity(0.08))
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(viewModel.isBusy)
-                .padding(.top, 4)
-            }
         }
         .billingCardStyle()
     }
@@ -485,24 +384,32 @@ struct AccountBillingView: View {
                         viewModel.selectedInterval = interval
                     }
                 } label: {
-                    HStack(spacing: 6) {
+                    let isSelected = viewModel.selectedInterval == interval
+                    HStack(spacing: 4) {
                         Text(interval.titleKey.localized)
                             .font(.subheadline.weight(.semibold))
+                            .foregroundColor(isSelected ? .white : SpectRoomTheme.text)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.65)
+                            .layoutPriority(1)
                         if interval == .yearly {
                             Text("billing.save.percent".localized)
                                 .font(.caption2.weight(.bold))
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
-                                .background(Capsule().fill(Color.green.opacity(0.2)))
-                                .foregroundColor(.green)
+                                .foregroundColor(isSelected ? .white : Color(red: 0.05, green: 0.45, blue: 0.2))
+                                .background(
+                                    Capsule().fill(isSelected ? Color.green : Color.green.opacity(0.22))
+                                )
                         }
                     }
-                    .foregroundColor(viewModel.selectedInterval == interval ? .white : SpectRoomTheme.text)
-                    .frame(maxWidth: .infinity)
+                    .frame(minWidth: 0, maxWidth: .infinity)
                     .padding(.vertical, 10)
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(viewModel.selectedInterval == interval ? Color.blue : SpectRoomTheme.background)
+                            .fill(isSelected ? Color.blue : SpectRoomTheme.background)
                     )
                 }
                 .buttonStyle(.plain)
@@ -520,19 +427,23 @@ struct AccountBillingView: View {
     }
 
     private func planCard(_ plan: SubscriptionPlan) -> some View {
-        let isCurrent = viewModel.isCurrent(plan)
+        let canCancel = viewModel.canCancelCurrentPlan(plan)
+        let canRenew = viewModel.canRenewCancelledPlan(plan)
+        let isExactCurrent = viewModel.isExactCurrentSelection(plan)
         return VStack(alignment: .leading, spacing: 10) {
             ZStack {
                 HStack(spacing: 4) {
                     Text(plan.tier.displayNameKey.localized)
                         .font(.headline)
                         .foregroundColor(SpectRoomTheme.text)
-                    Text(plan.tier.titleStars)
-                        .font(.caption)
+                    if !plan.tier.titleStars.isEmpty {
+                        Text(plan.tier.titleStars)
+                            .font(.caption)
+                    }
                 }
                 .frame(maxWidth: .infinity)
 
-                if isCurrent {
+                if isExactCurrent {
                     HStack {
                         Spacer()
                         Text("billing.badge.current".localized)
@@ -549,15 +460,10 @@ struct AccountBillingView: View {
                 Text("billing.price.no.charge".localized)
                     .font(.title3.weight(.bold))
                     .foregroundColor(SpectRoomTheme.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             } else {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(plan.formattedPrice(for: viewModel.selectedInterval))
-                        .font(.title3.weight(.bold))
-                        .foregroundColor(SpectRoomTheme.text)
-                    Text(viewModel.selectedInterval == .yearly ? "billing.per.year".localized : "billing.per.month".localized)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(SpectRoomTheme.text)
-                }
+                planPriceLine(for: plan)
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -576,178 +482,47 @@ struct AccountBillingView: View {
             }
 
             Button {
-                guard !isCurrent else { return }
-                viewModel.pendingPlanChange = plan
+                if canCancel {
+                    viewModel.showingCancelConfirm = true
+                } else if canRenew || !isExactCurrent {
+                    viewModel.planChangeSuccessLabel = nil
+                    viewModel.pendingPlanChange = plan
+                }
             } label: {
                 Text(viewModel.actionTitle(for: plan))
                     .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
-                    .foregroundColor(isCurrent ? SpectRoomTheme.secondaryText : .white)
+                    .foregroundColor(canCancel ? .red : (isExactCurrent ? SpectRoomTheme.secondaryText : .white))
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(isCurrent ? Color.primary.opacity(0.08) : Color.blue)
+                            .fill(
+                                canCancel
+                                    ? Color.red.opacity(0.08)
+                                    : (isExactCurrent ? Color.primary.opacity(0.08) : Color.blue)
+                            )
                     )
             }
             .buttonStyle(.plain)
-            .disabled(isCurrent || viewModel.isBusy)
+            .disabled(viewModel.isBusy || (isExactCurrent && !canCancel))
         }
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(isCurrent ? Color.green.opacity(0.1) : SpectRoomTheme.background)
+                .fill(isExactCurrent ? Color.green.opacity(0.1) : SpectRoomTheme.background)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .strokeBorder(
-                            isCurrent ? Color.green.opacity(0.45) : SpectRoomTheme.subtleBorder(for: colorScheme),
-                            lineWidth: isCurrent ? 1.5 : 1
+                            isExactCurrent ? Color.green.opacity(0.45) : SpectRoomTheme.subtleBorder(for: colorScheme),
+                            lineWidth: isExactCurrent ? 1.5 : 1
                         )
                 )
         )
     }
 
-    // MARK: C. Payment methods
-
-    private var paymentMethodsSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                sectionHeader("billing.section.payment.methods".localized, systemImage: "creditcard.fill")
-                Spacer()
-                Button {
-                    viewModel.editingPaymentMethod = nil
-                    viewModel.newCard = NewCardDraft()
-                    viewModel.didAttemptCardSave = false
-                    viewModel.cardNumberIsMasked = false
-                    viewModel.cvcIsMasked = false
-                    viewModel.showingAddCard = true
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.body.weight(.semibold))
-                        .foregroundColor(.blue)
-                        .frame(width: 32, height: 32)
-                        .background(Circle().fill(Color.blue.opacity(0.12)))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("billing.payment.add".localized)
-            }
-
-            if viewModel.paymentMethods.isEmpty {
-                emptyInline(message: "billing.payment.empty".localized)
-            } else {
-                ForEach(viewModel.paymentMethods) { method in
-                    paymentMethodRow(method)
-                }
-            }
-
-            Divider()
-                .background(SpectRoomTheme.subtleBorder(for: colorScheme))
-
-            walletPayRow(
-                title: "billing.wallet.apple".localized,
-                systemImage: "apple.logo",
-                isOn: Binding(
-                    get: { viewModel.applePayEnabled },
-                    set: { newValue in Task { await viewModel.toggleApplePay(newValue) } }
-                )
-            )
-
-            walletPayRow(
-                title: "billing.wallet.google".localized,
-                systemImage: "g.circle.fill",
-                isOn: Binding(
-                    get: { viewModel.googlePayEnabled },
-                    set: { newValue in Task { await viewModel.toggleGooglePay(newValue) } }
-                )
-            )
-        }
-        .billingCardStyle()
-    }
-
-    private func paymentMethodRow(_ method: PaymentMethod) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: method.brand?.systemImage ?? "creditcard.fill")
-                .font(.title3)
-                .foregroundColor(.blue)
-                .frame(width: 40, height: 40)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.1)))
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(method.displayTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(SpectRoomTheme.text)
-                    if method.isDefault {
-                        Text("billing.badge.default".localized)
-                            .font(.caption2.weight(.bold))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Color.green.opacity(0.18)))
-                            .foregroundColor(.green)
-                    }
-                }
-                Text(method.maskedNumber)
-                    .font(.caption.monospaced())
-                    .foregroundColor(SpectRoomTheme.secondaryText)
-                if let exp = method.expirationDisplay {
-                    Text(String(format: "billing.card.expires".localized, exp))
-                        .font(.caption2)
-                        .foregroundColor(SpectRoomTheme.secondaryText)
-                }
-            }
-
-            Spacer()
-
-            Menu {
-                Button("common.edit".localized) {
-                    viewModel.beginEditingCard(method)
-                }
-                if !method.isDefault {
-                    Button("billing.payment.set.default".localized) {
-                        Task { await viewModel.setDefault(method) }
-                    }
-                }
-                Button("common.delete".localized, role: .destructive) {
-                    viewModel.requestDeletePaymentMethod(method)
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.title3)
-                    .foregroundColor(SpectRoomTheme.secondaryText)
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(SpectRoomTheme.background)
-        )
-    }
-
-    private func walletPayRow(title: String, systemImage: String, isOn: Binding<Bool>) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.title3)
-                .foregroundColor(.blue)
-                .frame(width: 40, height: 40)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.1)))
-
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(SpectRoomTheme.text)
-
-            Spacer()
-
-            Toggle("", isOn: isOn)
-                .labelsHidden()
-                .tint(.blue)
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(SpectRoomTheme.background)
-        )
-    }
-
-    // MARK: D. Invoices / billing history
+    // MARK: C. Invoices / billing history
 
     private var invoicesSection: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -818,374 +593,27 @@ struct AccountBillingView: View {
         .padding(.vertical, 12)
     }
 
-    // MARK: Sheets
-
-    private func planChangeSheet(_ plan: SubscriptionPlan) -> some View {
-        NavigationView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(viewModel.actionTitle(for: plan))
-                    .font(.title2.weight(.bold))
-                    .foregroundColor(SpectRoomTheme.text)
-
-                Text(String(format: "billing.modal.switching.to".localized, plan.tier.displayNameKey.localized))
-                    .foregroundColor(SpectRoomTheme.secondaryText)
-
-                Text(viewModel.prorationSummary(for: plan))
-                    .font(.body)
-                    .foregroundColor(SpectRoomTheme.text)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.blue.opacity(0.08))
-                    )
-
-                Spacer()
-
-                Button {
-                    Task { await viewModel.confirmPlanChange() }
-                } label: {
-                    HStack {
-                        if viewModel.isBusy { ProgressView().tint(.white) }
-                        Text("billing.modal.confirm".localized)
-                            .fontWeight(.semibold)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .foregroundColor(.white)
-                    .background(RoundedRectangle(cornerRadius: 14).fill(Color.blue))
-                }
-                .disabled(viewModel.isBusy)
-            }
-            .padding(20)
-            .background(SpectRoomBackground())
-            .navigationTitle("billing.modal.title".localized)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("common.cancel".localized) { viewModel.pendingPlanChange = nil }
-                }
-            }
-        }
-    }
-
-    private var addCardSheet: some View {
-        NavigationView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    addCardField(
-                        title: "billing.add.card.card.name".localized,
-                        error: cardFieldError(
-                            show: !viewModel.newCard.isCardNameValid,
-                            message: "billing.add.card.card.name.invalid".localized
-                        )
-                    ) {
-                        TextField("billing.add.card.card.name".localized, text: $viewModel.newCard.cardName)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.words)
-                            .onChange(of: viewModel.newCard.cardName) { _, newValue in
-                                let trimmedLimit = String(newValue.prefix(40))
-                                if trimmedLimit != newValue {
-                                    viewModel.newCard.cardName = trimmedLimit
-                                }
-                            }
-                    }
-
-                    addCardField(
-                        title: "billing.add.card.name".localized,
-                        error: cardFieldError(
-                            show: !(viewModel.isEditingCard && viewModel.newCard.cardholderName.isEmpty)
-                                && !viewModel.newCard.isCardholderNameValid,
-                            message: "billing.add.card.name.invalid".localized
-                        )
-                    ) {
-                        TextField("billing.add.card.name".localized, text: $viewModel.newCard.cardholderName)
-                            .textContentType(.name)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.words)
-                            .onChange(of: viewModel.newCard.cardholderName) { _, newValue in
-                                let filtered = String(newValue.filter { $0.isLetter || $0.isWhitespace })
-                                if filtered != newValue {
-                                    viewModel.newCard.cardholderName = filtered
-                                }
-                            }
-                    }
-
-                    addCardField(
-                        title: "billing.add.card.number".localized,
-                        error: cardFieldError(
-                            show: !viewModel.cardNumberIsMasked
-                                && !(viewModel.isEditingCard && viewModel.newCard.cardNumber.isEmpty)
-                                && !viewModel.newCard.isCardNumberLengthValid,
-                            message: "billing.add.card.number.invalid".localized
-                        ),
-                        hint: viewModel.isEditingCard
-                            && !viewModel.cardNumberIsMasked
-                            && viewModel.newCard.cardNumber.isEmpty
-                            ? "billing.edit.card.number.hint".localized
-                            : nil
-                    ) {
-                        TextField(
-                            viewModel.isEditingCard && !viewModel.cardNumberIsMasked
-                                ? "billing.edit.card.number.placeholder".localized
-                                : "0000 0000 0000 0000",
-                            text: $viewModel.newCard.cardNumber
-                        )
-                        .keyboardType(.numberPad)
-                        .textContentType(.creditCardNumber)
-                        .focused($cardFormFocus, equals: .cardNumber)
-                        .onChange(of: cardFormFocus) { _, newValue in
-                            if newValue == .cardNumber {
-                                viewModel.clearMaskedCardNumberIfNeeded()
-                            }
-                        }
-                        .onChange(of: viewModel.newCard.cardNumber) { _, newValue in
-                            guard !viewModel.cardNumberIsMasked else { return }
-                            let formatted = NewCardDraft.formatCardNumber(newValue)
-                            if formatted != newValue {
-                                viewModel.newCard.cardNumber = formatted
-                            }
-                        }
-                    }
-
-                    HStack(alignment: .top, spacing: 12) {
-                        addCardField(
-                            title: "billing.add.card.expiry".localized,
-                            error: cardFieldError(
-                                show: !viewModel.newCard.isExpiryValid,
-                                message: "billing.add.card.expiry.invalid".localized
-                            )
-                        ) {
-                            TextField("MM/YY", text: $viewModel.newCard.expiration)
-                                .keyboardType(.numberPad)
-                                .textContentType(.creditCardExpiration)
-                                .onChange(of: viewModel.newCard.expiration) { _, newValue in
-                                    let formatted = NewCardDraft.formatExpiration(newValue)
-                                    if formatted != newValue {
-                                        viewModel.newCard.expiration = formatted
-                                    }
-                                }
-                        }
-
-                        addCardField(
-                            title: "billing.add.card.cvc".localized,
-                            error: cardFieldError(
-                                show: !viewModel.cvcIsMasked
-                                    && !(viewModel.isEditingCard && viewModel.newCard.cvc.isEmpty)
-                                    && !viewModel.newCard.isCVCValid,
-                                message: "billing.add.card.cvc.invalid".localized
-                            ),
-                            titleAccessory: {
-                                Button {
-                                    showingCVCHelp = true
-                                } label: {
-                                    Image(systemName: "info.circle")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundColor(.blue)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("billing.add.card.cvc.help.a11y".localized)
-                            }
-                        ) {
-                            TextField("billing.add.card.cvc".localized, text: $viewModel.newCard.cvc)
-                                .keyboardType(.numberPad)
-                                .textContentType(.creditCardSecurityCode)
-                                .focused($cardFormFocus, equals: .cvc)
-                                .onChange(of: cardFormFocus) { _, newValue in
-                                    if newValue == .cvc {
-                                        viewModel.clearMaskedCVCIfNeeded()
-                                    }
-                                }
-                                .onChange(of: viewModel.newCard.cvc) { _, newValue in
-                                    guard !viewModel.cvcIsMasked else { return }
-                                    let filtered = String(newValue.filter(\.isNumber).prefix(3))
-                                    if filtered != newValue {
-                                        viewModel.newCard.cvc = filtered
-                                    }
-                                }
-                        }
-                    }
-
-                    addCardField(
-                        title: "billing.add.card.postal".localized,
-                        error: cardFieldError(
-                            show: !(viewModel.isEditingCard && viewModel.newCard.postalCode.isEmpty)
-                                && !viewModel.newCard.isPostalCodeValid,
-                            message: "billing.add.card.postal.invalid".localized
-                        )
-                    ) {
-                        TextField("billing.add.card.postal".localized, text: $viewModel.newCard.postalCode)
-                            .keyboardType(.asciiCapable)
-                            .textContentType(.postalCode)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .onChange(of: viewModel.newCard.postalCode) { _, newValue in
-                                let filtered = String(
-                                    newValue
-                                        .filter { $0.isNumber || $0 == " " }
-                                        .prefix(6)
-                                )
-                                // Keep at most 5 digits inside the 6-character limit.
-                                var digitsSeen = 0
-                                let limited = filtered.filter { char in
-                                    if char.isNumber {
-                                        digitsSeen += 1
-                                        return digitsSeen <= 5
-                                    }
-                                    return true
-                                }
-                                let result = String(limited.prefix(6))
-                                if result != newValue {
-                                    viewModel.newCard.postalCode = result
-                                }
-                            }
-                    }
-                }
-                .padding(16)
-            }
-            .background(SpectRoomBackground())
-            .navigationTitle(
-                (viewModel.isEditingCard
-                    ? "billing.edit.card.title"
-                    : "billing.add.card.title").localized
-            )
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("common.cancel".localized) {
-                        cardFormFocus = nil
-                        viewModel.dismissCardForm()
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("common.save".localized) {
-                        Task { await viewModel.saveCardForm() }
-                    }
-                    .disabled(viewModel.isBusy)
-                }
-            }
-            .sheet(isPresented: $showingCVCHelp) {
-                cvcHelpSheet
-            }
-        }
-    }
-
-    private var cvcHelpSheet: some View {
-        VStack(spacing: 16) {
-            Capsule()
-                .fill(Color.secondary.opacity(0.35))
-                .frame(width: 36, height: 5)
-                .padding(.top, 10)
-
-            Text("billing.add.card.cvc.help.title".localized)
-                .font(.headline)
-                .foregroundColor(SpectRoomTheme.text)
-
-            Text("billing.add.card.cvc.help.message".localized)
-                .font(.subheadline)
-                .foregroundColor(SpectRoomTheme.secondaryText)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 8)
-
-            Image("CVC")
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: 320)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
-                .accessibilityLabel("billing.add.card.cvc.help.image.a11y".localized)
-
-            Button("common.close".localized) {
-                showingCVCHelp = false
-            }
-            .font(.subheadline.weight(.semibold))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .foregroundColor(.white)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.blue))
-            .padding(.top, 4)
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(SpectRoomBackground())
-        .presentationDetents([.height(360)])
-        .presentationDragIndicator(.hidden)
-        .presentationCornerRadius(20)
-    }
-
-    private func cardFieldError(show: Bool, message: String) -> String? {
-        guard viewModel.didAttemptCardSave, show else { return nil }
-        return message
-    }
-
-    private func addCardField<Content: View>(
-        title: String,
-        error: String? = nil,
-        hint: String? = nil,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        addCardField(
-            title: title,
-            error: error,
-            hint: hint,
-            titleAccessory: { EmptyView() },
-            content: content
-        )
-    }
-
-    private func addCardField<Content: View, Accessory: View>(
-        title: String,
-        error: String? = nil,
-        hint: String? = nil,
-        @ViewBuilder titleAccessory: () -> Accessory,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundColor(SpectRoomTheme.secondaryText)
-                titleAccessory()
-                Spacer(minLength: 0)
-            }
-            content()
-                .foregroundColor(SpectRoomTheme.text)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(SpectRoomTheme.card)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(
-                            error != nil
-                                ? Color.red.opacity(0.55)
-                                : SpectRoomTheme.subtleBorder(for: colorScheme),
-                            lineWidth: 1
-                        )
-                )
-            if let error {
-                Text(error)
-                    .font(.caption)
-                    .foregroundColor(.red)
-            } else if let hint {
-                Text(hint)
-                    .font(.caption)
-                    .foregroundColor(SpectRoomTheme.secondaryText)
-            }
-        }
-    }
-
     // MARK: Helpers
 
     private func sectionHeader(_ title: String, systemImage: String) -> some View {
         Label(title, systemImage: systemImage)
             .font(.headline)
             .foregroundColor(SpectRoomTheme.text)
+    }
+
+    private func planPriceLine(for plan: SubscriptionPlan) -> some View {
+        let price = plan.formattedPrice(for: viewModel.selectedInterval)
+        let period = viewModel.selectedInterval == .yearly
+            ? "billing.per.year".localized
+            : "billing.per.month".localized
+        return (Text(price)
+            .font(.title3.weight(.bold))
+            + Text(" \(period)")
+            .font(.subheadline.weight(.semibold)))
+            .foregroundColor(SpectRoomTheme.text)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func emptyInline(message: String) -> some View {
@@ -1199,7 +627,7 @@ struct AccountBillingView: View {
     private var billingSkeleton: some View {
         ScrollView {
             VStack(spacing: 16) {
-                ForEach(0..<4, id: \.self) { _ in
+                ForEach(0..<3, id: \.self) { _ in
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(Color.primary.opacity(0.06))
                         .frame(height: 140)

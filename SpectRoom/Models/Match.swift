@@ -140,6 +140,8 @@ struct ProfileCard: Codable {
     let matchPercentage: Int
     /// When Discover visibility boost ends (nil / past = not boosted).
     let boostedUntil: Date?
+    /// Public billing plan tier shown on profile photos (`nil` = Free / unknown).
+    let planTier: PlanTier?
     
     init(
         userId: String,
@@ -167,7 +169,8 @@ struct ProfileCard: Codable {
         shareSensoryPreferences: Bool = false,
         energyLevel: Int,
         matchPercentage: Int = 0,
-        boostedUntil: Date? = nil
+        boostedUntil: Date? = nil,
+        planTier: PlanTier? = nil
     ) {
         self.userId = userId
         self.name = name
@@ -195,6 +198,7 @@ struct ProfileCard: Codable {
         self.energyLevel = energyLevel
         self.matchPercentage = matchPercentage
         self.boostedUntil = boostedUntil
+        self.planTier = planTier
     }
     
     struct MatchBreakdown {

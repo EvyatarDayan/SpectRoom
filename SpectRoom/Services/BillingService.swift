@@ -5,6 +5,8 @@ import FirebaseFunctions
 @MainActor
 protocol BillingServicing {
     func fetchBillingSnapshot() async throws -> BillingSnapshot
+    /// Current snapshot without artificial delay (for refreshing UI after mutations).
+    func currentBillingSnapshot() -> BillingSnapshot
     func refreshPlanFromFirestore() async
     func changePlan(to planId: String, interval: BillingInterval) async throws -> CurrentSubscription
     func cancelSubscription() async throws -> CurrentSubscription
@@ -86,40 +88,51 @@ final class MockBillingService: BillingServicing {
     static let shared = MockBillingService()
 
     private static let persistedSubscriptionKey = "mockBillingCurrentSubscription"
+    private static let persistedAccountHistoryKey = "mockBillingAccountHistory"
 
     private var snapshot: BillingSnapshot
     private let delayNanoseconds: UInt64 = 650_000_000
 
     private init() {
         snapshot = Self.makeInitialSnapshot()
-        // Do not write UserDefaults here — Firestore hydrate owns the displayed plan.
+        Task { await processDueAutomaticBillingIfNeeded() }
+        // Do not write UserDefaults here for plan — Firestore hydrate owns the displayed plan.
+    }
+
+    func currentBillingSnapshot() -> BillingSnapshot {
+        return snapshot
     }
 
     /// Align mock billing with the plan stored on the user document (startup / profile load / live sync).
-    func applyRemotePlanTier(_ tier: PlanTier, interval: BillingInterval? = nil) {
+    func applyRemotePlanTier(
+        _ tier: PlanTier,
+        interval: BillingInterval? = nil,
+        status: SubscriptionStatus? = nil
+    ) {
         guard let plan = snapshot.availablePlans.first(where: { $0.tier == tier }) else { return }
         let resolvedInterval: BillingInterval = {
             if tier == .free { return .monthly }
             return interval ?? snapshot.subscription.interval
+        }()
+        let resolvedStatus: SubscriptionStatus = {
+            if tier == .free { return .none }
+            return status ?? snapshot.subscription.status
         }()
         let renews = Calendar.current.date(
             byAdding: resolvedInterval == .yearly ? .year : .month,
             value: 1,
             to: Date()
         )
-        // When tier/interval change from cloud, clear cancelled state unless we already match.
         let keepCancelled =
-            snapshot.subscription.status == .cancelled
-            && snapshot.subscription.tier == tier
-            && snapshot.subscription.interval == resolvedInterval
+            resolvedStatus == .cancelled
             && tier != .free
         snapshot.subscription = CurrentSubscription(
             planId: plan.id,
             tier: plan.tier,
-            status: plan.tier == .free ? .none : (keepCancelled ? .cancelled : .renewing),
+            status: keepCancelled ? .cancelled : resolvedStatus,
             interval: resolvedInterval,
-            renewsOn: plan.tier == .free ? nil : (keepCancelled ? snapshot.subscription.renewsOn : (snapshot.subscription.renewsOn ?? renews)),
-            cancelledAt: plan.tier == .free ? nil : (keepCancelled ? snapshot.subscription.cancelledAt : nil),
+            renewsOn: plan.tier == .free ? nil : (keepCancelled ? (snapshot.subscription.renewsOn ?? renews) : (snapshot.subscription.renewsOn ?? renews)),
+            cancelledAt: plan.tier == .free ? nil : (keepCancelled ? (snapshot.subscription.cancelledAt ?? Date()) : nil),
             usageSummary: plan.usageSummary
         )
         Self.persistSubscription(snapshot.subscription)
@@ -135,6 +148,8 @@ final class MockBillingService: BillingServicing {
         if snapshot.subscription.tier != cached {
             applyRemotePlanTier(cached, interval: snapshot.subscription.interval)
         }
+        await processDueAutomaticBillingIfNeeded()
+        await refreshAccountHistoryFromCloud()
         return snapshot
     }
 
@@ -143,8 +158,13 @@ final class MockBillingService: BillingServicing {
         guard let data = try? await FirebaseAuthService.shared.fetchUserData(preferServer: true) else { return }
         let parsed = PlanTierCloudSync.parseBillingPlan(from: data)
         await MainActor.run {
-            PlanTierCloudSync.applyRemoteBillingPlan(tier: parsed.tier, interval: parsed.interval)
+            PlanTierCloudSync.applyRemoteBillingPlan(
+                tier: parsed.tier,
+                interval: parsed.interval,
+                status: parsed.status
+            )
         }
+        await refreshAccountHistoryFromCloud()
     }
 
     func changePlan(to planId: String, interval: BillingInterval) async throws -> CurrentSubscription {
@@ -178,6 +198,7 @@ final class MockBillingService: BillingServicing {
             || previous.interval != next.interval
             || previous.status == .cancelled
         if changed {
+            await appendPlanChangeHistory(from: previous, to: next, plan: plan)
             Task { await PlanChangeEmailNotifier.notifyChanged(from: previous, to: next) }
         }
         return next
@@ -188,6 +209,7 @@ final class MockBillingService: BillingServicing {
         guard snapshot.subscription.tier != .free else {
             throw BillingServiceError.nothingToCancel
         }
+        let beforeCancel = snapshot.subscription
         snapshot.subscription.status = .cancelled
         snapshot.subscription.cancelledAt = Date()
         if snapshot.subscription.renewsOn == nil {
@@ -199,7 +221,21 @@ final class MockBillingService: BillingServicing {
         }
         Self.persistSubscription(snapshot.subscription)
         let cancelled = snapshot.subscription
+        await appendHistoryEvent(
+            AccountHistoryEvent(
+                kind: .cancelPlan,
+                planTier: beforeCancel.tier,
+                interval: beforeCancel.interval
+            )
+        )
         Task { await PlanChangeEmailNotifier.notifyCancelled(cancelled) }
+        Task { @MainActor in
+            await PlanTierCloudSync.pushCancellationToFirestore(
+                tier: beforeCancel.tier,
+                interval: beforeCancel.interval,
+                cancelledAt: cancelled.cancelledAt ?? Date()
+            )
+        }
         // Cancelled paid plans keep remaining access for the period; swipe quota stays on current tier.
         return cancelled
     }
@@ -400,100 +436,139 @@ final class MockBillingService: BillingServicing {
             )
         ]
 
-        let calendar = Calendar.current
-        let invoices: [Invoice] = [
-            Invoice(
-                id: "inv_1003",
-                date: calendar.date(byAdding: .month, value: -1, to: Date()) ?? Date(),
-                description: "SpectRoom Pro — Monthly",
-                planTier: .pro,
-                interval: .monthly,
-                amount: Decimal(string: "9.99")!,
-                currencyCode: "USD",
-                status: .paid,
-                pdfURL: URL(string: "https://example.com/invoices/inv_1003.pdf")
-            ),
-            Invoice(
-                id: "inv_1002",
-                date: calendar.date(byAdding: .month, value: -2, to: Date()) ?? Date(),
-                description: "SpectRoom Pro — Monthly",
-                planTier: .pro,
-                interval: .monthly,
-                amount: Decimal(string: "9.99")!,
-                currencyCode: "USD",
-                status: .paid,
-                pdfURL: URL(string: "https://example.com/invoices/inv_1002.pdf")
-            ),
-            Invoice(
-                id: "inv_1001",
-                date: calendar.date(byAdding: .month, value: -3, to: Date()) ?? Date(),
-                description: "SpectRoom Pro — Monthly",
-                planTier: .pro,
-                interval: .monthly,
-                amount: Decimal(string: "9.99")!,
-                currencyCode: "USD",
-                status: .refunded,
-                pdfURL: URL(string: "https://example.com/invoices/inv_1001.pdf")
-            ),
-            Invoice(
-                id: "inv_1000",
-                date: calendar.date(byAdding: .month, value: -4, to: Date()) ?? Date(),
-                description: "SpectRoom Premium — Monthly",
-                planTier: .premium,
-                interval: .yearly,
-                amount: Decimal(string: "19.99")!,
-                currencyCode: "USD",
-                status: .paid,
-                pdfURL: URL(string: "https://example.com/invoices/inv_1000.pdf")
-            ),
-            Invoice(
-                id: "inv_0999",
-                date: calendar.date(byAdding: .month, value: -5, to: Date()) ?? Date(),
-                description: "SpectRoom Pro — Monthly",
-                planTier: .pro,
-                interval: .monthly,
-                amount: Decimal(string: "9.99")!,
-                currencyCode: "USD",
-                status: .pending,
-                pdfURL: nil
-            ),
-            Invoice(
-                id: "inv_0998",
-                date: calendar.date(byAdding: .month, value: -6, to: Date()) ?? Date(),
-                description: "SpectRoom Pro — Monthly",
-                planTier: .pro,
-                interval: .monthly,
-                amount: Decimal(string: "9.99")!,
-                currencyCode: "USD",
-                status: .paid,
-                pdfURL: URL(string: "https://example.com/invoices/inv_0998.pdf")
-            ),
-            Invoice(
-                id: "inv_old",
-                date: calendar.date(byAdding: .year, value: -4, to: Date()) ?? Date(),
-                description: "SpectRoom Pro — Monthly",
-                planTier: .pro,
-                interval: .monthly,
-                amount: Decimal(string: "9.99")!,
-                currencyCode: "USD",
-                status: .paid,
-                pdfURL: nil
-            )
-        ]
-
         return BillingSnapshot(
             subscription: subscription,
             availablePlans: plans,
             paymentMethods: methods,
-            invoices: invoices,
+            accountHistory: [],
             applePayEnabled: true,
             googlePayEnabled: false
         )
     }
 
+    private func appendPlanChangeHistory(
+        from previous: CurrentSubscription,
+        to next: CurrentSubscription,
+        plan: SubscriptionPlan
+    ) async {
+        let kind: AccountHistoryEventKind = {
+            if previous.tier == .free, next.tier != .free {
+                return .newPlan
+            }
+            return .changePlan
+        }()
+
+        let now = Date()
+
+        // Paid take-up also records the charge. Give the plan action a slightly
+        // later timestamp so it stays above the charge after date sorting.
+        if next.tier != .free {
+            await appendAutomaticBillingEvent(for: plan, interval: next.interval, at: now)
+        }
+
+        await appendHistoryEvent(
+            AccountHistoryEvent(
+                date: now.addingTimeInterval(0.001),
+                kind: kind,
+                planTier: next.tier,
+                interval: next.interval
+            )
+        )
+    }
+
+    private func appendAutomaticBillingEvent(
+        for plan: SubscriptionPlan,
+        interval: BillingInterval,
+        at date: Date
+    ) async {
+        await appendHistoryEvent(
+            AccountHistoryEvent(
+                date: date,
+                kind: .automaticBilling,
+                planTier: plan.tier,
+                interval: interval,
+                amount: plan.price(for: interval),
+                currencyCode: plan.currencyCode,
+                status: .paid
+            )
+        )
+    }
+
+    private func appendHistoryEvent(_ event: AccountHistoryEvent) async {
+        let pushed = await AccountHistoryCloudSync.pushEvent(event)
+        guard pushed else { return }
+        // Display list comes only from Firestore.
+        await refreshAccountHistoryFromCloud()
+    }
+
+    /// Firestore is the only source for the Account History list when signed in.
+    private func refreshAccountHistoryFromCloud() async {
+        let remote = await AccountHistoryCloudSync.fetchEvents()
+        snapshot.accountHistory = remote
+        Self.persistAccountHistory(remote)
+    }
+
+    /// When a renewing paid plan's period ends, log automatic billing and roll `renewsOn` forward.
+    /// Cancelled plans that lapse become Free (no billing charge).
+    private func processDueAutomaticBillingIfNeeded() async {
+        var subscription = snapshot.subscription
+        guard subscription.tier != .free,
+              let renewsOn = subscription.renewsOn,
+              renewsOn <= Date() else { return }
+
+        guard let plan = snapshot.availablePlans.first(where: { $0.id == subscription.planId }) else { return }
+
+        if subscription.status == .cancelled {
+            subscription = CurrentSubscription(
+                planId: "plan_free",
+                tier: .free,
+                status: .none,
+                interval: .monthly,
+                renewsOn: nil,
+                cancelledAt: nil,
+                usageSummary: PlanTier.free.usageSummaryKey
+            )
+            snapshot.subscription = subscription
+            Self.persistSubscription(subscription)
+            DiscoverDailyLimit.syncPlanTier(.free, interval: nil)
+            await appendHistoryEvent(
+                AccountHistoryEvent(
+                    date: renewsOn,
+                    kind: .changePlan,
+                    planTier: .free,
+                    interval: .monthly
+                )
+            )
+            return
+        }
+
+        // Catch up any missed renewal periods (mock auto-billing).
+        var cursor = renewsOn
+        let now = Date()
+        var safety = 0
+        while cursor <= now, safety < 36 {
+            await appendAutomaticBillingEvent(for: plan, interval: subscription.interval, at: cursor)
+            cursor = Calendar.current.date(
+                byAdding: subscription.interval == .yearly ? .year : .month,
+                value: 1,
+                to: cursor
+            ) ?? now.addingTimeInterval(1)
+            safety += 1
+        }
+        subscription.renewsOn = cursor
+        subscription.status = .renewing
+        snapshot.subscription = subscription
+        Self.persistSubscription(subscription)
+    }
+
     private static func persistSubscription(_ subscription: CurrentSubscription) {
         guard let data = try? JSONEncoder().encode(subscription) else { return }
         UserDefaults.standard.set(data, forKey: persistedSubscriptionKey)
+    }
+
+    private static func persistAccountHistory(_ events: [AccountHistoryEvent]) {
+        guard let data = try? JSONEncoder().encode(events) else { return }
+        UserDefaults.standard.set(data, forKey: persistedAccountHistoryKey)
     }
 
     private static func loadPersistedSubscription(validPlanIds: Set<String>) -> CurrentSubscription? {

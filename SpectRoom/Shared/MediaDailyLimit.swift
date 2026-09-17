@@ -8,7 +8,7 @@ enum MediaDailyLimitError: LocalizedError {
     }
 }
 
-/// Tracks combined image + voice message sends per account for the local day.
+/// Tracks combined image + voice + video message sends per account for the local day.
 enum MediaDailyLimit {
     private static let dateKeyPrefix = "mediaDailySendDate_"
     private static let countKeyPrefix = "mediaDailySendCount_"

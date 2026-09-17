@@ -18,8 +18,20 @@ struct Message: Identifiable, Codable {
     var isRead: Bool
     var readAt: Date?
     var voiceDuration: TimeInterval?
+    /// Preview image URL for video messages (first-frame thumbnail).
+    var thumbnailURL: String?
+    var videoDuration: TimeInterval?
     
-    init(conversationId: UUID, senderId: UUID, senderFirebaseId: String, content: String, type: MessageType = .text, voiceDuration: TimeInterval? = nil) {
+    init(
+        conversationId: UUID,
+        senderId: UUID,
+        senderFirebaseId: String,
+        content: String,
+        type: MessageType = .text,
+        voiceDuration: TimeInterval? = nil,
+        thumbnailURL: String? = nil,
+        videoDuration: TimeInterval? = nil
+    ) {
         self.id = UUID()
         self.conversationId = conversationId
         self.senderId = senderId
@@ -30,10 +42,22 @@ struct Message: Identifiable, Codable {
         self.isRead = false
         self.readAt = nil
         self.voiceDuration = voiceDuration
+        self.thumbnailURL = thumbnailURL
+        self.videoDuration = videoDuration
     }
     
     // Custom initializer for messages with specific timestamp (from Firebase)
-    init(conversationId: UUID, senderId: UUID, senderFirebaseId: String, content: String, createdAt: Date, type: MessageType = .text, voiceDuration: TimeInterval? = nil) {
+    init(
+        conversationId: UUID,
+        senderId: UUID,
+        senderFirebaseId: String,
+        content: String,
+        createdAt: Date,
+        type: MessageType = .text,
+        voiceDuration: TimeInterval? = nil,
+        thumbnailURL: String? = nil,
+        videoDuration: TimeInterval? = nil
+    ) {
         self.id = UUID()
         self.conversationId = conversationId
         self.senderId = senderId
@@ -44,6 +68,8 @@ struct Message: Identifiable, Codable {
         self.isRead = false
         self.readAt = nil
         self.voiceDuration = voiceDuration
+        self.thumbnailURL = thumbnailURL
+        self.videoDuration = videoDuration
     }
 }
 
@@ -136,6 +162,8 @@ struct MessageDisplay: Identifiable {
     let senderProfilePhotoURL: String? // Profile photo URL of the sender
     let recipientProfilePhotoURL: String? // Profile photo URL of the recipient
     let voiceDuration: TimeInterval?
+    let thumbnailURL: String?
+    let videoDuration: TimeInterval?
     
     init(message: Message, senderName: String, recipientName: String, senderId: String, recipientId: String, senderProfilePhotoURL: String? = nil, recipientProfilePhotoURL: String? = nil) {
         self.id = message.id.uuidString
@@ -150,6 +178,8 @@ struct MessageDisplay: Identifiable {
         self.senderProfilePhotoURL = senderProfilePhotoURL
         self.recipientProfilePhotoURL = recipientProfilePhotoURL
         self.voiceDuration = message.voiceDuration
+        self.thumbnailURL = message.thumbnailURL
+        self.videoDuration = message.videoDuration
     }
     
     init(
@@ -164,7 +194,9 @@ struct MessageDisplay: Identifiable {
         isRead: Bool,
         senderProfilePhotoURL: String?,
         recipientProfilePhotoURL: String?,
-        voiceDuration: TimeInterval?
+        voiceDuration: TimeInterval?,
+        thumbnailURL: String? = nil,
+        videoDuration: TimeInterval? = nil
     ) {
         self.id = id
         self.content = content
@@ -178,6 +210,8 @@ struct MessageDisplay: Identifiable {
         self.senderProfilePhotoURL = senderProfilePhotoURL
         self.recipientProfilePhotoURL = recipientProfilePhotoURL
         self.voiceDuration = voiceDuration
+        self.thumbnailURL = thumbnailURL
+        self.videoDuration = videoDuration
     }
     
     /// Stable identity for deduplicating optimistic vs server-fetched copies of the same message.
@@ -199,7 +233,9 @@ struct MessageDisplay: Identifiable {
             isRead: isRead,
             senderProfilePhotoURL: isOutgoing ? senderProfilePhotoURL : (photoURL ?? senderProfilePhotoURL),
             recipientProfilePhotoURL: isOutgoing ? (photoURL ?? recipientProfilePhotoURL) : recipientProfilePhotoURL,
-            voiceDuration: voiceDuration
+            voiceDuration: voiceDuration,
+            thumbnailURL: thumbnailURL,
+            videoDuration: videoDuration
         )
     }
 }

@@ -57,19 +57,22 @@ class PhotoStorageService {
     
     // MARK: - Message Image Upload
     func uploadMessageImage(_ image: UIImage, for userID: String) async throws -> String {
-        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
-            throw PhotoStorageError.invalidImageData
+        let prepared: (data: Data, contentType: String, fileExtension: String)
+        do {
+            prepared = try ChatImageProcessor.prepareForUpload(image)
+        } catch let error as ChatImageValidationError {
+            throw PhotoStorageError.chatImageValidation(error)
         }
-        
-        let fileName = "message_\(userID)_\(UUID().uuidString).jpg"
+
+        let fileName = "message_\(userID)_\(UUID().uuidString).\(prepared.fileExtension)"
         let storageRef = storage.reference().child("message_images/\(fileName)")
-        
+
         let metadata = StorageMetadata()
-        metadata.contentType = "image/jpeg"
-        
-        let _ = try await storageRef.putDataAsync(imageData, metadata: metadata)
+        metadata.contentType = prepared.contentType
+
+        let _ = try await storageRef.putDataAsync(prepared.data, metadata: metadata)
         let downloadURL = try await storageRef.downloadURL()
-        
+
         return downloadURL.absoluteString
     }
     
@@ -87,6 +90,37 @@ class PhotoStorageService {
         let downloadURL = try await storageRef.downloadURL()
         
         return downloadURL.absoluteString
+    }
+
+    // MARK: - Video Message Upload
+    struct UploadedChatVideo {
+        let videoURL: String
+        let thumbnailURL: String
+    }
+
+    func uploadVideoMessage(_ prepared: PreparedChatVideo, for userID: String) async throws -> UploadedChatVideo {
+        let videoData = try Data(contentsOf: prepared.videoFileURL)
+        let maxBytes = DiscoverDailyLimit.currentPlanTier.maxVideoUploadBytes
+        let maxMB = DiscoverDailyLimit.currentPlanTier.maxVideoUploadMegabytes
+        guard videoData.count <= maxBytes else {
+            throw PhotoStorageError.chatVideoValidation(.fileTooLarge(maxMB: maxMB))
+        }
+
+        let videoName = "message_\(userID)_\(UUID().uuidString).\(prepared.fileExtension)"
+        let videoRef = storage.reference().child("message_videos/\(videoName)")
+        let videoMeta = StorageMetadata()
+        videoMeta.contentType = prepared.contentType
+        _ = try await videoRef.putDataAsync(videoData, metadata: videoMeta)
+        let videoURL = try await videoRef.downloadURL().absoluteString
+
+        let thumbName = "message_\(userID)_\(UUID().uuidString)_thumb.jpg"
+        let thumbRef = storage.reference().child("message_video_thumbnails/\(thumbName)")
+        let thumbMeta = StorageMetadata()
+        thumbMeta.contentType = "image/jpeg"
+        _ = try await thumbRef.putDataAsync(prepared.thumbnailJPEGData, metadata: thumbMeta)
+        let thumbnailURL = try await thumbRef.downloadURL().absoluteString
+
+        return UploadedChatVideo(videoURL: videoURL, thumbnailURL: thumbnailURL)
     }
     
     // MARK: - Photo Deletion
@@ -198,7 +232,9 @@ enum PhotoStorageError: Error, LocalizedError {
     case invalidURL
     case uploadFailed
     case deletionFailed
-    
+    case chatImageValidation(ChatImageValidationError)
+    case chatVideoValidation(ChatVideoValidationError)
+
     var errorDescription: String? {
         switch self {
         case .invalidImageData:
@@ -209,6 +245,15 @@ enum PhotoStorageError: Error, LocalizedError {
             return "Photo upload failed"
         case .deletionFailed:
             return "Photo deletion failed"
+        case .chatImageValidation(let error):
+            return error.alertMessageKey.localized
+        case .chatVideoValidation(let error):
+            let plan = DiscoverDailyLimit.currentPlanTier
+            return error.alertMessage(
+                planName: plan.displayNameKey.localized,
+                maxMB: plan.maxVideoUploadMegabytes,
+                canUpgrade: plan != .premium
+            )
         }
     }
 }

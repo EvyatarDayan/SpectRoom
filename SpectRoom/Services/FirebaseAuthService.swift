@@ -600,8 +600,13 @@ class FirebaseAuthService: ObservableObject {
                 }()
                 userWithPhotos.planTier = parsed.tier
                 userWithPhotos.billingInterval = parsed.interval
+                userWithPhotos.subscriptionStatus = parsed.status
                 await MainActor.run {
-                    PlanTierCloudSync.applyRemoteBillingPlan(tier: parsed.tier, interval: parsed.interval)
+                    PlanTierCloudSync.applyRemoteBillingPlan(
+                        tier: parsed.tier,
+                        interval: parsed.interval,
+                        status: parsed.status
+                    )
                     // Ensure the fields always exist in DB (parity with Android).
                     if !hadPlanTierField || (parsed.tier != .free && !hadIntervalField) {
                         DiscoverDailyLimit.syncPlanTier(parsed.tier, interval: parsed.interval)
@@ -957,6 +962,7 @@ class FirebaseAuthService: ObservableObject {
         let billing = PlanTierCloudSync.parseBillingPlan(from: userData)
         userWithPhotos.planTier = billing.tier
         userWithPhotos.billingInterval = billing.interval
+        userWithPhotos.subscriptionStatus = billing.status
         
         return userWithPhotos
     }
@@ -2695,6 +2701,8 @@ class FirebaseAuthService: ObservableObject {
             return "📷 Image"
         case "voice", "audio":
             return "🎤 Voice message"
+        case "video":
+            return "🎥 Video"
         default:
             let content = (data["content"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -2931,15 +2939,26 @@ class FirebaseAuthService: ObservableObject {
                 Task { @MainActor in
                     if PlanTierCloudSync.isWithinLocalPlanWriteGrace { return }
                     let localTier = DiscoverDailyLimit.currentPlanTier
-                    let localInterval = MockBillingService.shared.currentSubscription.interval
+                    let localSubscription = MockBillingService.shared.currentSubscription
+                    let localInterval = localSubscription.interval
+                    let localStatus = localSubscription.status
+                    let remoteStatus: SubscriptionStatus = {
+                        if parsed.tier == .free { return .none }
+                        return parsed.status ?? .renewing
+                    }()
                     let tierChanged = parsed.tier != localTier
                     let intervalChanged =
                         parsed.tier != .free
                         && parsed.interval != nil
                         && parsed.interval != localInterval
-                    guard tierChanged || intervalChanged else { return }
-                    PlanTierCloudSync.applyRemoteBillingPlan(tier: parsed.tier, interval: parsed.interval)
-                    print("✅ Billing plan updated from Firestore: \(parsed.tier.rawValue)")
+                    let statusChanged = remoteStatus != localStatus
+                    guard tierChanged || intervalChanged || statusChanged else { return }
+                    PlanTierCloudSync.applyRemoteBillingPlan(
+                        tier: parsed.tier,
+                        interval: parsed.interval,
+                        status: remoteStatus
+                    )
+                    print("✅ Billing plan updated from Firestore: \(parsed.tier.rawValue) status=\(remoteStatus.rawValue)")
                 }
             }
     }
@@ -3937,7 +3956,10 @@ class FirebaseAuthService: ObservableObject {
                     let content = data["content"] as? String ?? ""
                     let typeString = data["type"] as? String ?? "text"
                     let messageType = MessageType(rawValue: typeString) ?? .text
-                    let voiceDuration = data["voiceDuration"] as? TimeInterval
+                    let voiceDuration = Self.timeIntervalValue(data["voiceDuration"])
+                    let videoDuration = Self.timeIntervalValue(data["videoDuration"])
+                    // Reuse the duration slot for video so list previews can show length.
+                    let mediaDuration = voiceDuration ?? videoDuration
                     
                     DispatchQueue.main.async {
                         if SpectRoomSystemAccount.isSystemAccount(senderId) {
@@ -3948,7 +3970,7 @@ class FirebaseAuthService: ObservableObject {
                                 messageDocId,
                                 content,
                                 messageType,
-                                voiceDuration,
+                                mediaDuration,
                                 messageTime,
                                 true
                             )
@@ -3962,7 +3984,7 @@ class FirebaseAuthService: ObservableObject {
                             messageDocId,
                             content,
                             messageType,
-                            voiceDuration,
+                            mediaDuration,
                             messageTime,
                             false
                         )
@@ -3985,7 +4007,7 @@ class FirebaseAuthService: ObservableObject {
                                     messageDocId,
                                     content,
                                     messageType,
-                                    voiceDuration,
+                                    mediaDuration,
                                     messageTime,
                                     true
                                 )
@@ -4003,7 +4025,7 @@ class FirebaseAuthService: ObservableObject {
                                     messageDocId,
                                     content,
                                     messageType,
-                                    voiceDuration,
+                                    mediaDuration,
                                     messageTime,
                                     true
                                 )
@@ -4176,6 +4198,66 @@ class FirebaseAuthService: ObservableObject {
         print("✅ Voice message sent successfully with ID: \(messageId)")
         return messageId
     }
+
+    func sendVideoMessage(
+        to recipientId: String,
+        videoURL: String,
+        thumbnailURL: String,
+        duration: TimeInterval
+    ) async throws -> String {
+        guard let currentUserId = auth.currentUser?.uid else {
+            throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+
+        if SpectRoomSystemAccount.isSystemAccount(recipientId) {
+            throw NSError(
+                domain: "FirebaseAuthService",
+                code: 403,
+                userInfo: [NSLocalizedDescriptionKey: "You cannot reply to SpectRoom messages"]
+            )
+        }
+
+        if try await isBlockedBy(userId: recipientId) {
+            throw NSError(
+                domain: "FirebaseAuthService",
+                code: 403,
+                userInfo: [NSLocalizedDescriptionKey: "You have been blocked by this user"]
+            )
+        }
+
+        guard MediaDailyLimit.canSend else {
+            throw MediaDailyLimitError.dailyLimitReached(limit: MediaDailyLimit.maxMediaPerDay)
+        }
+
+        print("🎬 Sending video message from \(currentUserId) to \(recipientId)")
+
+        let messageId = UUID().uuidString
+        let timestamp = Date().timeIntervalSince1970
+
+        let messageData: [String: Any] = [
+            "id": messageId,
+            "senderId": currentUserId,
+            "recipientId": recipientId,
+            "content": videoURL,
+            "type": "video",
+            "thumbnailURL": thumbnailURL,
+            "videoDuration": duration,
+            "createdAt": timestamp,
+            "isRead": false,
+            "readAt": NSNull()
+        ]
+
+        let senderRef = db.collection("users").document(currentUserId).collection("sentMessages").document(messageId)
+        try await senderRef.setData(messageData)
+
+        let recipientRef = db.collection("users").document(recipientId).collection("incomingMessages").document(messageId)
+        try await recipientRef.setData(messageData)
+
+        MediaDailyLimit.recordSend()
+
+        print("✅ Video message sent successfully with ID: \(messageId)")
+        return messageId
+    }
     
     func fetchSentMessages() async throws -> [MessageDisplay] {
         guard let currentUserId = auth.currentUser?.uid else {
@@ -4216,7 +4298,9 @@ class FirebaseAuthService: ObservableObject {
                 senderFirebaseId: senderId,
                 content: content,
                 type: MessageType(rawValue: (data["type"] as? String) ?? "text") ?? .text,
-                voiceDuration: data["voiceDuration"] as? TimeInterval
+                voiceDuration: Self.timeIntervalValue(data["voiceDuration"]),
+                thumbnailURL: data["thumbnailURL"] as? String,
+                videoDuration: Self.timeIntervalValue(data["videoDuration"])
             )
             
             // Fetch recipient name and profile photo
@@ -4265,7 +4349,7 @@ class FirebaseAuthService: ObservableObject {
             
             let messageTypeString = data["type"] as? String ?? "text"
             let messageType = MessageType(rawValue: messageTypeString) ?? .text
-            let voiceDuration = data["voiceDuration"] as? TimeInterval
+            let voiceDuration = Self.timeIntervalValue(data["voiceDuration"])
             
             let message = Message(
                 conversationId: UUID(), // Not used in this structure
@@ -4274,7 +4358,9 @@ class FirebaseAuthService: ObservableObject {
                 content: content,
                 createdAt: Date(timeIntervalSince1970: createdAt),
                 type: messageType,
-                voiceDuration: voiceDuration
+                voiceDuration: voiceDuration,
+                thumbnailURL: data["thumbnailURL"] as? String,
+                videoDuration: Self.timeIntervalValue(data["videoDuration"])
             )
             
             // Fetch sender name and profile photo
@@ -4983,6 +5069,8 @@ class FirebaseAuthService: ObservableObject {
         let messageTypeString = data["type"] as? String ?? "text"
         let messageType = MessageType(rawValue: messageTypeString) ?? .text
         let voiceDuration = Self.timeIntervalValue(data["voiceDuration"])
+        let thumbnailURL = data["thumbnailURL"] as? String
+        let videoDuration = Self.timeIntervalValue(data["videoDuration"])
         
         return Message(
             conversationId: UUID(),
@@ -4991,7 +5079,9 @@ class FirebaseAuthService: ObservableObject {
             content: content,
             createdAt: Date(timeIntervalSince1970: createdAt),
             type: messageType,
-            voiceDuration: voiceDuration
+            voiceDuration: voiceDuration,
+            thumbnailURL: thumbnailURL,
+            videoDuration: videoDuration
         )
     }
     

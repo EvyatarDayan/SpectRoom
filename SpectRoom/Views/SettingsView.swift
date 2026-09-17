@@ -16,7 +16,7 @@ struct SettingsView: View {
     @AppStorage("notificationsEnabled") private var notificationsEnabled = false
     @State private var showingPermissionAlert = false
     @AppStorage("isDarkMode") private var isDarkMode = false
-    @AppStorage("selectedLanguage") private var selectedLanguageCode: String = "en"
+    @AppStorage("selectedLanguage") private var selectedLanguageCode: String = "sv"
     @State private var showingLanguageModal = false
     @State private var showingBlockedUsers = false
     @State private var showingReportedProfiles = false
@@ -163,6 +163,35 @@ struct SettingsView: View {
                     .onTapGesture {
                         showingPrivacySafety = true
                     }
+
+                    Button(action: exportMessages) {
+                        HStack {
+                            Image(systemName: "square.and.arrow.up.circle.fill")
+                                .foregroundColor(.blue)
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("settings.export.messages".localized)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                                    .foregroundColor(SpectRoomTheme.text)
+                                Text("settings.export.messages.description".localized)
+                                    .font(.caption)
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            Spacer()
+                            if isExportingMessages {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(SpectRoomTheme.secondaryText)
+                                    .font(.caption)
+                            }
+                        }
+                    }
+                    .disabled(isExportingMessages)
                     
                     Button(action: {
                         showingBlockedUsers = true
@@ -227,8 +256,8 @@ struct SettingsView: View {
                     }
                 }
                 
-                // Account & Data
-                Section("settings.section.account.data".localized) {
+                // Account
+                Section("settings.section.account".localized) {
                     Button(action: {
                         showingAccountBilling = true
                     }) {
@@ -249,41 +278,14 @@ struct SettingsView: View {
                                     .minimumScaleFactor(0.8)
                             }
                             Spacer()
+                            Text((appState.currentUser?.planTier ?? DiscoverDailyLimit.currentPlanTier).titleStars)
+                                .font(.body)
                             Image(systemName: "chevron.right")
                                 .foregroundColor(SpectRoomTheme.secondaryText)
                                 .font(.caption)
                         }
                     }
 
-                    Button(action: exportMessages) {
-                        HStack {
-                            Image(systemName: "square.and.arrow.up.circle.fill")
-                                .foregroundColor(.blue)
-                                .font(.title2)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("settings.export.messages".localized)
-                                    .font(.headline)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.85)
-                                    .foregroundColor(SpectRoomTheme.text)
-                                Text("settings.export.messages.description".localized)
-                                    .font(.caption)
-                                    .foregroundColor(SpectRoomTheme.secondaryText)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            Spacer()
-                            if isExportingMessages {
-                                ProgressView()
-                            } else {
-                                Image(systemName: "chevron.right")
-                                    .foregroundColor(SpectRoomTheme.secondaryText)
-                                    .font(.caption)
-                            }
-                        }
-                    }
-                    .disabled(isExportingMessages)
-                    
                     Button(action: {
                         showingSignOutConfirmation = true
                     }) {
@@ -304,39 +306,8 @@ struct SettingsView: View {
                                     .minimumScaleFactor(0.8)
                             }
                             Spacer()
-                            Image(systemName: "chevron.right")
-                                .foregroundColor(SpectRoomTheme.secondaryText)
-                                .font(.caption)
                         }
                     }
-                    
-                    Button(action: {
-                        deleteConfirmationStep = .sure
-                        deleteConfirmationText = ""
-                        isDeletingAccount = false
-                        deleteAccountErrorMessage = nil
-                        showingDeleteAccountConfirmation = true
-                    }) {
-                        HStack {
-                            Image(systemName: "trash.circle.fill")
-                                .foregroundColor(.blue)
-                                .font(.title2)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("settings.delete.account.button".localized)
-                                    .font(.headline)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.85)
-                                    .foregroundColor(.red)
-                                Text("settings.delete.account.subtitle".localized)
-                                    .font(.caption)
-                                    .foregroundColor(SpectRoomTheme.secondaryText)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            Spacer()
-                        }
-                    }
-                    .disabled(isDeletingAccount)
                 }
 
                 // Support & About
@@ -391,36 +362,62 @@ struct SettingsView: View {
                         showingAbout = true
                     }
                 }
-                
-                // Development only — alone at the bottom
-                #if DEBUG
-                Section {
+
+                // Danger zone
+                Section("settings.section.danger.zone".localized) {
+                    #if DEBUG
                     HStack {
                         Image(systemName: "trash.circle.fill")
-                            .foregroundColor(.blue)
+                            .foregroundColor(Color(red: 1.0, green: 0.45, blue: 0.45))
                             .font(.title2)
-                        VStack(alignment: .leading) {
+                        VStack(alignment: .leading, spacing: 4) {
                             Text("settings.reset.user.data".localized)
                                 .font(.headline)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.85)
+                                .foregroundColor(Color(red: 1.0, green: 0.45, blue: 0.45))
                             Text("settings.reset.user.data.description".localized)
                                 .font(.caption)
-                                .foregroundColor(SpectRoomTheme.secondaryText)
+                                .foregroundColor(Color(red: 1.0, green: 0.45, blue: 0.45))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
                         Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundColor(SpectRoomTheme.secondaryText)
-                            .font(.caption)
                     }
                     .contentShape(Rectangle())
                     .onTapGesture {
                         appState.resetAllAppState()
                     }
+                    #endif
+
+                    Button(action: {
+                        deleteConfirmationStep = .sure
+                        deleteConfirmationText = ""
+                        isDeletingAccount = false
+                        deleteAccountErrorMessage = nil
+                        showingDeleteAccountConfirmation = true
+                    }) {
+                        HStack {
+                            Image(systemName: "trash.circle.fill")
+                                .foregroundColor(Color(red: 1.0, green: 0.45, blue: 0.45))
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("settings.delete.account.button".localized)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                                    .foregroundColor(Color(red: 1.0, green: 0.45, blue: 0.45))
+                                Text("settings.delete.account.subtitle".localized)
+                                    .font(.caption)
+                                    .foregroundColor(Color(red: 1.0, green: 0.45, blue: 0.45))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            Spacer()
+                        }
+                    }
+                    .disabled(isDeletingAccount)
                 }
-                #endif
             }
             .padding(.bottom, 60)
             .scrollContentBackground(.hidden)
@@ -553,11 +550,11 @@ struct SettingsView: View {
     }
     
     private var currentLanguageFlag: String {
-        Language.allLanguages.first(where: { $0.code == selectedLanguageCode })?.flag ?? "🇺🇸"
+        Language.allLanguages.first(where: { $0.code == selectedLanguageCode })?.flag ?? "🇸🇪"
     }
     
     private var currentLanguageName: String {
-        Language.allLanguages.first(where: { $0.code == selectedLanguageCode })?.name ?? "English"
+        Language.allLanguages.first(where: { $0.code == selectedLanguageCode })?.name ?? "Swedish"
     }
     
     private func refreshReportedProfilesCount() async {
@@ -1090,71 +1087,6 @@ private struct SignOutConfirmationOverlay: View {
             }
             .background(SpectRoomTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .padding(.horizontal, 36)
-        }
-    }
-}
-
-private struct UnblockConfirmationOverlay: View {
-    let firstName: String
-    let onCancel: () -> Void
-    let onConfirm: () -> Void
-    
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.35)
-                .ignoresSafeArea()
-                .onTapGesture(perform: onCancel)
-            
-            VStack(spacing: 16) {
-                VStack(spacing: 8) {
-                    Text("settings.blocked.users.unblock.confirm.title".localized(with: firstName))
-                        .font(.headline)
-                        .multilineTextAlignment(.center)
-                        .foregroundColor(SpectRoomTheme.text)
-                        .padding(.bottom, 4)
-                    
-                    Text("settings.blocked.users.unblock.confirm.message".localized(with: firstName))
-                        .font(.subheadline)
-                        .multilineTextAlignment(.center)
-                        .foregroundColor(SpectRoomTheme.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                
-                Button(action: onConfirm) {
-                    Text("settings.blocked.users.unblock.action".localized)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.green)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.green.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.green.opacity(0.35), lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
-            }
-            .background(SpectRoomTheme.card)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(alignment: .topTrailing) {
-                Button(action: onCancel) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(SpectRoomTheme.secondaryText)
-                        .frame(width: 32, height: 32)
-                        .background(SpectRoomTheme.background)
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .padding(12)
-            }
             .padding(.horizontal, 36)
         }
     }

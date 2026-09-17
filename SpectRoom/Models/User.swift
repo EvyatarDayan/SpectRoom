@@ -47,6 +47,8 @@ struct SpectRoomUser: Identifiable, Codable, Equatable {
     var planTier: PlanTier = .free
     /// Billing cycle synced via Firestore (`monthly` / `yearly`). Nil when unset / Free.
     var billingInterval: BillingInterval? = nil
+    /// Subscription lifecycle synced via Firestore (`renewing` / `cancelled` / …).
+    var subscriptionStatus: SubscriptionStatus? = nil
     
     init(name: String, age: Int, email: String, bio: String = "", interests: [String] = [], location: Location = Location(), preferences: UserPreferences = UserPreferences(), gender: String = "", interestedIn: [String] = [], lookingFor: [String] = [], preferredAgeMin: Int? = nil, preferredAgeMax: Int? = nil, lifestyle: String = "", shareLifestyle: Bool = false, bodyType: String = "", shareBodyType: Bool = false, idealFirstDate: [String] = [], shareIdealFirstDate: Bool = false, sensoryPreferences: [String] = [], shareSensoryPreferences: Bool = false, energyLevel: Int = 4) {
         self.id = UUID()

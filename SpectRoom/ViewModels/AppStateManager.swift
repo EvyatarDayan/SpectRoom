@@ -1937,7 +1937,9 @@ class AppStateManager: ObservableObject {
             content: content,
             createdAt: createdAt,
             type: type,
-            voiceDuration: voiceDuration
+            voiceDuration: type == .voice ? voiceDuration : nil,
+            thumbnailURL: nil,
+            videoDuration: type == .video ? voiceDuration : nil
         )
         let messageDisplay = MessageDisplay(
             message: message,

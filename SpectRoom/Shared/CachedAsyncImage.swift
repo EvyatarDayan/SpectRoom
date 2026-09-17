@@ -134,13 +134,15 @@ struct ChatCachedImage: View {
     let url: URL?
     var maxWidth: CGFloat = 150
     var maxHeight: CGFloat = 150
+    var contentMode: ContentMode = .fit
     
     @StateObject private var loader: CachedImageLoader
     
-    init(url: URL?, maxWidth: CGFloat = 150, maxHeight: CGFloat = 150) {
+    init(url: URL?, maxWidth: CGFloat = 150, maxHeight: CGFloat = 150, contentMode: ContentMode = .fit) {
         self.url = url
         self.maxWidth = maxWidth
         self.maxHeight = maxHeight
+        self.contentMode = contentMode
         _loader = StateObject(wrappedValue: CachedImageLoader(url: url))
     }
     
@@ -149,8 +151,11 @@ struct ChatCachedImage: View {
             if let uiImage = loader.image {
                 Image(uiImage: uiImage)
                     .resizable()
-                    .aspectRatio(contentMode: .fit)
+                    .aspectRatio(contentMode: contentMode)
+                    .frame(width: contentMode == .fill ? maxWidth : nil,
+                           height: contentMode == .fill ? maxHeight : nil)
                     .frame(maxWidth: maxWidth, maxHeight: maxHeight)
+                    .clipped()
                     .cornerRadius(10)
             } else if loader.didFail {
                 Button {
@@ -174,6 +179,8 @@ struct ChatCachedImage: View {
                     .frame(width: maxWidth, height: maxHeight)
             }
         }
+        .frame(width: contentMode == .fill ? maxWidth : nil,
+               height: contentMode == .fill ? maxHeight : nil)
         .frame(maxWidth: maxWidth, maxHeight: maxHeight)
         .onAppear {
             loader.load()

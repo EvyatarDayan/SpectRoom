@@ -26,7 +26,7 @@ struct SpectRoomApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var appState = AppStateManager.shared
     @AppStorage("isDarkMode") private var isDarkMode = false
-    @AppStorage("selectedLanguage") private var selectedLanguage: String = "en"
+    @AppStorage("selectedLanguage") private var selectedLanguage: String = "sv"
     @State private var languageChanged = false
     @State private var moderationSupport: ModerationSupportPresentation? = nil
     

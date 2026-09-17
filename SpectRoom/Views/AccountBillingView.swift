@@ -8,7 +8,7 @@ final class AccountBillingViewModel: ObservableObject {
     @Published var selectedInterval: BillingInterval = .monthly
     @Published var subscription: CurrentSubscription?
     @Published var plans: [SubscriptionPlan] = []
-    @Published var invoices: [Invoice] = []
+    @Published var invoices: [AccountHistoryEvent] = []
     @Published var isBusy = false
     @Published var isExportingBillingHistory = false
 
@@ -28,12 +28,15 @@ final class AccountBillingViewModel: ObservableObject {
             ?? plans.first(where: { $0.tier == subscription?.tier })
     }
 
-    var recentInvoices: [Invoice] {
+    var recentAccountHistory: [AccountHistoryEvent] {
         let cutoff = Calendar.current.date(byAdding: .year, value: -3, to: Date()) ?? .distantPast
         return invoices
             .filter { $0.date >= cutoff }
             .sorted { $0.date > $1.date }
     }
+
+    /// Prefer `recentAccountHistory`; kept for export call sites.
+    var recentInvoices: [AccountHistoryEvent] { recentAccountHistory }
 
     func load() async {
         isLoading = true
@@ -55,6 +58,7 @@ final class AccountBillingViewModel: ObservableObject {
         defer { isBusy = false }
         do {
             subscription = try await service.changePlan(to: plan.id, interval: selectedInterval)
+            apply(service.currentBillingSnapshot())
             planChangeSuccessLabel = targetLabel
         } catch {
             showToast(error.localizedDescription)
@@ -71,6 +75,7 @@ final class AccountBillingViewModel: ObservableObject {
         defer { isBusy = false }
         do {
             subscription = try await service.cancelSubscription()
+            apply(service.currentBillingSnapshot())
             cancelSuccessPlanLabel = planLabel
         } catch {
             showToast(error.localizedDescription)
@@ -82,7 +87,7 @@ final class AccountBillingViewModel: ObservableObject {
     }
 
     func exportBillingHistoryPDF() async -> URL? {
-        guard !recentInvoices.isEmpty else {
+        guard !recentAccountHistory.isEmpty else {
             showToast("billing.invoices.empty".localized)
             return nil
         }
@@ -92,7 +97,7 @@ final class AccountBillingViewModel: ObservableObject {
             let email = FirebaseAuthService.shared.auth.currentUser?.email ?? ""
             return try BillingHistoryExport.writePDFFile(
                 accountEmail: email,
-                invoices: recentInvoices
+                events: recentAccountHistory
             )
         } catch {
             showToast("billing.invoices.export.error".localized)
@@ -191,7 +196,7 @@ final class AccountBillingViewModel: ObservableObject {
     private func apply(_ snap: BillingSnapshot) {
         subscription = snap.subscription
         plans = snap.availablePlans
-        invoices = snap.invoices.sorted { $0.date > $1.date }
+        invoices = snap.accountHistory.sorted { $0.date > $1.date }
         selectedInterval = snap.subscription.interval
     }
 
@@ -394,10 +399,10 @@ struct AccountBillingView: View {
                     let isSelected = viewModel.selectedInterval == interval
                     HStack(spacing: 4) {
                         Text(interval.titleKey.localized)
-                            .font(.subheadline.weight(.semibold))
+                            .font(.body.weight(.semibold))
                             .foregroundColor(isSelected ? .white : SpectRoomTheme.text)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.65)
+                            .minimumScaleFactor(1)
                             .layoutPriority(1)
                         if interval == .yearly {
                             Text("billing.save.percent".localized)
@@ -413,6 +418,7 @@ struct AccountBillingView: View {
                         }
                     }
                     .frame(minWidth: 0, maxWidth: .infinity)
+                    .padding(.horizontal, 8)
                     .padding(.vertical, 10)
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -529,12 +535,12 @@ struct AccountBillingView: View {
         )
     }
 
-    // MARK: C. Invoices / billing history
+    // MARK: C. Account history
 
     private var invoicesSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                sectionHeader("billing.section.invoices".localized, systemImage: "doc.text.fill")
+                sectionHeader("billing.section.invoices".localized, systemImage: "clock.arrow.circlepath")
                 Spacer()
                 Button {
                     Task {
@@ -553,49 +559,63 @@ struct AccountBillingView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(viewModel.isExportingBillingHistory || viewModel.recentInvoices.isEmpty)
+                .disabled(viewModel.isExportingBillingHistory || viewModel.recentAccountHistory.isEmpty)
                 .accessibilityLabel("billing.invoices.export".localized)
             }
 
-            if viewModel.recentInvoices.isEmpty {
-                emptyInline(message: "billing.invoices.empty".localized)
+            if viewModel.recentAccountHistory.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundColor(SpectRoomTheme.secondaryText.opacity(0.7))
+                    Text("billing.invoices.empty".localized)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(SpectRoomTheme.secondaryText)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
             } else {
                 let rowHeight: CGFloat = 62
                 let maxVisibleRows = 6
-                let visibleCount = min(viewModel.recentInvoices.count, maxVisibleRows)
+                let itemCount = viewModel.recentAccountHistory.count
+                let visibleCount = min(itemCount, maxVisibleRows)
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(viewModel.recentInvoices) { invoice in
-                            invoiceRow(invoice)
-                            if invoice.id != viewModel.recentInvoices.last?.id {
+                        ForEach(viewModel.recentAccountHistory) { event in
+                            accountHistoryRow(event)
+                            if event.id != viewModel.recentAccountHistory.last?.id {
                                 Divider().padding(.leading, 4)
                             }
                         }
                     }
                 }
                 .frame(height: CGFloat(visibleCount) * rowHeight)
+                .scrollDisabled(itemCount <= maxVisibleRows)
                 .scrollIndicators(.visible)
             }
         }
         .billingCardStyle()
     }
 
-    private func invoiceRow(_ invoice: Invoice) -> some View {
+    private func accountHistoryRow(_ event: AccountHistoryEvent) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(invoice.date.formatted(date: .abbreviated, time: .omitted))
+                Text(event.formattedDateTime())
                     .font(.caption)
                     .foregroundColor(SpectRoomTheme.secondaryText)
-                Text(invoice.displayTitle)
+                Text(event.displayTitle)
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(SpectRoomTheme.text)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            Text(invoice.formattedAmount())
-                .font(.subheadline.weight(.bold))
-                .foregroundColor(SpectRoomTheme.text)
-                .multilineTextAlignment(.trailing)
+            if event.showsAmount {
+                Text(event.formattedAmount())
+                    .font(.subheadline.weight(.bold))
+                    .foregroundColor(SpectRoomTheme.text)
+                    .multilineTextAlignment(.trailing)
+            }
         }
         .padding(.vertical, 12)
     }
@@ -621,14 +641,6 @@ struct AccountBillingView: View {
             .lineLimit(1)
             .minimumScaleFactor(0.7)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func emptyInline(message: String) -> some View {
-        Text(message)
-            .font(.subheadline)
-            .foregroundColor(SpectRoomTheme.secondaryText)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 8)
     }
 
     private var billingSkeleton: some View {

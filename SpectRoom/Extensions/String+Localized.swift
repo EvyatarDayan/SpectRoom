@@ -12,7 +12,7 @@ extension String {
     /// Respects the user's selected language preference
     var localized: String {
         // Get the selected language code from UserDefaults
-        let selectedLanguage = UserDefaults.standard.string(forKey: "selectedLanguage") ?? "en"
+        let selectedLanguage = UserDefaults.standard.string(forKey: "selectedLanguage") ?? "sv"
         
         // Get the bundle path for the selected language
         guard let path = Bundle.main.path(forResource: selectedLanguage, ofType: "lproj"),

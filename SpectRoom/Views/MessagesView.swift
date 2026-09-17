@@ -11,6 +11,8 @@ import UIKit
 import Photos
 import Foundation
 import AVFoundation
+import AVKit
+import UniformTypeIdentifiers
 
 struct MessagesView: View {
     @EnvironmentObject var appState: AppStateManager
@@ -24,6 +26,7 @@ struct MessagesView: View {
     @State private var searchText = ""
     @State private var historyMatchPartnerIds: Set<String> = []
     @State private var historySearchTask: Task<Void, Never>?
+    @State private var pendingUnblockConversationUser: BlockedUser?
     @FocusState private var isSearchFieldFocused: Bool
     /// Same as search bar `.padding(.bottom, 10)`.
     private let searchContentSpacing: CGFloat = 10
@@ -35,7 +38,9 @@ struct MessagesView: View {
     }
     
     private var visibleConversations: [MessageDisplay] {
-        conversations.filter { !appState.isHiddenByBlock(conversationOtherUserId(for: $0)) }
+        // Hide chats only when THEY blocked you. If YOU blocked them, keep the
+        // thread visible (blocked-row UI + read-only chat).
+        conversations.filter { !appState.isBlockedByUser(conversationOtherUserId(for: $0)) }
     }
     
     private var filteredConversations: [MessageDisplay] {
@@ -77,9 +82,13 @@ struct MessagesView: View {
                         ZStack {
                             List(filteredConversations) { conversation in
                                 let _ = print("💬 List: Rendering conversation with ID: \(conversation.id), recipient: \(conversation.recipientName)")
-                                ConversationRow(conversation: conversation) {
-                                    handleConversationTap(conversation)
-                                }
+                                ConversationRow(
+                                    conversation: conversation,
+                                    onTap: { handleConversationTap(conversation) },
+                                    onRequestUnblock: {
+                                        requestUnblock(for: conversation)
+                                    }
+                                )
                                 .environmentObject(appState)
                                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                                 .listRowSeparator(.hidden)
@@ -115,6 +124,20 @@ struct MessagesView: View {
             }
         }
         .navigationViewStyle(.stack)
+        .overlay {
+            if let user = pendingUnblockConversationUser {
+                UnblockConfirmationOverlay(
+                    firstName: firstName(from: user.name),
+                    onCancel: {
+                        pendingUnblockConversationUser = nil
+                    },
+                    onConfirm: {
+                        appState.unblockUser(userId: user.id)
+                        pendingUnblockConversationUser = nil
+                    }
+                )
+            }
+        }
         .onChange(of: searchText) { _, newValue in
             scheduleHistorySearch(for: newValue)
         }
@@ -508,6 +531,10 @@ struct MessagesView: View {
             if "messages.preview.voice".localized.localizedCaseInsensitiveContains(query) {
                 return true
             }
+        case .video:
+            if "messages.preview.video".localized.localizedCaseInsensitiveContains(query) {
+                return true
+            }
         default:
             break
         }
@@ -573,14 +600,30 @@ struct MessagesView: View {
         return sortedConversations(updated)
     }
     
+    private func requestUnblock(for conversation: MessageDisplay) {
+        let otherUserId = conversationOtherUserId(for: conversation)
+        if let blocked = appState.blockedUsers.first(where: { $0.id == otherUserId }) {
+            pendingUnblockConversationUser = blocked
+            return
+        }
+        let name = conversation.senderName == "You" ? conversation.recipientName : conversation.senderName
+        pendingUnblockConversationUser = BlockedUser(id: otherUserId, name: name, blockedAt: Date())
+    }
+
+    private func firstName(from fullName: String) -> String {
+        let components = fullName.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
+        return components.first.map(String.init) ?? fullName
+    }
+
     private func handleConversationTap(_ conversation: MessageDisplay) {
         print("💬 Conversation tapped for: \(conversation.recipientName)")
         print("💬 Message content: \(conversation.content)")
         print("💬 Message senderId: \(conversation.senderId), recipientId: \(conversation.recipientId)")
         
         let otherUserId = conversation.senderName == "You" ? conversation.recipientId : conversation.senderId
-        guard !appState.isHiddenByBlock(otherUserId) else {
-            print("🚫 Ignoring tap on blocked conversation with \(otherUserId)")
+        // Still hide / ignore if THEY blocked you. You can open chats you blocked.
+        guard !appState.isBlockedByUser(otherUserId) else {
+            print("🚫 Ignoring tap on conversation blocked by \(otherUserId)")
             return
         }
         
@@ -615,8 +658,8 @@ struct MessagesView: View {
     private func openConversationForSender(senderId: String, retryCount: Int = 0) {
         print("💬 Opening conversation for sender: \(senderId) (retry: \(retryCount))")
         
-        guard !appState.isHiddenByBlock(senderId) else {
-            print("🚫 Ignoring open for blocked conversation with \(senderId)")
+        guard !appState.isBlockedByUser(senderId) else {
+            print("🚫 Ignoring open for conversation blocked by \(senderId)")
             appState.conversationToOpenSenderId = nil
             appState.shouldOpenConversation = false
             appState.conversationToOpenProfile = nil
@@ -857,10 +900,25 @@ struct MessagesView: View {
 struct ConversationRow: View {
     let conversation: MessageDisplay
     let onTap: () -> Void
+    var onRequestUnblock: (() -> Void)? = nil
     @EnvironmentObject private var appState: AppStateManager
     
     var body: some View {
         let _ = print("💬 ConversationRow: Rendering row for \(conversation.recipientName), content: \(conversation.content.prefix(20))...")
+        Group {
+            if isBlockedByMe {
+                blockedByMeRow
+            } else {
+                standardRow
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        onTap()
+                    }
+            }
+        }
+    }
+
+    private var standardRow: some View {
         ZStack {
             HStack(spacing: 12) {
                 profilePhoto
@@ -899,10 +957,44 @@ struct ConversationRow: View {
                     .allowsHitTesting(false)
             }
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onTap()
+    }
+
+    /// Same layout as Settings → Blocked profiles row.
+    private var blockedByMeRow: some View {
+        HStack(spacing: 12) {
+            Button(action: onTap) {
+                HStack(spacing: 12) {
+                    profilePhoto
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(otherUserName)
+                            .font(.headline)
+                            .foregroundColor(SpectRoomTheme.text)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Text(blockedDateText)
+                            .font(.caption)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button("settings.blocked.users.unblock.action".localized) {
+                onRequestUnblock?()
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundColor(.green)
+            .buttonStyle(.plain)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
+        .background(SpectRoomTheme.card)
+        .cornerRadius(12)
     }
     
     private var otherUserName: String {
@@ -923,9 +1015,23 @@ struct ConversationRow: View {
     private var isSpectRoomSystemConversation: Bool {
         SpectRoomSystemAccount.isSystemAccount(otherUserId)
     }
+
+    private var isBlockedByMe: Bool {
+        !isSpectRoomSystemConversation && appState.isUserBlocked(otherUserId)
+    }
     
     private var isBlockedConversation: Bool {
         !isSpectRoomSystemConversation && appState.isMessagingBlocked(with: otherUserId)
+    }
+
+    private var blockedDateText: String {
+        if let blockedAt = appState.blockedUsers.first(where: { $0.id == otherUserId })?.blockedAt {
+            return String(
+                format: "settings.blocked.users.since".localized,
+                blockedAt.formatted(date: .abbreviated, time: .shortened)
+            )
+        }
+        return "settings.blocked.users.no.date".localized
     }
     
     private var unreadCount: Int {
@@ -1003,6 +1109,12 @@ struct ConversationRow: View {
             } else {
                 return "messages.preview.voice".localized
             }
+        case .video:
+            if let duration = conversation.videoDuration {
+                return String(format: "messages.preview.video.duration".localized, formattedDuration(duration))
+            } else {
+                return "messages.preview.video".localized
+            }
         default:
             return conversation.content
         }
@@ -1010,7 +1122,7 @@ struct ConversationRow: View {
 }
 
 private enum PendingMediaComposerAction {
-    case photo
+    case media
     case voice
 }
 
@@ -1047,15 +1159,24 @@ struct MessageConversationModal: View {
     @State private var currentUserProfilePhotoURL: String?
     @State private var otherUserProfilePhotoURL: String?
     @State private var hasMarkedAsRead = false
-    @State private var showingImagePicker = false
+    @State private var showingMediaPicker = false
     @State private var showingPhotoShareWarning = false
     /// What to resume after dismissing the photo-safety reminder.
     @State private var pendingMediaActionAfterWarning: PendingMediaComposerAction? = nil
     @State private var selectedImage: UIImage?
+    @State private var imageValidationError: ChatImageValidationError?
+    @State private var showingImageValidationAlert = false
     @State private var showingImageReadyPreview = false
     @State private var isUploadingImage = false
     /// Local previews keyed by message content (`pending://…` or final image URL).
     @State private var localImagePreviews: [String: UIImage] = [:]
+    @State private var preparedVideo: PreparedChatVideo?
+    @State private var videoValidationError: ChatVideoValidationError?
+    @State private var showingVideoValidationAlert = false
+    @State private var showingVideoReadyPreview = false
+    @State private var isProcessingVideo = false
+    @State private var isUploadingVideo = false
+    @State private var localVideoThumbnails: [String: UIImage] = [:]
     @State private var showingConversationPhotoViewer = false
     @State private var selectedPhotoIndex = 0
     @State private var previousMessageCount = 0
@@ -1070,9 +1191,10 @@ struct MessageConversationModal: View {
     @State private var showingMicLongPressTip = false
     @State private var showingMediaLimitAlert = false
     @State private var showingAccountBilling = false
-    /// Keep pending image/voice across Account & Billing so Send can resume after upgrade.
+    /// Keep pending image/voice/video across Account & Billing so Send can resume after upgrade.
     @State private var restoreImagePreviewAfterBilling = false
     @State private var restoreVoicePreviewAfterBilling = false
+    @State private var restoreVideoPreviewAfterBilling = false
     @State private var mediaSendCount = MediaDailyLimit.currentCount()
     @State private var loadError = false
     @State private var showingPreMessageOptions = false
@@ -1140,6 +1262,45 @@ struct MessageConversationModal: View {
     /// Composer is hidden for blocked partners and official SpectRoom messages.
     private var canReplyInConversation: Bool {
         !isBlockedByRecipient && !isSpectRoomSystemConversation
+    }
+
+    private var imageValidationAlertTitle: String {
+        switch imageValidationError {
+        case .fileTooLarge:
+            return "messages.image.error.size.title".localized
+        default:
+            return "messages.image.error.title".localized
+        }
+    }
+
+    private var videoValidationAlertTitle: String {
+        (videoValidationError ?? .processingFailed).alertTitleKey.localized
+    }
+
+    private var videoValidationAlertMessage: String {
+        let plan = appState.currentUser?.planTier ?? DiscoverDailyLimit.currentPlanTier
+        return (videoValidationError ?? .processingFailed).alertMessage(
+            planName: plan.displayNameKey.localized,
+            maxMB: plan.maxVideoUploadMegabytes,
+            canUpgrade: plan != .premium
+        )
+    }
+
+    private var isVideoFileSizeValidationError: Bool {
+        if case .fileTooLarge = videoValidationError { return true }
+        return false
+    }
+
+    private var showingNonSizeVideoValidationAlert: Binding<Bool> {
+        Binding(
+            get: { showingVideoValidationAlert && !isVideoFileSizeValidationError },
+            set: { newValue in
+                if !newValue {
+                    showingVideoValidationAlert = false
+                    videoValidationError = nil
+                }
+            }
+        )
     }
     
     private var otherUserName: String {
@@ -1369,8 +1530,8 @@ struct MessageConversationModal: View {
                         pendingMediaActionAfterWarning = nil
                         showingPhotoShareWarning = false
                         switch action {
-                        case .photo:
-                            showingImagePicker = true
+                        case .media:
+                            showingMediaPicker = true
                         case .voice:
                             startRecordingAfterWarning()
                         case .none:
@@ -1395,20 +1556,45 @@ struct MessageConversationModal: View {
                         showingAccountBilling = true
                     }
                 )
+            } else if showingVideoValidationAlert, case .fileTooLarge = videoValidationError {
+                let plan = appState.currentUser?.planTier ?? DiscoverDailyLimit.currentPlanTier
+                let isPremium = plan == .premium
+                MediaDailyLimitOverlay(
+                    title: videoValidationAlertTitle,
+                    message: videoValidationAlertMessage,
+                    showsPlansButton: !isPremium,
+                    dismissButtonTitle: isPremium
+                        ? "common.got.it".localized
+                        : "messages.media.limit.not.now".localized,
+                    plansButtonTitle: "messages.media.limit.view.plans".localized,
+                    onGotIt: {
+                        showingVideoValidationAlert = false
+                        videoValidationError = nil
+                    },
+                    onPlans: {
+                        showingVideoValidationAlert = false
+                        videoValidationError = nil
+                        showingAccountBilling = true
+                    }
+                )
             }
         }
         .sheet(isPresented: $showingAccountBilling, onDismiss: {
             mediaSendCount = MediaDailyLimit.currentCount()
             let shouldRestoreImage = restoreImagePreviewAfterBilling && selectedImage != nil
             let shouldRestoreVoice = restoreVoicePreviewAfterBilling && audioRecordingURL != nil
+            let shouldRestoreVideo = restoreVideoPreviewAfterBilling && preparedVideo != nil
             restoreImagePreviewAfterBilling = false
             restoreVoicePreviewAfterBilling = false
-            guard shouldRestoreImage || shouldRestoreVoice else { return }
+            restoreVideoPreviewAfterBilling = false
+            guard shouldRestoreImage || shouldRestoreVoice || shouldRestoreVideo else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 if shouldRestoreImage {
                     showingImageReadyPreview = true
                 } else if shouldRestoreVoice {
                     showRecordingPreview = true
+                } else if shouldRestoreVideo {
+                    showingVideoReadyPreview = true
                 }
             }
         }) {
@@ -1464,8 +1650,60 @@ struct MessageConversationModal: View {
             
             stopAutoRefresh()
         }
-        .sheet(isPresented: $showingImagePicker) {
-            MessageImagePicker(selectedImage: $selectedImage)
+        .sheet(isPresented: $showingMediaPicker) {
+            MessageMediaPicker(
+                selectedImage: $selectedImage,
+                imageValidationError: $imageValidationError,
+                onVideoPicked: { url, typeId in
+                    processPickedVideo(url: url, typeIdentifier: typeId)
+                },
+                onVideoValidationError: { error in
+                    videoValidationError = error
+                    showingVideoValidationAlert = true
+                }
+            )
+        }
+        .onChange(of: imageValidationError) { error in
+            if error != nil {
+                selectedImage = nil
+                showingImageReadyPreview = false
+                showingImageValidationAlert = true
+            }
+        }
+        .alert(
+            imageValidationAlertTitle,
+            isPresented: $showingImageValidationAlert
+        ) {
+            Button("common.got.it".localized, role: .cancel) {
+                imageValidationError = nil
+            }
+        } message: {
+            Text((imageValidationError ?? .processingFailed).alertMessageKey.localized)
+        }
+        .alert(
+            videoValidationAlertTitle,
+            isPresented: showingNonSizeVideoValidationAlert
+        ) {
+            Button("common.got.it".localized, role: .cancel) {
+                videoValidationError = nil
+            }
+        } message: {
+            Text(videoValidationAlertMessage)
+        }
+        .overlay {
+            if isProcessingVideo {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("messages.video.processing".localized)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(.white)
+                    }
+                    .padding(20)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+            }
         }
         .onChange(of: selectedImage) { newImage in
             showingImageReadyPreview = newImage != nil
@@ -1496,6 +1734,34 @@ struct MessageConversationModal: View {
                 .presentationDetents([.height(268)])
                 .presentationDragIndicator(.visible)
                 .interactiveDismissDisabled(isUploadingImage)
+                .presentationBackground(.regularMaterial)
+            }
+        }
+        .sheet(isPresented: $showingVideoReadyPreview) {
+            if let preparedVideo {
+                VideoPreviewReadySheet(
+                    thumbnail: preparedVideo.thumbnailImage,
+                    duration: preparedVideo.duration,
+                    isSending: isUploadingVideo,
+                    remainingMediaCount: max(0, MediaDailyLimit.maxMediaPerDay - mediaSendCount),
+                    onSend: {
+                        showingVideoReadyPreview = false
+                        sendVideoMessage(prepared: preparedVideo)
+                    },
+                    onDiscard: {
+                        discardPreparedVideo()
+                    },
+                    onUpgrade: {
+                        restoreVideoPreviewAfterBilling = true
+                        showingVideoReadyPreview = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            showingAccountBilling = true
+                        }
+                    }
+                )
+                .presentationDetents([.height(268)])
+                .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled(isUploadingVideo)
                 .presentationBackground(.regularMaterial)
             }
         }
@@ -1550,7 +1816,7 @@ struct MessageConversationModal: View {
                 onStop: { stopRecording() },
                 onCancel: { discardRecording() }
             )
-            .presentationDetents([.height(230)])
+            .presentationDetents([.height(268)])
             .presentationDragIndicator(.visible)
             .interactiveDismissDisabled(true)
             .presentationBackground(.regularMaterial)
@@ -1601,8 +1867,10 @@ struct MessageConversationModal: View {
     private var conversationContent: some View {
         conversationMessagesArea
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                // Keep the composer mounted so opening does not jump when loading finishes.
-                if canReplyInConversation {
+                if isSpectRoomSystemConversation {
+                    spectRoomNoReplyBar
+                } else {
+                    // Keep the composer visible when blocked — only disable send/media.
                     MessageComposerBar(
                         text: $replyText,
                         isFocused: $isTextFieldFocused,
@@ -1612,7 +1880,7 @@ struct MessageConversationModal: View {
                         isRecording: isRecording,
                         isMediaDisabled: mediaSendCount >= MediaDailyLimit.maxMediaPerDay,
                         onSend: { sendReply() },
-                        onCamera: { requestPhotoShare() },
+                        onCamera: { requestMediaShare() },
                         onRecordingPressChanged: { pressing in
                             if pressing, !isRecording {
                                 startRecording()
@@ -1625,14 +1893,12 @@ struct MessageConversationModal: View {
                             showingMediaLimitAlert = true
                         }
                     )
-                    .opacity(isLoadingMessages ? 0.55 : 1)
-                    .allowsHitTesting(!isLoadingMessages)
+                    .opacity(isLoadingMessages || isBlockedByRecipient ? 0.55 : 1)
+                    .allowsHitTesting(!isLoadingMessages && !isBlockedByRecipient)
                     .background {
                         Color(.systemGray2)
                             .ignoresSafeArea(edges: .bottom)
                     }
-                } else if isSpectRoomSystemConversation {
-                    spectRoomNoReplyBar
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { _ in
@@ -1714,6 +1980,7 @@ struct MessageConversationModal: View {
                                     showingConversationPhotoViewer: $showingConversationPhotoViewer,
                                     selectedPhotoIndex: $selectedPhotoIndex,
                                     localImagePreview: localImagePreviews[msg.content],
+                                    localVideoThumbnail: localVideoThumbnails[msg.content] ?? localVideoThumbnails[msg.thumbnailURL ?? ""],
                                     isImageUploading: msg.content.hasPrefix("pending://")
                                 )
                                 .id(msg.id)
@@ -1962,45 +2229,50 @@ struct MessageConversationModal: View {
     }
     
     private func checkBlockStatus() async {
+        let iBlockedThem = await MainActor.run { appState.isUserBlocked(otherUserId) }
         let locallyHidden = await MainActor.run { appState.isMessagingBlocked(with: otherUserId) }
         do {
             let theyBlockedMe = try await FirebaseAuthService.shared.isBlockedBy(userId: otherUserId)
-            print("🚫 Block status for \(otherUserId): theyBlockedMe=\(theyBlockedMe) locallyHidden=\(locallyHidden)")
+            print("🚫 Block status for \(otherUserId): theyBlockedMe=\(theyBlockedMe) iBlockedThem=\(iBlockedThem) locallyHidden=\(locallyHidden)")
             await MainActor.run {
                 let blocked = theyBlockedMe || appState.isMessagingBlocked(with: otherUserId)
                 isBlockedByRecipient = blocked
                 if blocked {
                     replyText = ""
-                    // Only show the "they've blocked you" alert when they blocked you
-                    // (not when you blocked them — they're simply hidden from your lists).
+                    // Only show the "they've blocked you" alert when they blocked you.
                     if theyBlockedMe, appState.shouldShowBlockedAlert(for: otherUserId) {
                         showingBlockedAlert = true
                     }
                     if theyBlockedMe {
                         appState.refreshBlockedByUsers()
-                    }
-                    if appState.isMessagingBlocked(with: otherUserId) {
+                        // They blocked you — leave the chat (and the list hides the thread).
                         dismiss()
                     }
+                    // If you blocked them, stay in a read-only chat (composer stays disabled).
                 }
             }
         } catch {
             print("⚠️ Unable to check block status for \(otherUserId): \(error.localizedDescription)")
             await MainActor.run {
                 isBlockedByRecipient = locallyHidden || appState.isMessagingBlocked(with: otherUserId)
-                if appState.isMessagingBlocked(with: otherUserId) {
+                if appState.isBlockedByUser(otherUserId) {
                     dismiss()
+                } else if appState.isUserBlocked(otherUserId) {
+                    replyText = ""
                 }
             }
         }
     }
     
     private func syncBlockStateFromAppState() {
-        let blocked = appState.isMessagingBlocked(with: otherUserId)
-        isBlockedByRecipient = blocked
-        if blocked {
+        let theyBlockedMe = appState.isBlockedByUser(otherUserId)
+        let iBlockedThem = appState.isUserBlocked(otherUserId)
+        isBlockedByRecipient = theyBlockedMe || iBlockedThem
+        if theyBlockedMe {
             replyText = ""
             dismiss()
+        } else if iBlockedThem {
+            replyText = ""
         }
     }
     
@@ -2342,6 +2614,11 @@ struct MessageConversationModal: View {
         Task {
             await appState.markMessagesAsRead(from: otherUserId)
         }
+
+        // Pull thumbnailURL / videoDuration for video bubbles when the live preview is sparse.
+        if newMessage.messageType == .video {
+            refreshMessagesOnly()
+        }
     }
     
     private func refreshConversationMessagesInBackground(otherUserId: String) async {
@@ -2478,7 +2755,7 @@ struct MessageConversationModal: View {
         refreshTimer = nil
     }
     
-    private func requestPhotoShare() {
+    private func requestMediaShare() {
         guard canReplyInConversation else { return }
         guard MediaDailyLimit.canSend else {
             showingMediaLimitAlert = true
@@ -2487,10 +2764,150 @@ struct MessageConversationModal: View {
         isTextFieldFocused = false
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         if PhotoShareWarningOverlay.registerMediaTapAndShouldShow() {
-            pendingMediaActionAfterWarning = .photo
+            pendingMediaActionAfterWarning = .media
             showingPhotoShareWarning = true
         } else {
-            showingImagePicker = true
+            showingMediaPicker = true
+        }
+    }
+
+    private func processPickedVideo(url: URL, typeIdentifier: String?) {
+        isProcessingVideo = true
+        let plan = appState.currentUser?.planTier ?? DiscoverDailyLimit.currentPlanTier
+        Task {
+            do {
+                let prepared = try await ChatVideoProcessor.prepareForUpload(
+                    sourceURL: url,
+                    declaredTypeIdentifier: typeIdentifier,
+                    plan: plan
+                )
+                await MainActor.run {
+                    isProcessingVideo = false
+                    preparedVideo = prepared
+                    showingVideoReadyPreview = true
+                }
+            } catch let error as ChatVideoValidationError {
+                await MainActor.run {
+                    isProcessingVideo = false
+                    videoValidationError = error
+                    showingVideoValidationAlert = true
+                }
+            } catch {
+                await MainActor.run {
+                    isProcessingVideo = false
+                    videoValidationError = .processingFailed
+                    showingVideoValidationAlert = true
+                }
+            }
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private func discardPreparedVideo() {
+        if let url = preparedVideo?.videoFileURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        preparedVideo = nil
+        showingVideoReadyPreview = false
+        isUploadingVideo = false
+    }
+
+    private func sendVideoMessage(prepared: PreparedChatVideo) {
+        guard canReplyInConversation else { return }
+        guard MediaDailyLimit.canSend else {
+            showingMediaLimitAlert = true
+            return
+        }
+        guard let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid else { return }
+
+        let pendingContent = "pending://\(UUID().uuidString)"
+        isUploadingVideo = true
+        localVideoThumbnails[pendingContent] = prepared.thumbnailImage
+        updateConversationListAfterOutgoingMessage(
+            content: pendingContent,
+            type: .video,
+            voiceDuration: nil,
+            thumbnailURL: nil,
+            videoDuration: prepared.duration
+        )
+        shouldScrollToBottom = true
+
+        Task {
+            do {
+                let recipientId = message.senderName == "You" ? message.recipientId : message.senderId
+                let uploaded = try await PhotoStorageService.shared.uploadVideoMessage(prepared, for: currentUserId)
+                let messageId = try await FirebaseAuthService.shared.sendVideoMessage(
+                    to: recipientId,
+                    videoURL: uploaded.videoURL,
+                    thumbnailURL: uploaded.thumbnailURL,
+                    duration: prepared.duration
+                )
+                print("✅ Video message sent successfully with ID: \(messageId)")
+
+                await MainActor.run {
+                    if let index = conversationMessages.firstIndex(where: { $0.content == pendingContent }) {
+                        let pending = conversationMessages[index]
+                        let finalized = Message(
+                            conversationId: UUID(),
+                            senderId: UUID(),
+                            senderFirebaseId: currentUserId,
+                            content: uploaded.videoURL,
+                            type: .video,
+                            thumbnailURL: uploaded.thumbnailURL,
+                            videoDuration: prepared.duration
+                        )
+                        let finalizedDisplay = MessageDisplay(
+                            message: finalized,
+                            senderName: pending.senderName,
+                            recipientName: pending.recipientName,
+                            senderId: pending.senderId,
+                            recipientId: pending.recipientId,
+                            senderProfilePhotoURL: pending.senderProfilePhotoURL,
+                            recipientProfilePhotoURL: pending.recipientProfilePhotoURL
+                        )
+                        conversationMessages[index] = finalizedDisplay
+                        localVideoThumbnails[uploaded.videoURL] = prepared.thumbnailImage
+                        localVideoThumbnails[uploaded.thumbnailURL] = prepared.thumbnailImage
+                        localVideoThumbnails.removeValue(forKey: pendingContent)
+                        cachedMessagesPool = (cachedMessagesPool.filter { $0.content != pendingContent } + [finalizedDisplay])
+                            .deduplicatedConversationMessages()
+                        persistConversationCache()
+                        appState.updateConversationInCache(finalizedDisplay)
+                    } else {
+                        localVideoThumbnails[uploaded.videoURL] = prepared.thumbnailImage
+                        localVideoThumbnails.removeValue(forKey: pendingContent)
+                        updateConversationListAfterOutgoingMessage(
+                            content: uploaded.videoURL,
+                            type: .video,
+                            voiceDuration: nil,
+                            thumbnailURL: uploaded.thumbnailURL,
+                            videoDuration: prepared.duration
+                        )
+                    }
+                    discardPreparedVideo()
+                    mediaSendCount = MediaDailyLimit.currentCount()
+                    refreshMessagesOnly()
+                }
+            } catch {
+                print("❌ Error sending video message: \(error)")
+                await MainActor.run {
+                    discardPreparedVideo()
+                    conversationMessages.removeAll { $0.content == pendingContent }
+                    cachedMessagesPool.removeAll { $0.content == pendingContent }
+                    localVideoThumbnails.removeValue(forKey: pendingContent)
+                    persistConversationCache()
+                    if error is MediaDailyLimitError {
+                        showingMediaLimitAlert = true
+                    } else if let storageError = error as? PhotoStorageError,
+                              case .chatVideoValidation(let validation) = storageError {
+                        videoValidationError = validation
+                        showingVideoValidationAlert = true
+                    } else if let validation = error as? ChatVideoValidationError {
+                        videoValidationError = validation
+                        showingVideoValidationAlert = true
+                    }
+                }
+            }
         }
     }
     
@@ -2638,6 +3055,13 @@ struct MessageConversationModal: View {
                     persistConversationCache()
                     if error is MediaDailyLimitError {
                         showingMediaLimitAlert = true
+                    } else if let storageError = error as? PhotoStorageError,
+                              case .chatImageValidation(let validation) = storageError {
+                        imageValidationError = validation
+                        showingImageValidationAlert = true
+                    } else if let validation = error as? ChatImageValidationError {
+                        imageValidationError = validation
+                        showingImageValidationAlert = true
                     }
                 }
             }
@@ -2687,22 +3111,27 @@ struct MessageConversationModal: View {
             try session.setActive(true)
             
             let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("voice_\(UUID().uuidString).m4a")
-            let settings: [String: Any] = [
-                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                AVSampleRateKey: 44_100,
-                AVNumberOfChannelsKey: 1,
-                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-            ]
+            let settings = VoiceMessageLimits.recorderSettings
             
             audioRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
             audioRecorder?.prepareToRecord()
-            audioRecorder?.record()
+            // Hard cap at 1 minute; AVFoundation stops the recorder automatically.
+            audioRecorder?.record(forDuration: VoiceMessageLimits.maxDuration)
             
             audioRecordingURL = fileURL
             recordingDuration = 0
             recordingTimer?.invalidate()
-            recordingTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
-                recordingDuration = audioRecorder?.currentTime ?? recordingDuration
+            recordingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                let current = self.audioRecorder?.currentTime ?? self.recordingDuration
+                self.recordingDuration = min(current, VoiceMessageLimits.maxDuration)
+
+                // Auto-stop UX: when the 1-minute limit is hit (or the recorder
+                // finished via record(forDuration:)), dismiss recording → show preview.
+                let hitLimit = current >= VoiceMessageLimits.maxDuration - 0.05
+                let recorderStopped = self.audioRecorder?.isRecording == false
+                if self.isRecording, hitLimit || recorderStopped {
+                    self.stopRecording()
+                }
             }
             
             withAnimation {
@@ -2718,11 +3147,16 @@ struct MessageConversationModal: View {
     private func stopRecording() {
         guard isRecording else { return }
         
-        audioRecorder?.stop()
         recordingTimer?.invalidate()
         recordingTimer = nil
         
-        let capturedDuration = audioRecorder?.currentTime ?? recordingDuration
+        let capturedDuration = min(
+            audioRecorder?.currentTime ?? recordingDuration,
+            VoiceMessageLimits.maxDuration
+        )
+        if audioRecorder?.isRecording == true {
+            audioRecorder?.stop()
+        }
         audioRecorder = nil
         
         withAnimation {
@@ -2734,7 +3168,7 @@ struct MessageConversationModal: View {
         recordingDuration = max(capturedDuration, 0.1)
         // Let the recording sheet finish dismissing before presenting the ready sheet.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            showRecordingPreview = true
+            self.showRecordingPreview = true
         }
     }
     
@@ -2811,7 +3245,13 @@ struct MessageConversationModal: View {
         }
     }
     
-    private func updateConversationListAfterOutgoingMessage(content: String, type: MessageType, voiceDuration: TimeInterval?) {
+    private func updateConversationListAfterOutgoingMessage(
+        content: String,
+        type: MessageType,
+        voiceDuration: TimeInterval?,
+        thumbnailURL: String? = nil,
+        videoDuration: TimeInterval? = nil
+    ) {
         guard let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid else { return }
         let otherUserId = message.senderName == "You" ? message.recipientId : message.senderId
         let otherUserName = message.senderName == "You" ? message.recipientName : message.senderName
@@ -2821,7 +3261,9 @@ struct MessageConversationModal: View {
             senderFirebaseId: currentUserId,
             content: content,
             type: type,
-            voiceDuration: voiceDuration
+            voiceDuration: voiceDuration,
+            thumbnailURL: thumbnailURL,
+            videoDuration: videoDuration
         )
         let messageDisplay = MessageDisplay(
             message: newMessage,
@@ -2840,42 +3282,165 @@ struct MessageConversationModal: View {
     }
 }
 
-struct MessageImagePicker: UIViewControllerRepresentable {
+struct MessageMediaPicker: UIViewControllerRepresentable {
     @Binding var selectedImage: UIImage?
+    @Binding var imageValidationError: ChatImageValidationError?
+    var onVideoPicked: (URL, String?) -> Void
+    var onVideoValidationError: (ChatVideoValidationError) -> Void
     @Environment(\.dismiss) private var dismiss
-    
+
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var config = PHPickerConfiguration()
-        config.filter = .images
+        config.filter = .any(of: [.images, .videos])
         config.selectionLimit = 1
-        
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
         return picker
     }
-    
+
     func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
-    
+
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
-    
+
     class Coordinator: NSObject, PHPickerViewControllerDelegate {
-        let parent: MessageImagePicker
-        
-        init(_ parent: MessageImagePicker) {
+        let parent: MessageMediaPicker
+
+        init(_ parent: MessageMediaPicker) {
             self.parent = parent
         }
-        
+
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             parent.dismiss()
-            
             guard let result = results.first else { return }
-            
-            result.itemProvider.loadObject(ofClass: UIImage.self) { image, error in
-                if let image = image as? UIImage {
+            let provider = result.itemProvider
+
+            if let videoTypeId = ChatVideoProcessor.matchingTypeIdentifier(for: provider),
+               provider.hasItemConformingToTypeIdentifier(videoTypeId) || provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
+                // Prefer video when the item is a movie (Live Photos may also advertise image).
+                let isLikelyVideo = provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier)
+                    || provider.hasItemConformingToTypeIdentifier(UTType.mpeg4Movie.identifier)
+                    || provider.hasItemConformingToTypeIdentifier(UTType.quickTimeMovie.identifier)
+                if isLikelyVideo {
+                    loadVideo(provider: provider, typeId: videoTypeId)
+                    return
+                }
+            }
+
+            if let imageTypeId = ChatImageProcessor.matchingTypeIdentifier(for: provider) {
+                loadImage(provider: provider, typeId: imageTypeId)
+                return
+            }
+
+            if let videoTypeId = ChatVideoProcessor.matchingTypeIdentifier(for: provider) {
+                loadVideo(provider: provider, typeId: videoTypeId)
+                return
+            }
+
+            DispatchQueue.main.async {
+                self.parent.imageValidationError = .unsupportedFormat
+            }
+        }
+
+        private func loadVideo(provider: NSItemProvider, typeId: String) {
+            provider.loadFileRepresentation(forTypeIdentifier: typeId) { url, error in
+                guard let url, error == nil else {
                     DispatchQueue.main.async {
-                        self.parent.selectedImage = image
+                        self.parent.onVideoValidationError(.processingFailed)
+                    }
+                    return
+                }
+
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("picked_video_\(UUID().uuidString).\(url.pathExtension.isEmpty ? "mp4" : url.pathExtension)")
+                do {
+                    try? FileManager.default.removeItem(at: tempURL)
+                    try FileManager.default.copyItem(at: url, to: tempURL)
+                    DispatchQueue.main.async {
+                        self.parent.onVideoPicked(tempURL, typeId)
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self.parent.onVideoValidationError(.processingFailed)
+                    }
+                }
+            }
+        }
+
+        private func loadImage(provider: NSItemProvider, typeId: String) {
+            if typeId != UTType.image.identifier,
+               provider.hasItemConformingToTypeIdentifier(typeId) {
+                provider.loadDataRepresentation(forTypeIdentifier: typeId) { data, error in
+                    self.handlePickedImageData(data, typeIdentifier: typeId, error: error, provider: provider)
+                }
+                return
+            }
+
+            let candidates = [
+                UTType.jpeg.identifier,
+                UTType.heic.identifier,
+                UTType.png.identifier,
+                UTType.gif.identifier,
+                UTType.heif.identifier,
+            ]
+            if let match = candidates.first(where: { provider.hasItemConformingToTypeIdentifier($0) }) {
+                provider.loadDataRepresentation(forTypeIdentifier: match) { data, error in
+                    self.handlePickedImageData(data, typeIdentifier: match, error: error, provider: provider)
+                }
+                return
+            }
+
+            provider.loadObject(ofClass: UIImage.self) { object, _ in
+                DispatchQueue.main.async {
+                    if let image = object as? UIImage {
+                        self.parent.selectedImage = image.normalizedUpOrientation()
+                    } else {
+                        self.parent.imageValidationError = .unsupportedFormat
+                    }
+                }
+            }
+        }
+
+        private func handlePickedImageData(
+            _ data: Data?,
+            typeIdentifier: String,
+            error: Error?,
+            provider: NSItemProvider
+        ) {
+            if let error {
+                print("⚠️ Chat image load failed: \(error.localizedDescription)")
+            }
+
+            if let data {
+                do {
+                    try ChatImageProcessor.validateOriginalData(data, typeIdentifier: typeIdentifier)
+                    guard let image = UIImage(data: data) else {
+                        throw ChatImageValidationError.processingFailed
+                    }
+                    DispatchQueue.main.async {
+                        self.parent.selectedImage = image.normalizedUpOrientation()
+                    }
+                    return
+                } catch let validation as ChatImageValidationError {
+                    DispatchQueue.main.async {
+                        self.parent.imageValidationError = validation
+                    }
+                    return
+                } catch {
+                    DispatchQueue.main.async {
+                        self.parent.imageValidationError = .processingFailed
+                    }
+                    return
+                }
+            }
+
+            provider.loadObject(ofClass: UIImage.self) { object, _ in
+                DispatchQueue.main.async {
+                    if let image = object as? UIImage {
+                        self.parent.selectedImage = image.normalizedUpOrientation()
+                    } else {
+                        self.parent.imageValidationError = .unsupportedFormat
                     }
                 }
             }
@@ -2931,6 +3496,13 @@ struct RecordingIndicatorSheet: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.green)
             }
+
+            Text("messages.voice.recording.max.duration".localized)
+                .font(.footnote)
+                .foregroundColor(SpectRoomTheme.secondaryText)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 2)
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
@@ -3082,19 +3654,112 @@ struct ImagePreviewReadySheet: View {
     }
 }
 
+struct VideoPreviewReadySheet: View {
+    let thumbnail: UIImage
+    let duration: TimeInterval
+    let isSending: Bool
+    let remainingMediaCount: Int
+    let onSend: () -> Void
+    let onDiscard: () -> Void
+    let onUpgrade: () -> Void
+
+    private var durationText: String {
+        let total = max(0, Int(duration.rounded()))
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("messages.video.ready".localized)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                ZStack {
+                    Image(uiImage: thumbnail)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 100)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 36))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .shadow(radius: 2)
+
+                    Text(durationText)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.black.opacity(0.5))
+                        .clipShape(Capsule())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        .padding(8)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 12) {
+                Button(action: onDiscard) {
+                    Text("settings.cancel".localized)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(isSending)
+
+                Button(action: onSend) {
+                    HStack(spacing: 8) {
+                        if isSending {
+                            SendingSpinner()
+                            Text("messages.sending".localized)
+                        } else {
+                            Text("messages.send".localized)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                .disabled(isSending)
+            }
+
+            MediaRemainingUpgradeFooter(
+                remainingCount: remainingMediaCount,
+                onUpgrade: onUpgrade
+            )
+            .disabled(isSending)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+}
+
 private struct MediaRemainingUpgradeFooter: View {
     let remainingCount: Int
     let onUpgrade: () -> Void
+
+    private var showsUpgrade: Bool {
+        DiscoverDailyLimit.currentPlanTier != .premium
+    }
 
     var body: some View {
         HStack(spacing: 0) {
             Text(String(format: "messages.media.preview.remaining".localized, remainingCount))
                 .foregroundColor(SpectRoomTheme.secondaryText)
-            Button(action: onUpgrade) {
-                Text("messages.media.preview.upgrade".localized)
-                    .foregroundColor(.blue)
+            if showsUpgrade {
+                Text(", ")
+                    .foregroundColor(SpectRoomTheme.secondaryText)
+                Button(action: onUpgrade) {
+                    Text("messages.media.preview.upgrade".localized)
+                        .foregroundColor(.blue)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .font(.footnote)
         .multilineTextAlignment(.center)
@@ -3464,6 +4129,215 @@ struct ChatImageBubbleContent: View {
     }
 }
 
+struct ChatVideoBubbleContent: View {
+    let thumbnailURL: URL?
+    let localThumbnail: UIImage?
+    let durationText: String?
+    let timestampText: String
+    let isUploading: Bool
+
+    private let mediaSize: CGFloat = 150
+    private let overlayPadding: CGFloat = 6
+
+    var body: some View {
+        ZStack {
+            Group {
+                if let localThumbnail {
+                    Image(uiImage: localThumbnail)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else if let thumbnailURL {
+                    ChatCachedImage(
+                        url: thumbnailURL,
+                        maxWidth: mediaSize,
+                        maxHeight: mediaSize,
+                        contentMode: .fill
+                    )
+                } else {
+                    Rectangle()
+                        .fill(Color.black.opacity(0.2))
+                }
+            }
+            .frame(width: mediaSize, height: mediaSize)
+            .clipped()
+
+            if !isUploading {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.white.opacity(0.95))
+                    .shadow(radius: 2)
+            }
+
+            // Duration + send time sit on the media with identical bottom padding.
+            VStack {
+                Spacer(minLength: 0)
+                HStack(alignment: .bottom, spacing: 8) {
+                    if let durationText {
+                        mediaBadge(durationText)
+                    }
+                    Spacer(minLength: 0)
+                    mediaBadge(timestampText)
+                }
+                .padding(overlayPadding)
+            }
+
+            if isUploading {
+                Color.black.opacity(0.35)
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    .scaleEffect(1.15)
+                    .padding(14)
+                    .background(Circle().fill(Color.black.opacity(0.45)))
+            }
+        }
+        .frame(width: mediaSize, height: mediaSize)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onAppear {
+            if let thumbnailURL, localThumbnail != nil {
+                ImageCacheService.shared.prefetch(thumbnailURL)
+            }
+        }
+    }
+
+    private func mediaBadge(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2)
+            .foregroundColor(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.black.opacity(0.45))
+            .clipShape(Capsule())
+    }
+}
+
+struct ChatVideoPlayerScreen: View {
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer?
+    @State private var isSaving = false
+    @State private var showingSaveAlert = false
+    @State private var saveSuccess = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                if let player {
+                    VideoPlayer(player: player)
+                        .ignoresSafeArea(edges: .bottom)
+                } else {
+                    ProgressView()
+                        .tint(.white)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("common.done".localized) {
+                        player?.pause()
+                        dismiss()
+                    }
+                    .foregroundColor(.white)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("common.save".localized) {
+                        saveVideoToPhotoLibrary()
+                    }
+                    .foregroundColor(.white)
+                    .disabled(isSaving)
+                }
+            }
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .alert("messages.video.saved".localized, isPresented: $showingSaveAlert) {
+                Button("common.ok".localized) { }
+            } message: {
+                Text(saveSuccess ? "messages.video.saved.success".localized : "messages.video.saved.failed".localized)
+            }
+            .overlay {
+                if isSaving {
+                    ProgressView()
+                        .tint(.white)
+                        .padding(16)
+                        .background(Circle().fill(Color.black.opacity(0.45)))
+                }
+            }
+        }
+        .onAppear {
+            let avPlayer = AVPlayer(url: url)
+            player = avPlayer
+            avPlayer.play()
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
+        }
+    }
+
+    private func saveVideoToPhotoLibrary() {
+        guard !isSaving else { return }
+        isSaving = true
+
+        Task {
+            do {
+                var status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+                if status == .notDetermined {
+                    status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+                }
+                guard status == .authorized || status == .limited else {
+                    await MainActor.run {
+                        isSaving = false
+                        saveSuccess = false
+                        showingSaveAlert = true
+                    }
+                    return
+                }
+
+                let localURL: URL
+                if url.isFileURL {
+                    localURL = url
+                } else {
+                    let (tempURL, response) = try await URLSession.shared.download(from: url)
+                    let ext: String = {
+                        if let http = response as? HTTPURLResponse,
+                           let mime = http.mimeType?.lowercased() {
+                            if mime.contains("quicktime") { return "mov" }
+                            if mime.contains("webm") { return "webm" }
+                        }
+                        let pathExt = url.pathExtension.lowercased()
+                        return pathExt.isEmpty ? "mp4" : pathExt
+                    }()
+                    let dest = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("chat_save_\(UUID().uuidString).\(ext)")
+                    try? FileManager.default.removeItem(at: dest)
+                    try FileManager.default.moveItem(at: tempURL, to: dest)
+                    localURL = dest
+                }
+
+                try await PHPhotoLibrary.shared().performChanges {
+                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: localURL)
+                }
+
+                if !url.isFileURL {
+                    try? FileManager.default.removeItem(at: localURL)
+                }
+
+                await MainActor.run {
+                    isSaving = false
+                    saveSuccess = true
+                    showingSaveAlert = true
+                }
+            } catch {
+                print("❌ Error saving video: \(error.localizedDescription)")
+                await MainActor.run {
+                    isSaving = false
+                    saveSuccess = false
+                    showingSaveAlert = true
+                }
+            }
+        }
+    }
+}
+
 /// Keeps chat header label fully opaque while pressed (default styles fade it).
 private struct ChatHeaderButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -3614,9 +4488,11 @@ struct MessageBubble: View {
     @Binding var showingConversationPhotoViewer: Bool
     @Binding var selectedPhotoIndex: Int
     var localImagePreview: UIImage? = nil
+    var localVideoThumbnail: UIImage? = nil
     var isImageUploading: Bool = false
     @State private var showingSaveAlert = false
     @State private var saveSuccess = false
+    @State private var showingVideoPlayer = false
     
     private let outgoingBubbleColor = Color(red: 0.851, green: 0.992, blue: 0.827) // WhatsApp-style green (#D9FDD3)
     private let incomingBubbleColor = Color.white
@@ -3635,6 +4511,12 @@ struct MessageBubble: View {
     
     private var bubbleTimeText: String {
         message.createdAt.formattedBubbleTime()
+    }
+
+    private var videoDurationText: String? {
+        guard let duration = message.videoDuration else { return nil }
+        let total = max(0, Int(duration.rounded()))
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
     
     private var bubbleShape: ChatBubbleShape {
@@ -3701,6 +4583,32 @@ struct MessageBubble: View {
             }
             .buttonStyle(PlainButtonStyle())
             .disabled(isOutgoing && (isImageUploading || message.content.hasPrefix("pending://")))
+
+        case .video:
+            Button(action: {
+                guard !isImageUploading, !message.content.hasPrefix("pending://") else { return }
+                showingVideoPlayer = true
+            }) {
+                ChatVideoBubbleContent(
+                    thumbnailURL: message.thumbnailURL.flatMap(URL.init(string:)),
+                    localThumbnail: localVideoThumbnail,
+                    durationText: videoDurationText,
+                    timestampText: bubbleTimeText,
+                    isUploading: isImageUploading || message.content.hasPrefix("pending://")
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(3)
+                .padding(.leading, isOutgoing ? 0 : 7)
+                .padding(.trailing, isOutgoing ? 7 : 0)
+                .background(bubbleColor, in: bubbleShape)
+            }
+            .buttonStyle(PlainButtonStyle())
+            .disabled(isOutgoing && (isImageUploading || message.content.hasPrefix("pending://")))
+            .fullScreenCover(isPresented: $showingVideoPlayer) {
+                if let url = URL(string: message.content), !message.content.hasPrefix("pending://") {
+                    ChatVideoPlayerScreen(url: url)
+                }
+            }
             
         case .voice:
             VoiceMessagePlayerView(

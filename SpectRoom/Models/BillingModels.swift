@@ -1,5 +1,29 @@
 import Foundation
 
+/// Unified billing price display: always `"9.99 USD"` (dot decimal, USD code).
+enum BillingCurrency {
+    static let code = "USD"
+
+    private static let amountFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.groupingSeparator = ","
+        formatter.decimalSeparator = "."
+        return formatter
+    }()
+
+    static func format(_ amount: Decimal, currencyCode: String = code) -> String {
+        let value = NSDecimalNumber(decimal: amount)
+        let number = amountFormatter.string(from: value) ?? "\(amount)"
+        let code = currencyCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let resolved = code.isEmpty ? Self.code : code
+        return "\(number) \(resolved)"
+    }
+}
+
 // MARK: - Plans
 
 enum BillingInterval: String, CaseIterable, Identifiable, Codable {
@@ -66,13 +90,26 @@ enum PlanTier: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// Combined daily image + voice message sends.
+    /// Combined daily image + voice + video message sends.
     var dailyMediaMessageLimit: Int {
         switch self {
         case .free: return 5
         case .pro: return 20
         case .premium: return 50
         }
+    }
+
+    /// Max chat video file size (picked original, compressed upload, and user-facing limit).
+    var maxVideoUploadBytes: Int {
+        switch self {
+        case .free: return 10 * 1024 * 1024
+        case .pro: return 20 * 1024 * 1024
+        case .premium: return 40 * 1024 * 1024
+        }
+    }
+
+    var maxVideoUploadMegabytes: Int {
+        maxVideoUploadBytes / (1024 * 1024)
     }
 
     var displayNameKey: String {
@@ -101,9 +138,12 @@ enum PlanTier: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// Icon next to plan titles (Free none, Pro star, Premium crown).
+    /// Icon next to plan titles in Account & Billing (Free sprout, Pro star, Premium crown).
     var titleStars: String {
-        profilePlanSymbol
+        switch self {
+        case .free: return "🌱"
+        case .pro, .premium: return profilePlanSymbol
+        }
     }
 
     /// Gold star count kept for any legacy call sites that need a numeric count.
@@ -132,7 +172,8 @@ enum PlanTier: String, CaseIterable, Identifiable, Codable {
                 "billing.feature.undos.3",
                 "billing.feature.match.basic",
                 "billing.feature.boost.none",
-                "billing.feature.media.5"
+                "billing.feature.media.5",
+                "billing.feature.video.10"
             ]
         case .pro:
             return [
@@ -140,7 +181,8 @@ enum PlanTier: String, CaseIterable, Identifiable, Codable {
                 "billing.feature.undos.6",
                 "billing.feature.match.full",
                 "billing.feature.boost.14",
-                "billing.feature.media.20"
+                "billing.feature.media.20",
+                "billing.feature.video.20"
             ]
         case .premium:
             return [
@@ -148,7 +190,8 @@ enum PlanTier: String, CaseIterable, Identifiable, Codable {
                 "billing.feature.undos.unlimited",
                 "billing.feature.match.full",
                 "billing.feature.boost.7",
-                "billing.feature.media.50"
+                "billing.feature.media.50",
+                "billing.feature.video.40"
             ]
         }
     }
@@ -194,22 +237,15 @@ struct SubscriptionPlan: Identifiable, Equatable, Hashable, Codable {
         interval == .yearly ? yearlyPrice : monthlyPrice
     }
 
-    func formattedPrice(for interval: BillingInterval, locale: Locale = .current) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
-        formatter.locale = locale
-        let value = NSDecimalNumber(decimal: price(for: interval))
-        let amount = formatter.string(from: value) ?? "\(price(for: interval))"
-        return "\(amount) \(currencyCode)"
+    func formattedPrice(for interval: BillingInterval) -> String {
+        BillingCurrency.format(price(for: interval), currencyCode: currencyCode)
     }
 
-    func formattedPriceWithInterval(for interval: BillingInterval, locale: Locale = .current) -> String {
+    func formattedPriceWithInterval(for interval: BillingInterval) -> String {
         let period = interval == .yearly
             ? "billing.per.year".localized
             : "billing.per.month".localized
-        return "\(formattedPrice(for: interval, locale: locale)) \(period)"
+        return "\(formattedPrice(for: interval)) \(period)"
     }
 
     /// Yearly discount vs paying monthly for 12 months (0…1).
@@ -409,7 +445,23 @@ struct NewCardDraft: Equatable {
     }
 }
 
-// MARK: - Invoices
+// MARK: - Account history
+
+enum AccountHistoryEventKind: String, Codable, CaseIterable {
+    case newPlan
+    case changePlan
+    case cancelPlan
+    case automaticBilling
+
+    var titleKey: String {
+        switch self {
+        case .newPlan: return "billing.history.event.new.plan"
+        case .changePlan: return "billing.history.event.change.plan"
+        case .cancelPlan: return "billing.history.event.cancel.plan"
+        case .automaticBilling: return "billing.history.event.automatic.billing"
+        }
+    }
+}
 
 enum InvoiceStatus: String, Codable, CaseIterable {
     case paid
@@ -425,35 +477,72 @@ enum InvoiceStatus: String, Codable, CaseIterable {
     }
 }
 
-struct Invoice: Identifiable, Equatable, Codable {
+/// Plan / billing activity shown under Account History.
+struct AccountHistoryEvent: Identifiable, Equatable, Codable {
     let id: String
     let date: Date
-    let description: String
+    let kind: AccountHistoryEventKind
     let planTier: PlanTier?
-    let interval: BillingInterval
-    let amount: Decimal
+    let interval: BillingInterval?
+    let amount: Decimal?
     let currencyCode: String
-    let status: InvoiceStatus
-    let pdfURL: URL?
+    let status: InvoiceStatus?
 
-    func formattedAmount(locale: Locale = .current) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = currencyCode
-        formatter.locale = locale
-        return formatter.string(from: NSDecimalNumber(decimal: amount)) ?? "\(amount)"
+    init(
+        id: String = UUID().uuidString,
+        date: Date = Date(),
+        kind: AccountHistoryEventKind,
+        planTier: PlanTier?,
+        interval: BillingInterval?,
+        amount: Decimal? = nil,
+        currencyCode: String = "USD",
+        status: InvoiceStatus? = nil
+    ) {
+        self.id = id
+        self.date = date
+        self.kind = kind
+        self.planTier = planTier
+        self.interval = interval
+        self.amount = amount
+        self.currencyCode = currencyCode
+        self.status = status
     }
 
-    /// Lowercased plan name used in titles: free / pro / premium.
-    var planNameLowercased: String {
-        (planTier ?? .free).rawValue
+    /// e.g. "Monthly Pro"
+    var planLabel: String {
+        let tierName = (planTier ?? .free).displayNameKey.localized
+        guard let interval, planTier != .free else { return tierName }
+        return "\(interval.titleKey.localized) \(tierName)"
     }
 
-    /// Plain title e.g. "Monthly pro plan".
     var displayTitle: String {
-        "\(interval.titleKey.localized) \(planNameLowercased) \("billing.invoice.title.plan".localized)"
+        String(format: kind.titleKey.localized, planLabel)
     }
+
+    var showsAmount: Bool {
+        kind == .automaticBilling && amount != nil
+    }
+
+    /// e.g. "14 Sep 2026 14:43"
+    func formattedDateTime() -> String {
+        Self.dateTimeFormatter.string(from: date)
+    }
+
+    func formattedAmount() -> String {
+        guard let amount else { return "—" }
+        return BillingCurrency.format(amount, currencyCode: currencyCode)
+    }
+
+    private static let dateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_GB_POSIX")
+        formatter.dateFormat = "d MMM yyyy HH:mm"
+        return formatter
+    }()
 }
+
+/// Kept as a typealias so older call sites / docs referring to invoices still compile during migration.
+typealias Invoice = AccountHistoryEvent
 
 // MARK: - Snapshot
 
@@ -461,7 +550,13 @@ struct BillingSnapshot: Equatable {
     var subscription: CurrentSubscription
     var availablePlans: [SubscriptionPlan]
     var paymentMethods: [PaymentMethod]
-    var invoices: [Invoice]
+    var accountHistory: [AccountHistoryEvent]
     var applePayEnabled: Bool
     var googlePayEnabled: Bool
+
+    /// Backward-compatible alias used by older view code.
+    var invoices: [AccountHistoryEvent] {
+        get { accountHistory }
+        set { accountHistory = newValue }
+    }
 }

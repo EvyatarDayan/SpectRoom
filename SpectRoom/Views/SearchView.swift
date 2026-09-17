@@ -2029,8 +2029,19 @@ struct SwipeableProfileCard: View {
                 .blur(radius: isDailyLimitReached ? 8 : 0)
             
             if isDailyLimitReached {
+                // Full-card scrim so light photos can't wash out white text.
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(Color.black.opacity(0.28))
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.black.opacity(0.55),
+                                Color.black.opacity(0.72),
+                                Color.black.opacity(0.62)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
                     .frame(width: cardWidth, height: cardHeight)
                 
                 // Limit message only on the front card; pile tips stay blurred/dimmed.
@@ -2044,7 +2055,6 @@ struct SwipeableProfileCard: View {
                                 .foregroundColor(.white)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 28)
-                                .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 2)
 
                             if showsUpgradePrompt {
                                 Button(action: { onUpgradeTap?() }) {
@@ -2056,8 +2066,6 @@ struct SwipeableProfileCard: View {
                                     )
                                     .font(.system(size: 15, weight: .semibold))
                                     .multilineTextAlignment(.center)
-                                    .shadow(color: .black.opacity(0.55), radius: 3, x: 0, y: 1)
-                                    .shadow(color: Color(red: 0.45, green: 0.78, blue: 1.0).opacity(0.35), radius: 6, x: 0, y: 0)
                                 }
                                 .buttonStyle(.plain)
                                 .disabled(onUpgradeTap == nil)
@@ -2070,6 +2078,13 @@ struct SwipeableProfileCard: View {
                                     .padding(.horizontal, 24)
                             }
                         }
+                        .padding(.vertical, 18)
+                        .padding(.horizontal, 8)
+                        .frame(maxWidth: cardWidth - 36)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(Color.black.opacity(0.55))
+                        )
 
                         Spacer(minLength: 24)
 
@@ -2078,9 +2093,15 @@ struct SwipeableProfileCard: View {
                         }) {
                             Text("search.daily.limit.why".localized)
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.92))
+                                .foregroundColor(.white)
                                 .underline()
                                 .multilineTextAlignment(.center)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(Color.black.opacity(0.55))
+                                )
                         }
                         .buttonStyle(.plain)
                         .padding(.bottom, 28)

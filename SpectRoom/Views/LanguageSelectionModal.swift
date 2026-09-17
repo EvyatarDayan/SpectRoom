@@ -24,19 +24,19 @@ struct Language: Identifiable, Hashable {
     static let icelandic = Language(id: "is", code: "is", name: "Icelandic", flag: "🇮🇸")
 
     static let allLanguages = [
-        english, spanish, swedish, french, german,
+        swedish, english, spanish, french, german,
         danish, norwegian, finnish, icelandic
     ]
 }
 
 struct LanguageSelectionModal: View {
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("selectedLanguage") private var selectedLanguageCode: String = "en"
+    @AppStorage("selectedLanguage") private var selectedLanguageCode: String = "sv"
     @State private var currentSelection: String
     
     init() {
         // Initialize with current selection from AppStorage
-        _currentSelection = State(initialValue: UserDefaults.standard.string(forKey: "selectedLanguage") ?? "en")
+        _currentSelection = State(initialValue: UserDefaults.standard.string(forKey: "selectedLanguage") ?? "sv")
     }
     
     var body: some View {

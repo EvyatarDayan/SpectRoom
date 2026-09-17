@@ -1007,6 +1007,10 @@ struct MfaVerificationView: View {
                 phoneE164.isEmpty ? maskedPhone : phoneE164
             )
             #endif
+        } else if raw.localizedCaseInsensitiveContains("failed to get document from server")
+            || raw.localizedCaseInsensitiveContains("firestoreSourceServer")
+            || raw.localizedCaseInsensitiveContains("local cache") {
+            errorMessage = "auth.mfa.error.sms.unavailable".localized
         } else {
             errorMessage = raw
         }

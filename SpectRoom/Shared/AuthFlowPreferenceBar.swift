@@ -7,7 +7,7 @@ import SwiftUI
 
 /// Dark mode and language controls shown during onboarding and authentication.
 struct AuthFlowPreferenceBar: View {
-    @AppStorage("selectedLanguage") private var selectedLanguageCode = "en"
+    @AppStorage("selectedLanguage") private var selectedLanguageCode = "sv"
     @AppStorage("isDarkMode") private var isDarkMode = false
     @State private var showingLanguageModal = false
 
@@ -56,11 +56,11 @@ struct AuthFlowPreferenceBar: View {
     }
 
     private var currentLanguageFlag: String {
-        Language.allLanguages.first(where: { $0.code == selectedLanguageCode })?.flag ?? "🇺🇸"
+        Language.allLanguages.first(where: { $0.code == selectedLanguageCode })?.flag ?? "🇸🇪"
     }
 
     private var currentLanguageName: String {
-        Language.allLanguages.first(where: { $0.code == selectedLanguageCode })?.name ?? "English"
+        Language.allLanguages.first(where: { $0.code == selectedLanguageCode })?.name ?? "Swedish"
     }
 }
 

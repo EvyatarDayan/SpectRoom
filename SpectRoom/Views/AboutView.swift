@@ -19,12 +19,17 @@ struct AboutView: View {
                 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
+                        Text("settings.about.app.version".localized)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(SpectRoomTheme.secondaryText)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 20)
+
                         // About SpectRoom Title
                         VStack(alignment: .leading, spacing: 12) {
                             Text("About SpectRoom")
                                 .font(.system(size: 24, weight: .bold))
                                 .foregroundColor(SpectRoomTheme.text)
-                                .padding(.top, 16)
                             
                             Text("SpectRoom is a dating and connection app thoughtfully designed for autistic adults and the broader neurodivergent community.")
                                 .font(.body)
@@ -35,7 +40,6 @@ struct AboutView: View {
                                 .foregroundColor(SpectRoomTheme.text)
                         }
                         .padding(.horizontal, 20)
-                        .padding(.top, 20)
                         
                         // SpectRoom Focus Section
                         sectionView(

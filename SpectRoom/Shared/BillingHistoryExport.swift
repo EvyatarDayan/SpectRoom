@@ -8,10 +8,10 @@ enum BillingHistoryExport {
 
     static func writePDFFile(
         accountEmail: String,
-        invoices: [Invoice]
+        events: [AccountHistoryEvent]
     ) throws -> URL {
         let dateStamp = fileDateFormatter.string(from: Date())
-        let fileName = "SpectRoom-Billing-History-\(dateStamp).pdf"
+        let fileName = "SpectRoom-Account-History-\(dateStamp).pdf"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
 
         let titleFont = UIFont.boldSystemFont(ofSize: 18)
@@ -99,7 +99,7 @@ enum BillingHistoryExport {
             )
             y += draw(rangeNote, x: margin, maxWidth: contentWidth) + 16
 
-            if invoices.isEmpty {
+            if events.isEmpty {
                 let empty = NSAttributedString(
                     string: "billing.invoices.empty".localized,
                     attributes: bodyAttrs
@@ -111,17 +111,17 @@ enum BillingHistoryExport {
             let amountColumnWidth: CGFloat = 100
             let leftColumnWidth = contentWidth - amountColumnWidth - 12
 
-            for invoice in invoices {
+            for event in events {
                 let dateText = NSAttributedString(
-                    string: invoice.date.formatted(date: .abbreviated, time: .omitted),
+                    string: event.formattedDateTime(),
                     attributes: secondaryAttrs
                 )
                 let titleText = NSAttributedString(
-                    string: invoice.displayTitle,
+                    string: event.displayTitle,
                     attributes: boldAttrs
                 )
                 let amountText = NSAttributedString(
-                    string: invoice.formattedAmount(),
+                    string: event.showsAmount ? event.formattedAmount() : "",
                     attributes: boldAttrs
                 )
 
@@ -157,25 +157,27 @@ enum BillingHistoryExport {
                     context: nil
                 )
 
-                let amountRect = CGRect(
-                    x: margin + leftColumnWidth + 12,
-                    y: rowTop,
-                    width: amountColumnWidth,
-                    height: amountHeight + 2
-                )
-                let paragraph = NSMutableParagraphStyle()
-                paragraph.alignment = .right
-                let rightAlignedAmount = NSMutableAttributedString(attributedString: amountText)
-                rightAlignedAmount.addAttribute(
-                    .paragraphStyle,
-                    value: paragraph,
-                    range: NSRange(location: 0, length: rightAlignedAmount.length)
-                )
-                rightAlignedAmount.draw(
-                    with: amountRect,
-                    options: [.usesLineFragmentOrigin, .usesFontLeading],
-                    context: nil
-                )
+                if event.showsAmount {
+                    let amountRect = CGRect(
+                        x: margin + leftColumnWidth + 12,
+                        y: rowTop,
+                        width: amountColumnWidth,
+                        height: amountHeight + 2
+                    )
+                    let paragraph = NSMutableParagraphStyle()
+                    paragraph.alignment = .right
+                    let rightAlignedAmount = NSMutableAttributedString(attributedString: amountText)
+                    rightAlignedAmount.addAttribute(
+                        .paragraphStyle,
+                        value: paragraph,
+                        range: NSRange(location: 0, length: rightAlignedAmount.length)
+                    )
+                    rightAlignedAmount.draw(
+                        with: amountRect,
+                        options: [.usesLineFragmentOrigin, .usesFontLeading],
+                        context: nil
+                    )
+                }
 
                 y = rowTop + rowHeight - 8
                 let separatorY = y + 4

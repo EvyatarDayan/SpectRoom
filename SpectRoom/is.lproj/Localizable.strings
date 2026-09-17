@@ -452,7 +452,12 @@
 "profile.block.confirm.message" = "Þeir munu ekki lengur geta séð prófílinn þinn eða sent þér skilaboð. Þeir verða ekki látnir vita.";
 "profile.block.confirm.action" = "Block";
 "profile.block.confirm.block.and.report" = "Lokaðu og tilkynntu";
+"profile.report.confirm.title" = "Tilkynna %@?";
+"profile.report.confirm.message" = "Þú getur tilkynnt %@, eða tilkynnt og lokað á viðkomandi svo hann geti ekki lengur sent þér skilaboð eða séð prófílinn þinn.";
+"profile.report.confirm.report.and.block" = "Tilkynna og loka";
+"profile.report.confirm.action" = "Tilkynna";
 "profile.report.blocked.notice" = "%@ hefur verið lokað!";
+"profile.report.notice" = "Tilkynna %@";
 "profile.report.blocked.not.reported" = "%@ hefur verið lokað, en ekki tilkynnt";
 "profile.report.title" = "Af hverju ertu að tilkynna %@?";
 "profile.report.confidential" = "Þetta er trúnaðarmál. %@ mun ekki vita að þú tilkynntir þá.";
@@ -564,6 +569,13 @@
 "messages.photo.share.warning.continue" = "Halda áfram";
 "messages.photo.share.warning.understand" = "Ég skil";
 "messages.conversation.blocked" = "Lokað";
+"messages.report.menu" = "Tilkynna";
+"messages.delete.menu" = "Eyða";
+"messages.delete.title" = "Eyða skilaboðum";
+"messages.delete.option.for.me" = "Eyða fyrir mig";
+"messages.delete.option.for.everyone" = "Eyða fyrir alla";
+"messages.delete.confirm" = "Eyða";
+"messages.deleted.placeholder" = "Þessum skilaboðum var eytt.";
 "messages.error.no.message" = "Villa: Engin skilaboð valin";
 "messages.image.saved" = "Mynd vistuð";
 "messages.image.error.processing" = "Ekki tókst að undirbúa myndina fyrir upphleðslu. Prófaðu aðra mynd.";

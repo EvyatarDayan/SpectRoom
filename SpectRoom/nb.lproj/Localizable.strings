@@ -452,7 +452,12 @@
 "profile.block.confirm.message" = "De vil ikke lenger kunne se profilen din eller sende deg en melding. De vil ikke bli varslet.";
 "profile.block.confirm.action" = "Blokkere";
 "profile.block.confirm.block.and.report" = "Blokker og rapporter";
+"profile.report.confirm.title" = "Rapporter %@?";
+"profile.report.confirm.message" = "Du kan rapportere %@, eller rapportere og blokkere slik at personen ikke lenger kan sende deg meldinger eller se profilen din.";
+"profile.report.confirm.report.and.block" = "Rapporter og blokker";
+"profile.report.confirm.action" = "Rapporter";
 "profile.report.blocked.notice" = "%@ har blitt blokkert!";
+"profile.report.notice" = "Rapporter %@";
 "profile.report.blocked.not.reported" = "%@ har blitt blokkert, men ikke rapportert";
 "profile.report.title" = "Hvorfor rapporterer du %@?";
 "profile.report.confidential" = "Dette er konfidensielt. %@ vil ikke vite at du rapporterte dem.";
@@ -564,6 +569,13 @@
 "messages.photo.share.warning.continue" = "Fortsette";
 "messages.photo.share.warning.understand" = "Jeg forstår";
 "messages.conversation.blocked" = "Blokkert";
+"messages.report.menu" = "Rapporter";
+"messages.delete.menu" = "Slett";
+"messages.delete.title" = "Slett melding";
+"messages.delete.option.for.me" = "Slett for meg";
+"messages.delete.option.for.everyone" = "Slett for alle";
+"messages.delete.confirm" = "Slett";
+"messages.deleted.placeholder" = "Denne meldingen ble slettet.";
 "messages.error.no.message" = "Feil: Ingen melding er valgt";
 "messages.image.saved" = "Bilde lagret";
 "messages.image.error.processing" = "Vi kunne ikke klargjøre bildet for opplasting. Prøv et annet bilde.";

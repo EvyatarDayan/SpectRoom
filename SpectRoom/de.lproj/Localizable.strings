@@ -448,7 +448,12 @@
 "profile.block.confirm.message" = "Diese Person kann dein Profil nicht mehr sehen und dir keine Nachrichten mehr senden. Sie wird nicht benachrichtigt.";
 "profile.block.confirm.action" = "Blockieren";
 "profile.block.confirm.block.and.report" = "Blockieren & melden";
+"profile.report.confirm.title" = "%@ melden?";
+"profile.report.confirm.message" = "Du kannst %@ melden oder melden und blockieren, damit die Person dir keine Nachrichten mehr senden und dein Profil nicht mehr sehen kann.";
+"profile.report.confirm.report.and.block" = "Melden und blockieren";
+"profile.report.confirm.action" = "Melden";
 "profile.report.blocked.notice" = "%@ wurde blockiert!";
+"profile.report.notice" = "%@ melden";
 "profile.report.blocked.not.reported" = "%@ wurde blockiert, aber nicht gemeldet";
 "profile.report.title" = "Warum meldest du %@?";
 "profile.report.confidential" = "Das ist vertraulich. %@ erfährt nicht, dass du eine Meldung gemacht hast.";
@@ -560,6 +565,13 @@
 "messages.photo.share.warning.continue" = "Weiter";
 "messages.photo.share.warning.understand" = "Ich verstehe";
 "messages.conversation.blocked" = "Blockiert";
+"messages.report.menu" = "Melden";
+"messages.delete.menu" = "Löschen";
+"messages.delete.title" = "Nachricht löschen";
+"messages.delete.option.for.me" = "Für mich löschen";
+"messages.delete.option.for.everyone" = "Für alle löschen";
+"messages.delete.confirm" = "Löschen";
+"messages.deleted.placeholder" = "Diese Nachricht wurde gelöscht.";
 "messages.error.no.message" = "Fehler: Keine Nachricht ausgewählt";
 "messages.image.saved" = "Bild Gespeichert";
 "messages.image.error.processing" = "Dieses Bild konnte nicht für den Upload vorbereitet werden. Bitte versuche ein anderes Foto.";

@@ -448,7 +448,12 @@
 "profile.block.confirm.message" = "Personen kommer inte längre kunna se din profil eller skicka meddelanden till dig. Hen får ingen avisering.";
 "profile.block.confirm.action" = "Blockera";
 "profile.block.confirm.block.and.report" = "Blockera och rapportera";
+"profile.report.confirm.title" = "Rapportera %@?";
+"profile.report.confirm.message" = "Du kan rapportera %@, eller rapportera och blockera så att personen inte längre kan skicka meddelanden eller se din profil.";
+"profile.report.confirm.report.and.block" = "Rapportera och blockera";
+"profile.report.confirm.action" = "Rapportera";
 "profile.report.blocked.notice" = "%@ har blockerats!";
+"profile.report.notice" = "Rapportera %@";
 "profile.report.blocked.not.reported" = "%@ har blockerats, men inte rapporterats";
 "profile.report.title" = "Varför rapporterar du %@?";
 "profile.report.confidential" = "Detta är konfidentiellt. %@ får inte veta att du rapporterade.";
@@ -560,6 +565,13 @@
 "messages.photo.share.warning.continue" = "Fortsätt";
 "messages.photo.share.warning.understand" = "Jag förstår";
 "messages.conversation.blocked" = "Blockerad";
+"messages.report.menu" = "Rapportera";
+"messages.delete.menu" = "Radera";
+"messages.delete.title" = "Radera meddelande";
+"messages.delete.option.for.me" = "Radera för mig";
+"messages.delete.option.for.everyone" = "Radera för alla";
+"messages.delete.confirm" = "Radera";
+"messages.deleted.placeholder" = "Detta meddelande raderades.";
 "messages.error.no.message" = "Fel: Inget meddelande valt";
 "messages.image.saved" = "Bild Sparad";
 "messages.image.error.processing" = "Vi kunde inte förbereda bilden för uppladdning. Prova en annan bild.";

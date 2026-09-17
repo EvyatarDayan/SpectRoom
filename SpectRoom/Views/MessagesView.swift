@@ -948,53 +948,60 @@ struct ConversationRow: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 16)
-            .background(SpectRoomTheme.card)
+            .background(SpectRoomTheme.card.opacity(isBlockedConversation ? 0.55 : 1))
             .cornerRadius(12)
+            .opacity(isBlockedConversation ? 0.28 : 1)
             
             if isBlockedConversation {
-                BlockedProfileLabel()
+                BlockedProfileLabel(dimmed: false, slanted: false)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)
             }
         }
     }
 
-    /// Same layout as Settings → Blocked profiles row.
+    /// Same layout as Settings → Blocked profiles row, plus red stamp + grayed content.
     private var blockedByMeRow: some View {
-        HStack(spacing: 12) {
-            Button(action: onTap) {
-                HStack(spacing: 12) {
-                    profilePhoto
+        ZStack {
+            HStack(spacing: 12) {
+                Button(action: onTap) {
+                    HStack(spacing: 12) {
+                        profilePhoto
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(otherUserName)
-                            .font(.headline)
-                            .foregroundColor(SpectRoomTheme.text)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        Text(blockedDateText)
-                            .font(.caption)
-                            .foregroundColor(SpectRoomTheme.secondaryText)
-                            .lineLimit(1)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(otherUserName)
+                                .font(.headline)
+                                .foregroundColor(SpectRoomTheme.text)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Text(blockedDateText)
+                                .font(.caption)
+                                .foregroundColor(SpectRoomTheme.secondaryText)
+                                .lineLimit(1)
+                        }
+
+                        Spacer(minLength: 0)
                     }
-
-                    Spacer(minLength: 0)
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
+                .opacity(0.28)
 
-            Button("settings.blocked.users.unblock.action".localized) {
-                onRequestUnblock?()
+                Button("settings.blocked.users.unblock.action".localized) {
+                    onRequestUnblock?()
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.green)
+                .buttonStyle(.plain)
             }
-            .font(.subheadline.weight(.semibold))
-            .foregroundColor(.green)
-            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .background(SpectRoomTheme.card.opacity(0.55))
+            .cornerRadius(12)
+
+            BlockedProfileLabel(dimmed: false, slanted: false)
+                .allowsHitTesting(false)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 16)
-        .background(SpectRoomTheme.card)
-        .cornerRadius(12)
     }
     
     private var otherUserName: String {
@@ -1100,6 +1107,9 @@ struct ConversationRow: View {
     }
     
     private var previewText: String {
+        if conversation.isDeleted {
+            return "messages.deleted.placeholder".localized
+        }
         switch conversation.messageType {
         case .image:
             return "messages.preview.photo".localized
@@ -1218,6 +1228,14 @@ struct MessageConversationModal: View {
     @State private var showingOtherUserProfile = false
     @State private var otherUserProfile: ProfileCard?
     @State private var resolvedPartnerName: String?
+    @State private var messagePendingDelete: MessageDisplay?
+    @State private var messagePendingActions: MessageDisplay?
+    @State private var isDeletingMessage = false
+    @State private var showingReportConfirmation = false
+    @State private var showingReportReason = false
+    @State private var reportReasonHeaderStyle: ReportReasonHeaderStyle = .reportOnly
+    @State private var showingReportThankYou = false
+    @State private var shouldDismissAfterReportFlow = false
     
     private let conversationPageSize = 10
     private let conversationBottomAnchorID = "conversation-bottom-anchor"
@@ -1577,6 +1595,75 @@ struct MessageConversationModal: View {
                         showingAccountBilling = true
                     }
                 )
+            } else if let messagePendingActions {
+                MessageQuickActionsOverlay(
+                    onReact: { emoji in
+                        let message = messagePendingActions
+                        self.messagePendingActions = nil
+                        requestReactToMessage(message, emoji: emoji)
+                    },
+                    onReport: {
+                        self.messagePendingActions = nil
+                        requestReportPartner()
+                    },
+                    onDelete: {
+                        let message = messagePendingActions
+                        self.messagePendingActions = nil
+                        requestDeleteMessage(message)
+                    },
+                    onCancel: {
+                        self.messagePendingActions = nil
+                    }
+                )
+            } else if showingReportConfirmation {
+                ReportConfirmationOverlay(
+                    firstName: firstName(from: otherUserName),
+                    onCancel: {
+                        showingReportConfirmation = false
+                    },
+                    onReport: {
+                        showingReportConfirmation = false
+                        reportReasonHeaderStyle = .reportOnly
+                        shouldDismissAfterReportFlow = false
+                        showingReportReason = true
+                    },
+                    onReportAndBlock: {
+                        showingReportConfirmation = false
+                        appState.blockUser(userId: otherUserId, name: otherUserName)
+                        reportReasonHeaderStyle = .blocked
+                        shouldDismissAfterReportFlow = true
+                        showingReportReason = true
+                    }
+                )
+            } else if showingReportReason {
+                ReportReasonOverlay(
+                    firstName: firstName(from: otherUserName),
+                    headerStyle: reportReasonHeaderStyle,
+                    onCancel: {
+                        showingReportReason = false
+                        finishReportFlow()
+                    },
+                    onSubmit: { reason, details in
+                        showingReportReason = false
+                        showingReportThankYou = true
+                        submitReportFromChat(reason: reason, details: details)
+                    }
+                )
+            } else if showingReportThankYou {
+                ReportThankYouOverlay {
+                    showingReportThankYou = false
+                    finishReportFlow()
+                }
+            } else if let messagePendingDelete {
+                MessageDeleteOptionsOverlay(
+                    allowsDeleteForEveryone: messagePendingDelete.canDeleteForEveryone(),
+                    onDelete: { option in
+                        confirmDeleteMessage(messagePendingDelete, option: option)
+                    },
+                    onCancel: {
+                        self.messagePendingDelete = nil
+                    }
+                )
             }
         }
         .sheet(isPresented: $showingAccountBilling, onDismiss: {
@@ -1632,6 +1719,9 @@ struct MessageConversationModal: View {
         .onReceive(appState.newMessageReceivedPublisher) { newMessage in
             appendIncomingMessageIfNeeded(newMessage)
             refreshPartnerNameFromIncomingMessageIfNeeded(newMessage)
+        }
+        .onReceive(appState.messageSoftDeletePublisher) { event in
+            applyRemoteSoftDelete(event)
         }
         .onDisappear {
             // Determine the other user's ID
@@ -1981,7 +2071,10 @@ struct MessageConversationModal: View {
                                     selectedPhotoIndex: $selectedPhotoIndex,
                                     localImagePreview: localImagePreviews[msg.content],
                                     localVideoThumbnail: localVideoThumbnails[msg.content] ?? localVideoThumbnails[msg.thumbnailURL ?? ""],
-                                    isImageUploading: msg.content.hasPrefix("pending://")
+                                    isImageUploading: msg.content.hasPrefix("pending://"),
+                                    onRequestActions: {
+                                        requestMessageActions(msg)
+                                    }
                                 )
                                 .id(msg.id)
                                 .onAppear {
@@ -2477,8 +2570,7 @@ struct MessageConversationModal: View {
             )
             
             await MainActor.run {
-                let mergedPool = (cachedMessagesPool + page.messages)
-                    .deduplicatedConversationMessages()
+                let mergedPool = cachedMessagesPool.mergingConversationMessages(page.messages)
                 let newVisible = Array(mergedPool.suffix(conversationPageSize))
                 let oldKeys = conversationMessages.map(\.deduplicationKey)
                 let newKeys = newVisible.map(\.deduplicationKey)
@@ -2591,25 +2683,27 @@ struct MessageConversationModal: View {
     private func appendIncomingMessageIfNeeded(_ newMessage: MessageDisplay) {
         // Only handle messages from the other person in this open chat.
         guard newMessage.senderId == otherUserId else { return }
-        
-        let key = newMessage.deduplicationKey
-        if conversationMessages.contains(where: { $0.deduplicationKey == key }) {
-            return
-        }
-        
-        // Always re-sort: while backgrounded, Firestore can deliver several
-        // adds in non-chronological order.
-        conversationMessages = (conversationMessages + [newMessage])
-            .deduplicatedConversationMessages()
-        cachedMessagesPool = (cachedMessagesPool + [newMessage]).deduplicatedConversationMessages()
+
+        let beforeCount = conversationMessages.count
+        let beforeKeys = conversationMessages.map(\.deduplicationKey)
+        let merged = conversationMessages.mergingConversationMessages([newMessage])
+        let mergedPool = cachedMessagesPool.mergingConversationMessages([newMessage])
+
+        // Already present (same Firestore id or optimistic duplicate of the same send).
+        guard merged.map(\.deduplicationKey) != beforeKeys else { return }
+
+        let didAddNewBubble = merged.count > beforeCount
+        conversationMessages = merged
+        cachedMessagesPool = mergedPool
         shouldScrollToBottom = true
         previousMessageCount = conversationMessages.count
         keyboardScrollToken += 1
         persistConversationCache()
         
-        // Play sound at the same moment the bubble is added (not when the
-        // Firestore listener first fires ahead of the UI refresh).
-        appState.playIncomingMessageSoundIfNeeded(for: key)
+        // Play sound only when a new bubble appears (not when replacing a preview copy).
+        if didAddNewBubble {
+            appState.playIncomingMessageSoundIfNeeded(for: newMessage.deduplicationKey)
+        }
         
         Task {
             await appState.markMessagesAsRead(from: otherUserId)
@@ -2618,6 +2712,80 @@ struct MessageConversationModal: View {
         // Pull thumbnailURL / videoDuration for video bubbles when the live preview is sparse.
         if newMessage.messageType == .video {
             refreshMessagesOnly()
+        }
+    }
+
+    private func applyRemoteSoftDelete(_ event: MessageSoftDeleteEvent) {
+        guard event.partnerId == otherUserId else { return }
+        let hasDelete = event.deletedForEveryone || event.deletedForViewer
+        let hasReactions = event.reactions != nil
+        guard hasDelete || hasReactions else { return }
+
+        let mark: (MessageDisplay) -> MessageDisplay = { message in
+            guard message.id == event.messageId else { return message }
+            var updated = message
+            if hasDelete {
+                updated = updated.markingDeleted(forEveryone: event.deletedForEveryone)
+            }
+            if let reactions = event.reactions {
+                updated = updated.withReactions(reactions)
+            }
+            return updated
+        }
+
+        let updatedVisible = conversationMessages.map(mark)
+        let updatedPool = cachedMessagesPool.map(mark)
+        guard updatedVisible.map(\.isDeleted) != conversationMessages.map(\.isDeleted)
+                || updatedVisible.map(\.reactions) != conversationMessages.map(\.reactions)
+                || updatedPool.map(\.isDeleted) != cachedMessagesPool.map(\.isDeleted)
+                || updatedPool.map(\.reactions) != cachedMessagesPool.map(\.reactions) else {
+            return
+        }
+
+        conversationMessages = updatedVisible
+        cachedMessagesPool = updatedPool
+        persistConversationCache()
+    }
+
+    private func requestReactToMessage(_ message: MessageDisplay, emoji: String) {
+        guard !isSpectRoomSystemConversation else { return }
+        guard !message.isDeleted else { return }
+        guard !message.content.hasPrefix("pending://") else { return }
+        guard MessageDisplay.quickReactionEmojis.contains(emoji) else { return }
+        guard let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid else { return }
+
+        let isOutgoing = message.senderName == "You" || message.senderId == currentUserId
+        let updated = message.togglingReaction(emoji, forUserId: currentUserId)
+
+        if let index = conversationMessages.firstIndex(where: { $0.id == message.id }) {
+            conversationMessages[index] = updated
+        }
+        if let index = cachedMessagesPool.firstIndex(where: { $0.id == message.id }) {
+            cachedMessagesPool[index] = updated
+        }
+        persistConversationCache()
+
+        Task {
+            do {
+                try await FirebaseAuthService.shared.setMessageReaction(
+                    messageId: message.id,
+                    partnerId: otherUserId,
+                    isOutgoing: isOutgoing,
+                    emoji: emoji,
+                    reactions: updated.reactions
+                )
+            } catch {
+                print("❌ Failed to set message reaction: \(error)")
+                await MainActor.run {
+                    if let index = conversationMessages.firstIndex(where: { $0.id == message.id }) {
+                        conversationMessages[index] = message
+                    }
+                    if let index = cachedMessagesPool.firstIndex(where: { $0.id == message.id }) {
+                        cachedMessagesPool[index] = message
+                    }
+                    persistConversationCache()
+                }
+            }
         }
     }
     
@@ -2636,20 +2804,24 @@ struct MessageConversationModal: View {
                 guard !newerMessages.isEmpty else { return }
                 
                 await MainActor.run {
-                    let existingKeys = Set(conversationMessages.map(\.deduplicationKey))
-                    let uniqueNew = newerMessages.filter { !existingKeys.contains($0.deduplicationKey) }
+                    let beforeKeys = conversationMessages.map(\.deduplicationKey)
+                    let merged = conversationMessages.mergingConversationMessages(newerMessages)
+                    let mergedPool = cachedMessagesPool.mergingConversationMessages(newerMessages)
                     
-                    guard !uniqueNew.isEmpty else { return }
+                    guard merged.map(\.deduplicationKey) != beforeKeys else { return }
                     
-                    conversationMessages = (conversationMessages + uniqueNew)
-                        .deduplicatedConversationMessages()
-                    cachedMessagesPool = (cachedMessagesPool + uniqueNew).deduplicatedConversationMessages()
+                    let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid ?? ""
+                    let existingKeys = Set(beforeKeys)
+                    let didAddIncoming = newerMessages.contains {
+                        $0.senderId != currentUserId && !existingKeys.contains($0.deduplicationKey)
+                    }
+                    
+                    conversationMessages = merged
+                    cachedMessagesPool = mergedPool
                     shouldScrollToBottom = true
                     persistConversationCache()
                     
-                    let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid ?? ""
-                    let hasNewIncomingMessage = uniqueNew.contains { $0.senderId != currentUserId }
-                    if hasNewIncomingMessage {
+                    if didAddIncoming {
                         Task {
                             await appState.markMessagesAsRead(from: otherUserId)
                         }
@@ -2755,6 +2927,112 @@ struct MessageConversationModal: View {
         refreshTimer = nil
     }
     
+    private func requestMessageActions(_ message: MessageDisplay) {
+        guard !isSpectRoomSystemConversation else { return }
+        guard !message.content.hasPrefix("pending://") else { return }
+        guard !message.isDeleted else { return }
+        messagePendingActions = message
+    }
+
+    private func requestReportPartner() {
+        guard !isSpectRoomSystemConversation else { return }
+        showingReportConfirmation = true
+    }
+
+    private func finishReportFlow() {
+        let shouldDismiss = shouldDismissAfterReportFlow
+        shouldDismissAfterReportFlow = false
+        showingReportConfirmation = false
+        showingReportReason = false
+        showingReportThankYou = false
+        if shouldDismiss {
+            dismiss()
+        }
+    }
+
+    private func submitReportFromChat(reason: ProfileReportReason, details: String?) {
+        let reportedUserId = otherUserId
+        let reportedName = otherUserName
+        Task {
+            do {
+                let profile: ProfileCard
+                if let otherUserProfile {
+                    profile = otherUserProfile
+                } else {
+                    profile = try await FirebaseAuthService.shared.fetchUserProfile(for: reportedUserId)
+                }
+                try await FirebaseAuthService.shared.submitUserReport(
+                    reportedUserId: reportedUserId,
+                    category: reason.storageCategory,
+                    details: details,
+                    reportedProfile: profile
+                )
+            } catch {
+                print("⚠️ Failed to submit report for \(reportedName): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func requestDeleteMessage(_ message: MessageDisplay) {
+        guard !isSpectRoomSystemConversation else { return }
+        guard !message.content.hasPrefix("pending://") else { return }
+        guard !message.isDeleted else { return }
+        messagePendingDelete = message
+    }
+
+    private func confirmDeleteMessage(_ message: MessageDisplay, option: MessageDeleteOption) {
+        guard !isDeletingMessage else { return }
+        let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid ?? ""
+        let isOutgoing = message.senderName == "You" || message.senderId == currentUserId
+        let scope: FirebaseAuthService.MessageDeleteScope = {
+            if option == .forEveryone, message.canDeleteForEveryone() {
+                return .forEveryone
+            }
+            return .forMe
+        }()
+
+        messagePendingDelete = nil
+        isDeletingMessage = true
+
+        let marked = message.markingDeleted(forEveryone: scope == .forEveryone)
+        if let index = conversationMessages.firstIndex(where: { $0.id == message.id }) {
+            conversationMessages[index] = marked
+        }
+        if let index = cachedMessagesPool.firstIndex(where: { $0.id == message.id }) {
+            cachedMessagesPool[index] = marked
+        }
+        persistConversationCache()
+        appState.updateConversationInCache(marked)
+
+        Task {
+            do {
+                try await FirebaseAuthService.shared.softDeleteMessage(
+                    messageId: message.id,
+                    partnerId: otherUserId,
+                    isOutgoing: isOutgoing,
+                    scope: scope
+                )
+                await MainActor.run {
+                    isDeletingMessage = false
+                    refreshMessagesOnly()
+                }
+            } catch {
+                print("❌ Failed to soft-delete message: \(error)")
+                await MainActor.run {
+                    isDeletingMessage = false
+                    if let index = conversationMessages.firstIndex(where: { $0.id == message.id }) {
+                        conversationMessages[index] = message
+                    }
+                    if let index = cachedMessagesPool.firstIndex(where: { $0.id == message.id }) {
+                        cachedMessagesPool[index] = message
+                    }
+                    persistConversationCache()
+                    refreshMessagesOnly()
+                }
+            }
+        }
+    }
+
     private func requestMediaShare() {
         guard canReplyInConversation else { return }
         guard MediaDailyLimit.canSend else {
@@ -2863,7 +3141,8 @@ struct MessageConversationModal: View {
                             senderId: pending.senderId,
                             recipientId: pending.recipientId,
                             senderProfilePhotoURL: pending.senderProfilePhotoURL,
-                            recipientProfilePhotoURL: pending.recipientProfilePhotoURL
+                            recipientProfilePhotoURL: pending.recipientProfilePhotoURL,
+                            firestoreId: messageId
                         )
                         conversationMessages[index] = finalizedDisplay
                         localVideoThumbnails[uploaded.videoURL] = prepared.thumbnailImage
@@ -2881,7 +3160,8 @@ struct MessageConversationModal: View {
                             type: .video,
                             voiceDuration: nil,
                             thumbnailURL: uploaded.thumbnailURL,
-                            videoDuration: prepared.duration
+                            videoDuration: prepared.duration,
+                            firestoreId: messageId
                         )
                     }
                     discardPreparedVideo()
@@ -2948,6 +3228,23 @@ struct MessageConversationModal: View {
                 await MainActor.run {
                     isSendingReply = false
                     isTextFieldFocused = true
+                    // Stamp Firestore id onto the optimistic bubble so refresh won't duplicate it.
+                    if let index = conversationMessages.lastIndex(where: {
+                        $0.content == trimmedContent
+                            && $0.senderId == (FirebaseAuthService.shared.auth.currentUser?.uid ?? "")
+                            && $0.id != messageId
+                    }) {
+                        let previousId = conversationMessages[index].id
+                        let stamped = conversationMessages[index].replacingId(messageId)
+                        conversationMessages[index] = stamped
+                        if let poolIndex = cachedMessagesPool.lastIndex(where: { $0.id == previousId }) {
+                            cachedMessagesPool[poolIndex] = stamped
+                        }
+                        conversationMessages = conversationMessages.deduplicatedConversationMessages()
+                        cachedMessagesPool = cachedMessagesPool.deduplicatedConversationMessages()
+                        persistConversationCache()
+                        appState.updateConversationInCache(stamped)
+                    }
                     refreshMessagesOnly()
                 }
                 
@@ -3025,7 +3322,8 @@ struct MessageConversationModal: View {
                             senderId: pending.senderId,
                             recipientId: pending.recipientId,
                             senderProfilePhotoURL: pending.senderProfilePhotoURL,
-                            recipientProfilePhotoURL: pending.recipientProfilePhotoURL
+                            recipientProfilePhotoURL: pending.recipientProfilePhotoURL,
+                            firestoreId: messageId
                         )
                         conversationMessages[index] = finalizedDisplay
                         localImagePreviews[imageURL] = image
@@ -3037,7 +3335,12 @@ struct MessageConversationModal: View {
                     } else {
                         localImagePreviews[imageURL] = image
                         localImagePreviews.removeValue(forKey: pendingContent)
-                        updateConversationListAfterOutgoingMessage(content: imageURL, type: .image, voiceDuration: nil)
+                        updateConversationListAfterOutgoingMessage(
+                            content: imageURL,
+                            type: .image,
+                            voiceDuration: nil,
+                            firestoreId: messageId
+                        )
                     }
                     isUploadingImage = false
                     mediaSendCount = MediaDailyLimit.currentCount()
@@ -3229,7 +3532,8 @@ struct MessageConversationModal: View {
                     updateConversationListAfterOutgoingMessage(
                         content: remoteURL,
                         type: .voice,
-                        voiceDuration: duration
+                        voiceDuration: duration,
+                        firestoreId: messageId
                     )
                     refreshMessagesOnly()
                 }
@@ -3250,7 +3554,8 @@ struct MessageConversationModal: View {
         type: MessageType,
         voiceDuration: TimeInterval?,
         thumbnailURL: String? = nil,
-        videoDuration: TimeInterval? = nil
+        videoDuration: TimeInterval? = nil,
+        firestoreId: String? = nil
     ) {
         guard let currentUserId = FirebaseAuthService.shared.auth.currentUser?.uid else { return }
         let otherUserId = message.senderName == "You" ? message.recipientId : message.senderId
@@ -3272,11 +3577,20 @@ struct MessageConversationModal: View {
             senderId: currentUserId,
             recipientId: otherUserId,
             senderProfilePhotoURL: currentUserProfilePhotoURL,
-            recipientProfilePhotoURL: otherUserProfilePhotoURL
+            recipientProfilePhotoURL: otherUserProfilePhotoURL,
+            firestoreId: firestoreId
         )
-        conversationMessages = (conversationMessages + [messageDisplay])
-            .deduplicatedConversationMessages()
-        cachedMessagesPool = (cachedMessagesPool + [messageDisplay]).deduplicatedConversationMessages()
+        if let firestoreId, !firestoreId.isEmpty {
+            // Server-backed send: replace any matching optimistic bubble.
+            conversationMessages = conversationMessages.mergingConversationMessages([messageDisplay])
+            cachedMessagesPool = cachedMessagesPool.mergingConversationMessages([messageDisplay])
+        } else {
+            // Fresh optimistic bubble — always append (same text twice must stay as two).
+            conversationMessages = (conversationMessages + [messageDisplay])
+                .deduplicatedConversationMessages()
+            cachedMessagesPool = (cachedMessagesPool + [messageDisplay])
+                .deduplicatedConversationMessages()
+        }
         persistConversationCache()
         appState.updateConversationInCache(messageDisplay)
     }
@@ -4490,6 +4804,7 @@ struct MessageBubble: View {
     var localImagePreview: UIImage? = nil
     var localVideoThumbnail: UIImage? = nil
     var isImageUploading: Bool = false
+    var onRequestActions: (() -> Void)? = nil
     @State private var showingSaveAlert = false
     @State private var saveSuccess = false
     @State private var showingVideoPlayer = false
@@ -4524,41 +4839,96 @@ struct MessageBubble: View {
     }
     
     private var isLongMessage: Bool {
-        message.content.count > longMessageCollapseLimit
+        !message.isDeleted && message.content.count > longMessageCollapseLimit
     }
     
     private var displayedText: String {
+        if message.isDeleted {
+            return message.displayContent
+        }
         guard isLongMessage, !isLongMessageExpanded else {
             return message.content
         }
         return String(message.content.prefix(longMessageCollapseLimit))
+    }
+
+    private var canShowMessageActions: Bool {
+        !message.isDeleted
+            && !isImageUploading
+            && !message.content.hasPrefix("pending://")
+            && onRequestActions != nil
     }
     
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             if isOutgoing {
                 Spacer(minLength: 48)
-                bubbleContent
+                bubbleWithReactions
             } else {
-                bubbleContent
+                bubbleWithReactions
                 Spacer(minLength: 48)
             }
         }
         .padding(.vertical, 4)
     }
+
+    private var bubbleWithReactions: some View {
+        VStack(alignment: isOutgoing ? .trailing : .leading, spacing: 2) {
+            bubbleContent
+            if !message.isDeleted, !message.reactionSummary.isEmpty {
+                reactionChips
+            }
+        }
+        .onLongPressGesture(minimumDuration: 0.35) {
+            guard canShowMessageActions else { return }
+            onRequestActions?()
+        }
+    }
+
+    private var reactionChips: some View {
+        HStack(spacing: 4) {
+            ForEach(message.reactionSummary, id: \.emoji) { item in
+                HStack(spacing: 2) {
+                    Text(item.emoji)
+                        .font(.caption)
+                    if item.count > 1 {
+                        Text("\(item.count)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundColor(SpectRoomTheme.secondaryText)
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color(.systemBackground).opacity(0.95))
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(Color.black.opacity(0.08), lineWidth: 0.5)
+                )
+            }
+        }
+        .padding(.horizontal, isOutgoing ? 4 : 10)
+    }
     
     @ViewBuilder
     private var bubbleContent: some View {
-        switch message.messageType {
-        case .image:
-            Button(action: {
-                guard !isImageUploading, !message.content.hasPrefix("pending://") else { return }
-                let imageMessages = conversationMessages.filter { $0.messageType == .image && !$0.content.hasPrefix("pending://") }
-                if let index = imageMessages.firstIndex(where: { $0.id == message.id }) {
-                    selectedPhotoIndex = index
-                    showingConversationPhotoViewer = true
-                }
-            }) {
+        if message.isDeleted {
+            HStack(alignment: .bottom, spacing: 8) {
+                Text(displayedText)
+                    .italic()
+                    .foregroundColor(SpectRoomTheme.secondaryText)
+                Text(bubbleTimeText)
+                    .font(.caption2)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .padding(.leading, isOutgoing ? 0 : 7)
+            .padding(.trailing, isOutgoing ? 7 : 0)
+            .background(bubbleColor, in: bubbleShape)
+        } else {
+            switch message.messageType {
+            case .image:
                 ZStack(alignment: .bottomTrailing) {
                     ChatImageBubbleContent(
                         remoteURL: message.content.hasPrefix("pending://") ? nil : URL(string: message.content),
@@ -4580,15 +4950,10 @@ struct MessageBubble: View {
                 .padding(.leading, isOutgoing ? 0 : 7)
                 .padding(.trailing, isOutgoing ? 7 : 0)
                 .background(bubbleColor, in: bubbleShape)
-            }
-            .buttonStyle(PlainButtonStyle())
-            .disabled(isOutgoing && (isImageUploading || message.content.hasPrefix("pending://")))
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .gesture(mediaPressGesture(onTap: openImageViewerIfPossible))
 
-        case .video:
-            Button(action: {
-                guard !isImageUploading, !message.content.hasPrefix("pending://") else { return }
-                showingVideoPlayer = true
-            }) {
+            case .video:
                 ChatVideoBubbleContent(
                     thumbnailURL: message.thumbnailURL.flatMap(URL.init(string:)),
                     localThumbnail: localVideoThumbnail,
@@ -4601,60 +4966,94 @@ struct MessageBubble: View {
                 .padding(.leading, isOutgoing ? 0 : 7)
                 .padding(.trailing, isOutgoing ? 7 : 0)
                 .background(bubbleColor, in: bubbleShape)
-            }
-            .buttonStyle(PlainButtonStyle())
-            .disabled(isOutgoing && (isImageUploading || message.content.hasPrefix("pending://")))
-            .fullScreenCover(isPresented: $showingVideoPlayer) {
-                if let url = URL(string: message.content), !message.content.hasPrefix("pending://") {
-                    ChatVideoPlayerScreen(url: url)
-                }
-            }
-            
-        case .voice:
-            VoiceMessagePlayerView(
-                audioURL: URL(string: message.content),
-                displayDuration: message.voiceDuration,
-                accentColor: voiceAccentColor,
-                textColor: bubbleTextColor,
-                baseColor: bubbleColor,
-                waveColor: Color.gray.opacity(0.45),
-                timestampText: bubbleTimeText,
-                isOutgoing: isOutgoing
-            )
-            
-        default:
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(displayedText)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .lineLimit(nil)
-                    .foregroundColor(bubbleTextColor)
-                    .multilineTextAlignment(.leading)
-                
-                HStack(alignment: .bottom, spacing: 8) {
-                    if isLongMessage && !isLongMessageExpanded {
-                        Button {
-                            onExpandLongMessage?()
-                        } label: {
-                            Text("messages.read.more".localized)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundColor(readMoreColor)
-                        }
-                        .buttonStyle(.plain)
-                        
-                        Spacer(minLength: 8)
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .gesture(mediaPressGesture(onTap: openVideoPlayerIfPossible))
+                .fullScreenCover(isPresented: $showingVideoPlayer) {
+                    if let url = URL(string: message.content), !message.content.hasPrefix("pending://") {
+                        ChatVideoPlayerScreen(url: url)
                     }
-                    
-                    Text(bubbleTimeText)
-                        .font(.caption2)
-                        .foregroundColor(SpectRoomTheme.secondaryText)
                 }
+            
+            case .voice:
+                VoiceMessagePlayerView(
+                    audioURL: URL(string: message.content),
+                    displayDuration: message.voiceDuration,
+                    accentColor: voiceAccentColor,
+                    textColor: bubbleTextColor,
+                    baseColor: bubbleColor,
+                    waveColor: Color.gray.opacity(0.45),
+                    timestampText: bubbleTimeText,
+                    isOutgoing: isOutgoing
+                )
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.35).onEnded { _ in
+                        guard canShowMessageActions else { return }
+                        onRequestActions?()
+                    }
+                )
+            
+            default:
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(displayedText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(nil)
+                        .foregroundColor(bubbleTextColor)
+                        .multilineTextAlignment(.leading)
+                    
+                    HStack(alignment: .bottom, spacing: 8) {
+                        if isLongMessage && !isLongMessageExpanded {
+                            Button {
+                                onExpandLongMessage?()
+                            } label: {
+                                Text("messages.read.more".localized)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(readMoreColor)
+                            }
+                            .buttonStyle(.plain)
+                            
+                            Spacer(minLength: 8)
+                        }
+                        
+                        Text(bubbleTimeText)
+                            .font(.caption2)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .padding(.leading, isOutgoing ? 0 : 7)
+                .padding(.trailing, isOutgoing ? 7 : 0)
+                .background(bubbleColor, in: bubbleShape)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .padding(.leading, isOutgoing ? 0 : 7)
-            .padding(.trailing, isOutgoing ? 7 : 0)
-            .background(bubbleColor, in: bubbleShape)
         }
+    }
+
+    private func openImageViewerIfPossible() {
+        guard !isImageUploading, !message.content.hasPrefix("pending://") else { return }
+        let imageMessages = conversationMessages.filter {
+            $0.messageType == .image && !$0.content.hasPrefix("pending://") && !$0.isDeleted
+        }
+        if let index = imageMessages.firstIndex(where: { $0.id == message.id }) {
+            selectedPhotoIndex = index
+            showingConversationPhotoViewer = true
+        }
+    }
+
+    private func openVideoPlayerIfPossible() {
+        guard !isImageUploading, !message.content.hasPrefix("pending://") else { return }
+        showingVideoPlayer = true
+    }
+
+    /// Tap opens media; long-press opens reactions/delete (Buttons were blocking long-press).
+    private func mediaPressGesture(onTap: @escaping () -> Void) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.35)
+            .onEnded { _ in
+                guard canShowMessageActions else { return }
+                onRequestActions?()
+            }
+            .exclusively(before: TapGesture().onEnded { _ in
+                onTap()
+            })
     }
 }
 

@@ -448,7 +448,12 @@
 "profile.block.confirm.message" = "Ya no podrá ver tu perfil ni enviarte mensajes. No se le notificará.";
 "profile.block.confirm.action" = "Bloquear";
 "profile.block.confirm.block.and.report" = "Bloquear y reportar";
+"profile.report.confirm.title" = "¿Reportar a %@?";
+"profile.report.confirm.message" = "Puedes reportar a %@, o reportar y bloquear para que ya no pueda enviarte mensajes ni ver tu perfil.";
+"profile.report.confirm.report.and.block" = "Reportar y bloquear";
+"profile.report.confirm.action" = "Reportar";
 "profile.report.blocked.notice" = "¡%@ ha sido bloqueado!";
+"profile.report.notice" = "Reportar a %@";
 "profile.report.blocked.not.reported" = "%@ ha sido bloqueado, pero no reportado";
 "profile.report.title" = "¿Por qué reportas a %@?";
 "profile.report.confidential" = "Esto es confidencial. %@ no sabrá que lo reportaste.";
@@ -560,6 +565,13 @@
 "messages.photo.share.warning.continue" = "Continuar";
 "messages.photo.share.warning.understand" = "Entiendo";
 "messages.conversation.blocked" = "Bloqueado";
+"messages.report.menu" = "Reportar";
+"messages.delete.menu" = "Eliminar";
+"messages.delete.title" = "Eliminar mensaje";
+"messages.delete.option.for.me" = "Eliminar para mí";
+"messages.delete.option.for.everyone" = "Eliminar para todos";
+"messages.delete.confirm" = "Eliminar";
+"messages.deleted.placeholder" = "Este mensaje fue eliminado.";
 "messages.error.no.message" = "Error: No se seleccionó ningún mensaje";
 "messages.image.saved" = "Imagen Guardada";
 "messages.image.error.processing" = "No pudimos preparar esta imagen para subirla. Prueba con otra foto.";

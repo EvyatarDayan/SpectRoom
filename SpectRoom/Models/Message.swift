@@ -164,9 +164,54 @@ struct MessageDisplay: Identifiable {
     let voiceDuration: TimeInterval?
     let thumbnailURL: String?
     let videoDuration: TimeInterval?
+    /// Soft-delete: hidden only for the current viewer (document still kept for admin).
+    let deletedForViewer: Bool
+    /// Soft-delete: hidden for both participants (document content still kept for admin).
+    let deletedForEveryone: Bool
+    /// Quick reactions: Firebase userId → emoji.
+    let reactions: [String: String]
+
+    static let deleteForEveryoneWindow: TimeInterval = 60 * 60
+    static let quickReactionEmojis = ["❤️", "😂", "👍", "🙏", "🔥"]
+
+    var isDeleted: Bool {
+        deletedForViewer || deletedForEveryone
+    }
+
+    var displayContent: String {
+        isDeleted ? "messages.deleted.placeholder".localized : content
+    }
+
+    /// Aggregated reaction chips for the bubble footer.
+    var reactionSummary: [(emoji: String, count: Int)] {
+        let grouped = Dictionary(grouping: reactions.values, by: { $0 })
+        return grouped
+            .map { (emoji: $0.key, count: $0.value.count) }
+            .sorted { lhs, rhs in
+                if lhs.count != rhs.count { return lhs.count > rhs.count }
+                return lhs.emoji < rhs.emoji
+            }
+    }
+
+    /// Messages can be deleted for everyone within the time window of send.
+    func canDeleteForEveryone(now: Date = Date()) -> Bool {
+        now.timeIntervalSince(createdAt) <= Self.deleteForEveryoneWindow
+    }
     
-    init(message: Message, senderName: String, recipientName: String, senderId: String, recipientId: String, senderProfilePhotoURL: String? = nil, recipientProfilePhotoURL: String? = nil) {
-        self.id = message.id.uuidString
+    init(
+        message: Message,
+        senderName: String,
+        recipientName: String,
+        senderId: String,
+        recipientId: String,
+        senderProfilePhotoURL: String? = nil,
+        recipientProfilePhotoURL: String? = nil,
+        firestoreId: String? = nil,
+        deletedForViewer: Bool = false,
+        deletedForEveryone: Bool = false,
+        reactions: [String: String] = [:]
+    ) {
+        self.id = firestoreId ?? message.id.uuidString
         self.content = message.content
         self.messageType = message.type
         self.senderName = senderName
@@ -180,6 +225,9 @@ struct MessageDisplay: Identifiable {
         self.voiceDuration = message.voiceDuration
         self.thumbnailURL = message.thumbnailURL
         self.videoDuration = message.videoDuration
+        self.deletedForViewer = deletedForViewer
+        self.deletedForEveryone = deletedForEveryone
+        self.reactions = reactions
     }
     
     init(
@@ -196,7 +244,10 @@ struct MessageDisplay: Identifiable {
         recipientProfilePhotoURL: String?,
         voiceDuration: TimeInterval?,
         thumbnailURL: String? = nil,
-        videoDuration: TimeInterval? = nil
+        videoDuration: TimeInterval? = nil,
+        deletedForViewer: Bool = false,
+        deletedForEveryone: Bool = false,
+        reactions: [String: String] = [:]
     ) {
         self.id = id
         self.content = content
@@ -212,30 +263,103 @@ struct MessageDisplay: Identifiable {
         self.voiceDuration = voiceDuration
         self.thumbnailURL = thumbnailURL
         self.videoDuration = videoDuration
+        self.deletedForViewer = deletedForViewer
+        self.deletedForEveryone = deletedForEveryone
+        self.reactions = reactions
     }
     
     /// Stable identity for deduplicating optimistic vs server-fetched copies of the same message.
     var deduplicationKey: String {
-        "\(senderId)_\(recipientId)_\(messageType.rawValue)_\(content)"
+        if content.hasPrefix("pending://") {
+            return "\(senderId)_\(recipientId)_\(messageType.rawValue)_\(content)"
+        }
+        return id
+    }
+
+    /// Local optimistic bubble that matches a server message of the same send
+    /// (same parties/content/type, close timestamps, different ids).
+    func isOptimisticDuplicate(of server: MessageDisplay, within seconds: TimeInterval = 90) -> Bool {
+        guard id != server.id else { return false }
+        guard !content.hasPrefix("pending://"), !server.content.hasPrefix("pending://") else { return false }
+        guard senderId == server.senderId,
+              recipientId == server.recipientId,
+              messageType == server.messageType,
+              content == server.content else { return false }
+        return abs(createdAt.timeIntervalSince(server.createdAt)) < seconds
+    }
+
+    func replacingId(_ newId: String) -> MessageDisplay {
+        copying(id: newId)
     }
     
     func replacingPartnerIdentity(name: String, photoURL: String?, currentUserId: String) -> MessageDisplay {
         let isOutgoing = senderId == currentUserId || senderName == "You"
-        return MessageDisplay(
-            id: id,
-            content: content,
-            messageType: messageType,
+        return copying(
             senderName: isOutgoing ? senderName : name,
             recipientName: isOutgoing ? name : recipientName,
-            senderId: senderId,
-            recipientId: recipientId,
-            createdAt: createdAt,
-            isRead: isRead,
             senderProfilePhotoURL: isOutgoing ? senderProfilePhotoURL : (photoURL ?? senderProfilePhotoURL),
-            recipientProfilePhotoURL: isOutgoing ? (photoURL ?? recipientProfilePhotoURL) : recipientProfilePhotoURL,
-            voiceDuration: voiceDuration,
-            thumbnailURL: thumbnailURL,
-            videoDuration: videoDuration
+            recipientProfilePhotoURL: isOutgoing ? (photoURL ?? recipientProfilePhotoURL) : recipientProfilePhotoURL
+        )
+    }
+
+    func markingDeleted(forEveryone: Bool) -> MessageDisplay {
+        copying(
+            deletedForViewer: true,
+            deletedForEveryone: forEveryone || deletedForEveryone
+        )
+    }
+
+    func withReactions(_ reactions: [String: String]) -> MessageDisplay {
+        copying(reactions: reactions)
+    }
+
+    func togglingReaction(_ emoji: String, forUserId userId: String) -> MessageDisplay {
+        var next = reactions
+        if next[userId] == emoji {
+            next.removeValue(forKey: userId)
+        } else {
+            next[userId] = emoji
+        }
+        return withReactions(next)
+    }
+
+    private func copying(
+        id: String? = nil,
+        content: String? = nil,
+        messageType: MessageType? = nil,
+        senderName: String? = nil,
+        recipientName: String? = nil,
+        senderId: String? = nil,
+        recipientId: String? = nil,
+        createdAt: Date? = nil,
+        isRead: Bool? = nil,
+        senderProfilePhotoURL: String?? = nil,
+        recipientProfilePhotoURL: String?? = nil,
+        voiceDuration: TimeInterval?? = nil,
+        thumbnailURL: String?? = nil,
+        videoDuration: TimeInterval?? = nil,
+        deletedForViewer: Bool? = nil,
+        deletedForEveryone: Bool? = nil,
+        reactions: [String: String]? = nil
+    ) -> MessageDisplay {
+        MessageDisplay(
+            id: id ?? self.id,
+            content: content ?? self.content,
+            messageType: messageType ?? self.messageType,
+            senderName: senderName ?? self.senderName,
+            recipientName: recipientName ?? self.recipientName,
+            senderId: senderId ?? self.senderId,
+            recipientId: recipientId ?? self.recipientId,
+            createdAt: createdAt ?? self.createdAt,
+            isRead: isRead ?? self.isRead,
+            senderProfilePhotoURL: senderProfilePhotoURL ?? self.senderProfilePhotoURL,
+            recipientProfilePhotoURL: recipientProfilePhotoURL ?? self.recipientProfilePhotoURL,
+            voiceDuration: voiceDuration ?? self.voiceDuration,
+            thumbnailURL: thumbnailURL ?? self.thumbnailURL,
+            videoDuration: videoDuration ?? self.videoDuration,
+            deletedForViewer: deletedForViewer ?? self.deletedForViewer,
+            deletedForEveryone: deletedForEveryone ?? self.deletedForEveryone,
+            reactions: reactions ?? self.reactions
         )
     }
 }
@@ -253,11 +377,39 @@ extension Array where Element == MessageDisplay {
             seen.insert(message.deduplicationKey).inserted
         }
     }
+
+    /// Merge server-fetched messages, replacing local optimistic copies instead of appending duplicates.
+    func mergingConversationMessages(_ serverMessages: [MessageDisplay]) -> [MessageDisplay] {
+        var result = self
+        for serverMsg in serverMessages {
+            if let exactIndex = result.firstIndex(where: { $0.deduplicationKey == serverMsg.deduplicationKey }) {
+                result[exactIndex] = serverMsg
+                continue
+            }
+            if let optimisticIndex = result.firstIndex(where: { $0.isOptimisticDuplicate(of: serverMsg) }) {
+                result[optimisticIndex] = serverMsg
+                continue
+            }
+            result.append(serverMsg)
+        }
+        return result.deduplicatedConversationMessages()
+    }
 }
 
 struct ConversationMessagesPage {
     let messages: [MessageDisplay]
     let hasMoreOlder: Bool
+}
+
+/// Real-time update applied to the other participant's copy of a message.
+struct MessageSoftDeleteEvent: Equatable {
+    let messageId: String
+    /// Conversation partner relative to the current user.
+    let partnerId: String
+    let deletedForEveryone: Bool
+    let deletedForViewer: Bool
+    /// `nil` means reactions were not part of this update.
+    let reactions: [String: String]?
 }
 
 extension Date {

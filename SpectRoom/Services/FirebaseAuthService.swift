@@ -32,6 +32,8 @@ class FirebaseAuthService: ObservableObject {
     private var blockedByListener: ListenerRegistration?
     private var moderationListener: ListenerRegistration?
     private var billingPlanListener: ListenerRegistration?
+    private var messagesListener: ListenerRegistration?
+    private var messageSoftDeleteListeners: [ListenerRegistration] = []
     private var authStateListenerHandle: AuthStateDidChangeListenerHandle?
     private var didStartAuthListening = false
     /// Keeps the app on the login screen while we verify the account isn't soft-deleted.
@@ -3891,18 +3893,25 @@ class FirebaseAuthService: ObservableObject {
         }
     }
     
+    func stopListeningForNewMessages() {
+        messagesListener?.remove()
+        messagesListener = nil
+    }
+
     func listenForNewMessages(completion: @escaping (String, String, String?, String, String, MessageType, TimeInterval?, Date, Bool) -> Void) {
         guard let currentUserId = auth.currentUser?.uid else {
             print("❌ User not authenticated for message listening")
             return
         }
+
+        stopListeningForNewMessages()
         
         print("💬 Starting to listen for new messages for user: \(currentUserId)")
         
         // Listen to incoming messages collection
         let incomingMessagesRef = db.collection("users").document(currentUserId).collection("incomingMessages")
         
-        incomingMessagesRef.addSnapshotListener { snapshot, error in
+        messagesListener = incomingMessagesRef.addSnapshotListener { snapshot, error in
             if let error = error {
                 print("❌ Error listening for messages: \(error)")
                 return
@@ -4035,6 +4044,71 @@ class FirebaseAuthService: ObservableObject {
                 }
             }
         }
+    }
+
+    func stopListeningForMessageSoftDeletes() {
+        messageSoftDeleteListeners.forEach { $0.remove() }
+        messageSoftDeleteListeners.removeAll()
+    }
+
+    /// Fires when a message document is soft-deleted (especially delete-for-everyone on the peer's copy).
+    func listenForMessageSoftDeletes(completion: @escaping (MessageSoftDeleteEvent) -> Void) {
+        guard let currentUserId = auth.currentUser?.uid else {
+            print("❌ User not authenticated for soft-delete listening")
+            return
+        }
+
+        stopListeningForMessageSoftDeletes()
+        print("💬 Starting soft-delete listeners for user: \(currentUserId)")
+
+        let handleSnapshot: (QuerySnapshot?, Error?, Bool) -> Void = { snapshot, error, isOutgoing in
+            if let error {
+                print("❌ Error listening for message soft-deletes: \(error)")
+                return
+            }
+            guard let snapshot else { return }
+
+            // Ignore cold cache hydration; real deletes arrive as live modifications.
+            if snapshot.metadata.isFromCache && !snapshot.metadata.hasPendingWrites {
+                return
+            }
+
+            for change in snapshot.documentChanges where change.type == .modified {
+                let data = change.document.data()
+                let deletedForEveryone = data["deletedForEveryone"] as? Bool ?? false
+                let deletedForViewer = data["deletedForViewer"] as? Bool ?? false
+                let hasReactionsField = data["reactions"] != nil
+                let reactions = hasReactionsField ? Self.parseReactions(data["reactions"]) : nil
+                guard deletedForEveryone || deletedForViewer || hasReactionsField else { continue }
+
+                let senderId = data["senderId"] as? String ?? ""
+                let recipientId = data["recipientId"] as? String ?? ""
+                let partnerId = isOutgoing ? recipientId : senderId
+                guard !partnerId.isEmpty else { continue }
+
+                let event = MessageSoftDeleteEvent(
+                    messageId: change.document.documentID,
+                    partnerId: partnerId,
+                    deletedForEveryone: deletedForEveryone,
+                    deletedForViewer: deletedForViewer,
+                    reactions: reactions
+                )
+                DispatchQueue.main.async {
+                    completion(event)
+                }
+            }
+        }
+
+        let incomingRef = db.collection("users").document(currentUserId).collection("incomingMessages")
+        let sentRef = db.collection("users").document(currentUserId).collection("sentMessages")
+
+        let incomingListener = incomingRef.addSnapshotListener { snapshot, error in
+            handleSnapshot(snapshot, error, false)
+        }
+        let sentListener = sentRef.addSnapshotListener { snapshot, error in
+            handleSnapshot(snapshot, error, true)
+        }
+        messageSoftDeleteListeners = [incomingListener, sentListener]
     }
     
     // MARK: - Message Functions (Simplified Structure)
@@ -4692,6 +4766,7 @@ class FirebaseAuthService: ObservableObject {
         for document in sentDocs {
             if let display = messageDisplay(
                 from: document.data(),
+                documentID: document.documentID,
                 currentUserId: currentUserId,
                 otherUserId: otherUserId,
                 otherUserName: otherUserName,
@@ -4706,6 +4781,7 @@ class FirebaseAuthService: ObservableObject {
         for document in incomingDocs {
             if let display = messageDisplay(
                 from: document.data(),
+                documentID: document.documentID,
                 currentUserId: currentUserId,
                 otherUserId: otherUserId,
                 otherUserName: otherUserName,
@@ -4762,6 +4838,7 @@ class FirebaseAuthService: ObservableObject {
         for document in sentDocs {
             if let display = messageDisplay(
                 from: document.data(),
+                documentID: document.documentID,
                 currentUserId: currentUserId,
                 otherUserId: otherUserId,
                 otherUserName: otherUserName,
@@ -4776,6 +4853,7 @@ class FirebaseAuthService: ObservableObject {
         for document in incomingDocs {
             if let display = messageDisplay(
                 from: document.data(),
+                documentID: document.documentID,
                 currentUserId: currentUserId,
                 otherUserId: otherUserId,
                 otherUserName: otherUserName,
@@ -5104,6 +5182,7 @@ class FirebaseAuthService: ObservableObject {
     
     private func messageDisplay(
         from data: [String: Any],
+        documentID: String? = nil,
         currentUserId: String,
         otherUserId: String,
         otherUserName: String,
@@ -5112,6 +5191,11 @@ class FirebaseAuthService: ObservableObject {
         isOutgoing: Bool
     ) -> MessageDisplay? {
         guard let message = messageFromDocument(data) else { return nil }
+        let firestoreId = (data["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedId = (firestoreId?.isEmpty == false ? firestoreId : nil) ?? documentID ?? message.id.uuidString
+        let deletedForViewer = data["deletedForViewer"] as? Bool ?? false
+        let deletedForEveryone = data["deletedForEveryone"] as? Bool ?? false
+        let reactions = Self.parseReactions(data["reactions"])
         
         if isOutgoing {
             return MessageDisplay(
@@ -5121,7 +5205,11 @@ class FirebaseAuthService: ObservableObject {
                 senderId: currentUserId,
                 recipientId: otherUserId,
                 senderProfilePhotoURL: currentUserPhotoURL,
-                recipientProfilePhotoURL: otherUserPhotoURL
+                recipientProfilePhotoURL: otherUserPhotoURL,
+                firestoreId: resolvedId,
+                deletedForViewer: deletedForViewer,
+                deletedForEveryone: deletedForEveryone,
+                reactions: reactions
             )
         }
         
@@ -5132,8 +5220,96 @@ class FirebaseAuthService: ObservableObject {
             senderId: otherUserId,
             recipientId: currentUserId,
             senderProfilePhotoURL: otherUserPhotoURL,
-            recipientProfilePhotoURL: currentUserPhotoURL
+            recipientProfilePhotoURL: currentUserPhotoURL,
+            firestoreId: resolvedId,
+            deletedForViewer: deletedForViewer,
+            deletedForEveryone: deletedForEveryone,
+            reactions: reactions
         )
+    }
+
+    private static func parseReactions(_ value: Any?) -> [String: String] {
+        guard let raw = value as? [String: Any] else { return [:] }
+        var parsed: [String: String] = [:]
+        for (userId, emojiValue) in raw {
+            guard let emoji = emojiValue as? String, !emoji.isEmpty else { continue }
+            parsed[userId] = emoji
+        }
+        return parsed
+    }
+
+    enum MessageDeleteScope {
+        case forMe
+        case forEveryone
+    }
+
+    /// Soft-delete a chat message. Documents stay in Firestore for admin audit.
+    func softDeleteMessage(
+        messageId: String,
+        partnerId: String,
+        isOutgoing: Bool,
+        scope: MessageDeleteScope
+    ) async throws {
+        guard let currentUserId = auth.currentUser?.uid else {
+            throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        guard !messageId.isEmpty, !messageId.hasPrefix("pending") else {
+            throw NSError(domain: "FirebaseAuthService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid message id"])
+        }
+
+        let timestamp = Date().timeIntervalSince1970
+        let viewerPatch: [String: Any] = [
+            "deletedForViewer": true,
+            "deletedAt": timestamp,
+            "deletedBy": currentUserId
+        ]
+        let everyonePatch: [String: Any] = [
+            "deletedForEveryone": true,
+            "deletedForViewer": true,
+            "deletedAt": timestamp,
+            "deletedBy": currentUserId
+        ]
+
+        let myCollection = isOutgoing ? "sentMessages" : "incomingMessages"
+        let theirCollection = isOutgoing ? "incomingMessages" : "sentMessages"
+        let myRef = db.collection("users").document(currentUserId).collection(myCollection).document(messageId)
+        let theirRef = db.collection("users").document(partnerId).collection(theirCollection).document(messageId)
+
+        switch scope {
+        case .forMe:
+            try await myRef.setData(viewerPatch, merge: true)
+        case .forEveryone:
+            try await myRef.setData(everyonePatch, merge: true)
+            try await theirRef.setData(everyonePatch, merge: true)
+        }
+    }
+
+    /// Toggle a quick reaction on both participants' copies of the message.
+    func setMessageReaction(
+        messageId: String,
+        partnerId: String,
+        isOutgoing: Bool,
+        emoji: String,
+        reactions: [String: String]
+    ) async throws {
+        guard let currentUserId = auth.currentUser?.uid else {
+            throw NSError(domain: "FirebaseAuthService", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+        }
+        guard !messageId.isEmpty, !messageId.hasPrefix("pending") else {
+            throw NSError(domain: "FirebaseAuthService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid message id"])
+        }
+        guard MessageDisplay.quickReactionEmojis.contains(emoji) else {
+            throw NSError(domain: "FirebaseAuthService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Unsupported reaction"])
+        }
+
+        let patch: [String: Any] = ["reactions": reactions]
+        let myCollection = isOutgoing ? "sentMessages" : "incomingMessages"
+        let theirCollection = isOutgoing ? "incomingMessages" : "sentMessages"
+        let myRef = db.collection("users").document(currentUserId).collection(myCollection).document(messageId)
+        let theirRef = db.collection("users").document(partnerId).collection(theirCollection).document(messageId)
+
+        try await myRef.setData(patch, merge: true)
+        try await theirRef.setData(patch, merge: true)
     }
     
     private struct UserSummary {

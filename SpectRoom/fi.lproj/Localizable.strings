@@ -452,7 +452,12 @@
 "profile.block.confirm.message" = "He eivät voi enää nähdä profiiliasi tai lähettää sinulle viestejä. Heille ei ilmoiteta.";
 "profile.block.confirm.action" = "Lohko";
 "profile.block.confirm.block.and.report" = "Estä ja tee ilmoitus";
+"profile.report.confirm.title" = "Ilmoita %@?";
+"profile.report.confirm.message" = "Voit ilmoittaa käyttäjän %@ tai ilmoittaa ja estää, jotta hän ei enää voi lähettää viestejä tai nähdä profiiliasi.";
+"profile.report.confirm.report.and.block" = "Ilmoita ja estä";
+"profile.report.confirm.action" = "Ilmoita";
 "profile.report.blocked.notice" = "%@ on estetty!";
+"profile.report.notice" = "Ilmoita %@";
 "profile.report.blocked.not.reported" = "%@ on estetty, mutta sitä ei ole raportoitu";
 "profile.report.title" = "Miksi ilmoitat %@?";
 "profile.report.confidential" = "Tämä on luottamuksellista. %@ ei tiedä, että olet ilmoittanut niistä.";
@@ -564,6 +569,13 @@
 "messages.photo.share.warning.continue" = "Jatkaa";
 "messages.photo.share.warning.understand" = "Ymmärrän";
 "messages.conversation.blocked" = "Estetty";
+"messages.report.menu" = "Ilmoita";
+"messages.delete.menu" = "Poista";
+"messages.delete.title" = "Poista viesti";
+"messages.delete.option.for.me" = "Poista minulta";
+"messages.delete.option.for.everyone" = "Poista kaikilta";
+"messages.delete.confirm" = "Poista";
+"messages.deleted.placeholder" = "Tämä viesti poistettiin.";
 "messages.error.no.message" = "Virhe: Viestiä ei ole valittu";
 "messages.image.saved" = "Kuva tallennettu";
 "messages.image.error.processing" = "Kuvaa ei voitu valmistella lähetystä varten. Kokeile toista kuvaa.";

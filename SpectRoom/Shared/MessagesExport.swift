@@ -258,6 +258,9 @@ enum MessagesExport {
     }
     
     private static func bodyText(for message: MessageDisplay) -> String {
+        if message.isDeleted {
+            return "messages.deleted.placeholder".localized
+        }
         switch message.messageType {
         case .text, .system:
             return message.content

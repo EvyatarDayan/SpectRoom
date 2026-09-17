@@ -466,7 +466,12 @@
 "profile.block.confirm.message" = "They will no longer be able to see your profile or message you. They won't be notified.";
 "profile.block.confirm.action" = "Block";
 "profile.block.confirm.block.and.report" = "Block & Report";
+"profile.report.confirm.title" = "Report %@?";
+"profile.report.confirm.message" = "You can report %@, or report and block them so they can no longer message you or see your profile.";
+"profile.report.confirm.report.and.block" = "Report and block";
+"profile.report.confirm.action" = "Report";
 "profile.report.blocked.notice" = "%@ has been blocked!";
+"profile.report.notice" = "Report %@";
 "profile.report.blocked.not.reported" = "%@ has been blocked, but not reported";
 "profile.report.title" = "Why are you reporting %@?";
 "profile.report.confidential" = "This is confidential. %@ won't know you reported them.";
@@ -578,6 +583,13 @@
 "messages.photo.share.warning.continue" = "Continue";
 "messages.photo.share.warning.understand" = "I understand";
 "messages.conversation.blocked" = "Blocked";
+"messages.report.menu" = "Report";
+"messages.delete.menu" = "Delete";
+"messages.delete.title" = "Delete message";
+"messages.delete.option.for.me" = "Delete for me";
+"messages.delete.option.for.everyone" = "Delete for everyone";
+"messages.delete.confirm" = "Delete";
+"messages.deleted.placeholder" = "This message was deleted.";
 "messages.error.no.message" = "Error: No message selected";
 "messages.image.saved" = "Image Saved";
 "messages.image.error.processing" = "We couldn’t prepare this image for upload. Please try another photo.";

@@ -97,6 +97,10 @@ class AppStateManager: ObservableObject {
     var newMessageReceivedPublisher: AnyPublisher<MessageDisplay, Never> {
         newMessageReceivedSubject.eraseToAnyPublisher()
     }
+    private let messageSoftDeleteSubject = PassthroughSubject<MessageSoftDeleteEvent, Never>()
+    var messageSoftDeletePublisher: AnyPublisher<MessageSoftDeleteEvent, Never> {
+        messageSoftDeleteSubject.eraseToAnyPublisher()
+    }
     private let newMatchReceivedSubject = PassthroughSubject<MatchDisplay, Never>()
     var newMatchReceivedPublisher: AnyPublisher<MatchDisplay, Never> {
         newMatchReceivedSubject.eraseToAnyPublisher()
@@ -179,6 +183,8 @@ class AppStateManager: ObservableObject {
                     self?.firebaseAuth.stopListeningForBlockedByUsers()
                     self?.firebaseAuth.stopListeningForModerationStatus()
                     self?.firebaseAuth.stopListeningForBillingPlan()
+                    self?.firebaseAuth.stopListeningForMessageSoftDeletes()
+                    self?.firebaseAuth.stopListeningForNewMessages()
                     // If admin deleted the account and Auth was revoked before/while the popup showed,
                     // keep or restore the deleted acknowledgement so the user can tap "I understand".
                     if self?.firebaseAuth.hasPendingDeletedAcknowledgement() == true {
@@ -1686,6 +1692,7 @@ class AppStateManager: ObservableObject {
                 if self?.isHiddenByBlock(senderId) == true {
                     if !hasProfile {
                         self?.applyIncomingMessagePreview(
+                            messageId: messageDocId,
                             senderId: senderId,
                             senderName: senderName.isEmpty ? nil : senderName,
                             senderPhotoURL: senderPhotoURL,
@@ -1702,6 +1709,7 @@ class AppStateManager: ObservableObject {
                 if !hasProfile {
                     print("💬 New message preview from: \(senderId), content: \(content.prefix(20))...")
                     self?.applyIncomingMessagePreview(
+                        messageId: messageDocId,
                         senderId: senderId,
                         senderName: senderName.isEmpty ? nil : senderName,
                         senderPhotoURL: senderPhotoURL,
@@ -1803,6 +1811,63 @@ class AppStateManager: ObservableObject {
                 self?.lastMessageId = messageDocId
             }
         }
+
+        firebaseAuth.listenForMessageSoftDeletes { [weak self] event in
+            Task { @MainActor in
+                self?.applyMessageSoftDelete(event)
+            }
+        }
+    }
+
+    /// Apply a remote soft-delete / reaction update to caches and notify the UI.
+    @MainActor
+    func applyMessageSoftDelete(_ event: MessageSoftDeleteEvent) {
+        let hasDelete = event.deletedForEveryone || event.deletedForViewer
+        let hasReactions = event.reactions != nil
+        guard hasDelete || hasReactions else { return }
+
+        if var state = cachedConversationStates[event.partnerId] {
+            state.messagePool = state.messagePool.map { message in
+                guard message.id == event.messageId else { return message }
+                var updated = message
+                if hasDelete {
+                    updated = updated.markingDeleted(forEveryone: event.deletedForEveryone)
+                }
+                if let reactions = event.reactions {
+                    updated = updated.withReactions(reactions)
+                }
+                return updated
+            }
+            state.visibleMessages = state.visibleMessages.map { message in
+                guard message.id == event.messageId else { return message }
+                var updated = message
+                if hasDelete {
+                    updated = updated.markingDeleted(forEveryone: event.deletedForEveryone)
+                }
+                if let reactions = event.reactions {
+                    updated = updated.withReactions(reactions)
+                }
+                return updated
+            }
+            state.updatedAt = Date()
+            cachedConversationStates[event.partnerId] = state
+        }
+
+        if let index = cachedMessageConversations.firstIndex(where: { $0.id == event.messageId }) {
+            var updated = cachedMessageConversations
+            var message = updated[index]
+            if hasDelete {
+                message = message.markingDeleted(forEveryone: event.deletedForEveryone)
+            }
+            if let reactions = event.reactions {
+                message = message.withReactions(reactions)
+            }
+            updated[index] = message
+            cachedMessageConversations = updated
+            lastMessageConversationsUpdate = Date()
+        }
+
+        messageSoftDeleteSubject.send(event)
     }
     
     func playIncomingMessageSoundIfNeeded(for messageDocId: String) {
@@ -1917,6 +1982,7 @@ class AppStateManager: ObservableObject {
     
     @MainActor
     func applyIncomingMessagePreview(
+        messageId: String,
         senderId: String,
         senderName: String?,
         senderPhotoURL: String?,
@@ -1948,7 +2014,8 @@ class AppStateManager: ObservableObject {
             senderId: senderId,
             recipientId: currentUserId,
             senderProfilePhotoURL: resolvedPhotoURL,
-            recipientProfilePhotoURL: currentUser?.profilePhotoURL
+            recipientProfilePhotoURL: currentUser?.profilePhotoURL,
+            firestoreId: messageId
         )
         updateConversationInCache(messageDisplay)
         // Keep the open-chat message pool in sync so the conversation UI can show
@@ -2233,19 +2300,8 @@ class AppStateManager: ObservableObject {
             return
         }
         
-        let existingKeys = Set(existingState.messagePool.map(\.deduplicationKey))
-        var appendedToVisible = false
-        
-        for newMessage in newMessages where !existingKeys.contains(newMessage.deduplicationKey) {
-            existingState.messagePool.append(newMessage)
-            existingState.visibleMessages.append(newMessage)
-            appendedToVisible = true
-        }
-        
-        existingState.messagePool = existingState.messagePool.deduplicatedConversationMessages()
-        if appendedToVisible {
-            existingState.visibleMessages = existingState.visibleMessages.deduplicatedConversationMessages()
-        }
+        existingState.messagePool = existingState.messagePool.mergingConversationMessages(newMessages)
+        existingState.visibleMessages = existingState.visibleMessages.mergingConversationMessages(newMessages)
         existingState.updatedAt = Date()
         cachedConversationStates[otherUserId] = existingState
         print("💬 Updated conversation cache for \(otherUserId) (total: \(existingState.messagePool.count))")

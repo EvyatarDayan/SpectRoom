@@ -115,7 +115,8 @@
 "settings.about.description" = "Versión de la app e información";
 "settings.about.app.version" = "Versión de la app: Beta";
 "settings.sign.out" = "Cerrar Sesión";
-"settings.sign.out.confirm.title" = "¿Estás seguro?";
+"settings.sign.out.confirm.title" = "¿Cerrar sesión?";
+"settings.sign.out.confirm.message" = "¿Estás seguro de que quieres cerrar sesión?";
 "settings.sign.out.confirm.yes" = "Sí";
 "settings.development" = "Desarrollo";
 "settings.reset.user.data" = "Restablecer datos del usuario";
@@ -144,10 +145,14 @@
 "settings.reported.profiles.since" = "Reportado %@";
 "settings.reported.profiles.no.date" = "Reportado";
 "settings.reported.profiles.detail.title" = "Detalles del reporte";
-"settings.reported.profiles.detail.headline" = "%@ fue reportado el %@";
-"settings.reported.profiles.detail.headline.no.date" = "%@ fue reportado";
+"settings.reported.profiles.detail.headline" = "Reporte sobre %@";
+"settings.reported.profiles.detail.headline.no.date" = "Reporte sobre %@";
+"settings.reported.profiles.detail.date.line" = "Fecha: %@";
 "settings.reported.profiles.detail.category" = "Motivo del reporte";
+"settings.reported.profiles.detail.category.line" = "Motivo del reporte: %@";
 "settings.reported.profiles.detail.details" = "Detalles del reporte";
+"settings.reported.profiles.detail.details.line" = "Detalles del reporte: %@";
+"settings.reported.profiles.detail.see.details" = "Ver detalles";
 "settings.reported.profiles.detail.status" = "Estado";
 "settings.reported.profiles.detail.bio" = "Bio en el momento del reporte";
 "settings.reported.profiles.status.pending" = "Pendiente";
@@ -180,6 +185,9 @@
 "settings.delete.account.confirm.yes" = "Sí";
 "settings.delete.account.type.message" = "Para eliminar tu cuenta, introduce tu contraseña";
 "settings.delete.account.type.placeholder" = "Contraseña";
+"settings.delete.account.mfa.message" = "Introduce el código de 6 dígitos que enviamos a %@";
+"settings.delete.account.mfa.placeholder" = "Código de 6 dígitos";
+"settings.delete.account.mfa.resend" = "Reenviar código";
 "settings.delete.account.confirm.ok" = "OK";
 "settings.delete.account.error" = "No se pudo eliminar tu cuenta. Inténtalo de nuevo.";
 "settings.delete.account.wrong.password" = "Contraseña incorrecta, inténtalo de nuevo.";
@@ -277,11 +285,14 @@
 "admin.ban.popup.message" = "Tu cuenta de SpectRoom ha sido baneada permanentemente por violar nuestras Normas de la comunidad.\n\nYa no podrás acceder a esta cuenta. Si crees que se trata de un error, puedes enviar una apelación al soporte.";
 "admin.ban.popup.accept" = "Entiendo";
 "admin.deleted.popup.title" = "Cuenta eliminada";
-"admin.deleted.popup.message" = "Tu cuenta de SpectRoom ha sido eliminada permanentemente.\n\nYa no podrás acceder a esta cuenta. Si crees que se trata de un error, puedes contactar con soporte.";
+"admin.deleted.popup.message" = "Tu cuenta de SpectRoom ha sido eliminada.\n\nYa no podrás acceder a esta cuenta. Si crees que se trata de un error, puedes contactar con soporte.";
 "admin.deleted.popup.accept" = "Entiendo";
 "admin.ban.lifted.popup.title" = "Ban levantado";
 "admin.ban.lifted.popup.message" = "El ban de tu cuenta de SpectRoom ha sido levantado.\n\nYa puedes usar SpectRoom de nuevo.";
 "admin.ban.lifted.popup.accept" = "Entiendo";
+"admin.restored.popup.title" = "Cuenta restaurada";
+"admin.restored.popup.message" = "Tu cuenta de SpectRoom está activa de nuevo.\n\nPuedes volver a iniciar sesión.";
+"admin.restored.popup.accept" = "Iniciar sesión";
 "admin.freeze.login.message" = "Tu cuenta está temporalmente congelada.\n\nIntenta iniciar sesión después de %@.";
 "admin.freeze.push.title" = "Cuenta temporalmente congelada";
 "admin.freeze.push.body" = "Tu cuenta de SpectRoom ha sido congelada temporalmente. Abre la app para más detalles.";
@@ -376,8 +387,8 @@
 "auth.mfa.error.rate.limited" = "Parece que se solicitaron demasiados códigos desde este dispositivo. Vuelve a intentarlo en aproximadamente 1 hora.";
 "auth.mfa.error.invalid.code" = "Código de verificación incorrecto, inténtalo de nuevo.";
 "auth.mfa.error.session" = "La sesión caducó. Solicita un código nuevo.";
-"auth.mfa.error.send" = "No se pudo enviar el SMS. Inténtalo de nuevo.";
-"auth.mfa.error.sms.unavailable" = "No pudimos completar la verificación por SMS. Inténtalo de nuevo o contacta con soporte si el problema continúa.";
+"auth.mfa.error.send" = "No se pudo enviar el SMS. Toca Reenviar, o contacta con soporte si el problema continúa.";
+"auth.mfa.error.sms.unavailable" = "No se pudo enviar el SMS a %@. Toca Reenviar, o contacta con soporte si el problema continúa.";
 "auth.mfa.error.factor" = "No hay un factor de teléfono disponible para esta cuenta.";
 "auth.mfa.phone.missing.title" = "Añadir número de teléfono";
 "auth.mfa.phone.missing.save" = "Continuar con este número";
@@ -387,6 +398,15 @@
 "auth.mfa.phone.edit.cancel" = "Cancelar";
 "auth.mfa.phone.using" = "Teléfono para 2FA: %@";
 
+"auth.mfa.sending.subtitle" = "Enviando un código de verificación…";
+"auth.mfa.sending.failed.subtitle" = "Aún no se pudo enviar el código";
+"auth.mfa.sending.body" = "Esto puede tardar unos segundos. Puede aparecer una breve comprobación de seguridad.";
+"auth.mfa.sign.out" = "Cerrar sesión y empezar de nuevo";
+"auth.mfa.error.app.verification" = "Aún no se pudo enviar el código SMS en este dispositivo. Usa un número de prueba de Firebase en DEBUG, o inténtalo de nuevo / con un iPhone real. Sigues conectado: toca OK e inténtalo otra vez.";
+"auth.mfa.error.sms.detail" = "No se pudo enviar el SMS a %@. Toca Reenviar, o contacta con soporte si el problema continúa.";
+"auth.mfa.error.sms.device" = "No se pudo enviar el SMS a %@. Toca Reenviar, o contacta con soporte si el problema continúa.";
+"auth.mfa.error.sms.client" = "No se pudo enviar el SMS a %@. Toca Reenviar, o contacta con soporte si el problema continúa.";
+"auth.mfa.error.sms.debug" = "No se pudo enviar el SMS a %@. Toca Reenviar, o contacta con soporte si el problema continúa.";
 "address.search.map.placeholder" = "Busca para previsualizar la ubicación";
 "address.search.use.address" = "Usar esta dirección";
 "address.search.privacy.notice" = "¡Tu dirección no se compartirá!";
@@ -450,7 +470,7 @@
 "profile.block.confirm.block.and.report" = "Bloquear y reportar";
 "profile.report.confirm.title" = "¿Reportar a %@?";
 "profile.report.confirm.message" = "Puedes reportar a %@, o reportar y bloquear para que ya no pueda enviarte mensajes ni ver tu perfil.";
-"profile.report.confirm.report.and.block" = "Reportar y bloquear";
+"profile.report.confirm.report.and.block" = "Reportar & bloquear";
 "profile.report.confirm.action" = "Reportar";
 "profile.report.blocked.notice" = "¡%@ ha sido bloqueado!";
 "profile.report.notice" = "Reportar a %@";
@@ -463,6 +483,9 @@
 "profile.report.reason.something.else" = "Algo más";
 "profile.report.something.else.placeholder" = "Cuéntanos más...";
 "profile.report.submit" = "Reportar";
+"profile.report.submitted.title" = "Reporte enviado";
+"profile.report.submitted.body" = "Gracias por mantener segura nuestra comunidad. Nuestro equipo revisará este reporte en breve.";
+"profile.report.submitted.body.blocked" = "Gracias por mantener segura nuestra comunidad. Nuestro equipo revisará este reporte en breve. También hemos bloqueado automáticamente este perfil para que ya no pueda verte ni contactarte.";
 "profile.report.thank.you" = "¡Gracias por mantener segura nuestra comunidad!";
 "profile.actions.title" = "Acciones";
 "profile.unlike.title" = "Dejar de gustar este perfil";
@@ -565,6 +588,7 @@
 "messages.photo.share.warning.continue" = "Continuar";
 "messages.photo.share.warning.understand" = "Entiendo";
 "messages.conversation.blocked" = "Bloqueado";
+"messages.copy.menu" = "Copiar";
 "messages.report.menu" = "Reportar";
 "messages.delete.menu" = "Eliminar";
 "messages.delete.title" = "Eliminar mensaje";
@@ -917,7 +941,7 @@
 "billing.modal.title" = "Confirmar cambio de plan";
 "billing.modal.confirm" = "Confirmar";
 "billing.change.confirm.message" = "¿Seguro que quieres cambiar tu plan de %@ a %@?";
-"billing.change.success.message" = "El plan se ha cambiado a %@ correctamente.";
+"billing.change.success.message" = "Tu plan se ha cambiado correctamente a %@.";
 "billing.change.success.title" = "Plan cambiado";
 "billing.modal.switching.to" = "Cambiando a %@";
 "billing.modal.proration" = "Se te cobrará %@ por el plan %@. El tiempo no usado de tu plan actual se prorratea automáticamente.";

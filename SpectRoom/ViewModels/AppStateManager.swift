@@ -172,6 +172,14 @@ class AppStateManager: ObservableObject {
                     self?.startListeningForModerationStatus()
                     self?.startListeningForBillingPlan()
                     self?.refreshUnreadMessageCount()
+                    // Restore popup is signed-out handoff only — never keep it after login/MFA.
+                    self?.firebaseAuth.markRestoredNoticeDismissed()
+                    if case .restoredAcknowledgement = self?.pendingModerationNotice?.kind {
+                        self?.pendingModerationNotice = nil
+                    }
+                    Task {
+                        await self?.firebaseAuth.clearPendingAccountRestoredNoticeIfNeeded()
+                    }
                 } else {
                     self?.pendingMfaSignIn = false
                     self?.mfaSignInMaskedPhone = ""
@@ -194,11 +202,24 @@ class AppStateManager: ObservableObject {
                         default:
                             self?.pendingModerationNotice = ModerationNotice(kind: .deletedAcknowledgement)
                         }
+                    } else if self?.firebaseAuth.hasPendingRestoredAcknowledgement() == true
+                                && self?.firebaseAuth.hasDismissedRestoredNotice() != true {
+                        // Only re-show restore if it was never acknowledged (not after a completed login).
+                        switch self?.pendingModerationNotice?.kind {
+                        case .restoredAcknowledgement:
+                            break
+                        default:
+                            self?.pendingModerationNotice = ModerationNotice(kind: .restoredAcknowledgement)
+                        }
+                    } else if case .restoredAcknowledgement = self?.pendingModerationNotice?.kind {
+                        // Dismissed restore must not bounce back on sign-out after MFA.
+                        self?.pendingModerationNotice = nil
                     }
                     // Keep login / acknowledgement notices so the user can still dismiss after sign-out.
                     switch self?.pendingModerationNotice?.kind {
                     case .loginBlocked, .loginBanned, .loginDeleted,
-                            .banAcknowledgement, .deletedAcknowledgement, .freezeAcknowledgement:
+                            .banAcknowledgement, .deletedAcknowledgement, .freezeAcknowledgement,
+                            .restoredAcknowledgement:
                         break
                     default:
                         self?.pendingModerationNotice = nil
@@ -269,6 +290,10 @@ class AppStateManager: ObservableObject {
         // still show the deleted popup until "I understand".
         if firebaseAuth.hasPendingDeletedAcknowledgement() {
             pendingModerationNotice = ModerationNotice(kind: .deletedAcknowledgement)
+        } else if firebaseAuth.hasPendingRestoredAcknowledgement(),
+                  !firebaseAuth.hasDismissedRestoredNotice(),
+                  !isAuthenticated {
+            pendingModerationNotice = ModerationNotice(kind: .restoredAcknowledgement)
         }
     }
     
@@ -309,11 +334,23 @@ class AppStateManager: ObservableObject {
                     switch outcome {
                     case .completed:
                         UserDefaults.standard.set(0, forKey: "failedSignInAttempts")
+                        self.firebaseAuth.markRestoredNoticeDismissed()
+                        if case .restoredAcknowledgement = self.pendingModerationNotice?.kind {
+                            self.pendingModerationNotice = nil
+                        }
                         self.refreshMfaEnrollmentRequirement()
                     case .mfaRequired(let maskedPhone):
+                        // Block restore popup for the whole MFA challenge.
+                        self.firebaseAuth.markRestoredNoticeDismissed()
+                        if case .restoredAcknowledgement = self.pendingModerationNotice?.kind {
+                            self.pendingModerationNotice = nil
+                        }
                         self.mfaSignInMaskedPhone = maskedPhone
                         self.pendingMfaSignIn = true
                     }
+                }
+                if case .completed = outcome {
+                    await self.firebaseAuth.clearPendingAccountRestoredNoticeIfNeeded()
                 }
             } catch let error as SpectRoomAuthError {
                 await MainActor.run {
@@ -349,7 +386,14 @@ class AppStateManager: ObservableObject {
                     // MFA / phone-auth failures must never look like a wrong password.
                     let ns = error as NSError
                     let message = ns.localizedDescription
+                    // Admin delete often disables Auth — surface the same Account Deleted popup.
                     if ns.domain == AuthErrorDomain,
+                       ns.code == AuthErrorCode.userDisabled.rawValue
+                        || message.localizedCaseInsensitiveContains("disabled by an administrator")
+                        || message.localizedCaseInsensitiveContains("user account has been disabled") {
+                        self.authErrorMessage = nil
+                        self.pendingModerationNotice = ModerationNotice(kind: .loginDeleted)
+                    } else if ns.domain == AuthErrorDomain,
                        ns.code == AuthErrorCode.secondFactorRequired.rawValue
                         || message.localizedCaseInsensitiveContains("second factor")
                         || message.localizedCaseInsensitiveContains("multi-factor") {
@@ -381,9 +425,28 @@ class AppStateManager: ObservableObject {
         }
     }
     
-    func deleteAccount(password: String) async throws {
-        try await firebaseAuth.reauthenticate(withPassword: password)
+    func deleteAccount(password: String) async throws -> ReauthOutcome {
+        let outcome = try await firebaseAuth.reauthenticateWithPossibleMfa(password: password)
+        switch outcome {
+        case .completed:
+            try await firebaseAuth.requestAccountDeletion()
+            return .completed
+        case .mfaRequired(let maskedPhone):
+            return .mfaRequired(maskedPhone: maskedPhone)
+        }
+    }
+
+    func completeDeleteAccountAfterMfa(code: String) async throws {
+        try await firebaseAuth.confirmReauthMfa(code: code)
         try await firebaseAuth.requestAccountDeletion()
+    }
+
+    func resendDeleteAccountMfaCode() async throws {
+        try await firebaseAuth.resendReauthMfaCode()
+    }
+
+    func cancelDeleteAccountMfa() {
+        firebaseAuth.cancelPendingMfaReauth()
     }
     
     func signUp(name: String, age: Int, email: String, password: String, phoneE164: String) {
@@ -449,8 +512,14 @@ class AppStateManager: ObservableObject {
             pendingMfaSignIn = false
             mfaSignInMaskedPhone = ""
             UserDefaults.standard.set(0, forKey: "failedSignInAttempts")
+            // Never leave a restore popup on screen after MFA succeeds.
+            firebaseAuth.markRestoredNoticeDismissed()
+            if case .restoredAcknowledgement = pendingModerationNotice?.kind {
+                pendingModerationNotice = nil
+            }
             refreshMfaEnrollmentRequirement()
         }
+        await firebaseAuth.clearPendingAccountRestoredNoticeIfNeeded()
     }
 
     func confirmMfaEnrollment(code: String, phoneE164: String) async throws {
@@ -1128,6 +1197,11 @@ class AppStateManager: ObservableObject {
                         // Ban popup is showing — do not clear or force another sign-out yet.
                     } else if case .deletedAcknowledgement = self?.pendingModerationNotice?.kind {
                         // Delete popup is showing — do not clear or force another sign-out yet.
+                    } else if case .restoredAcknowledgement = self?.pendingModerationNotice?.kind {
+                        // Should not happen while signed in; clear instead of blocking.
+                        self?.pendingModerationNotice = nil
+                        self?.firebaseAuth.markRestoredNoticeDismissed()
+                        Task { await self?.firebaseAuth.clearPendingAccountRestoredNoticeIfNeeded() }
                     } else {
                         self?.pendingModerationNotice = nil
                         self?.signOut()
@@ -1137,6 +1211,15 @@ class AppStateManager: ObservableObject {
             onNotice: { [weak self] notice in
                 Task { @MainActor in
                     guard self?.isDismissingModerationNotice != true else { return }
+                    // Restore must never interrupt a signed-in or MFA session.
+                    if case .restoredAcknowledgement = notice.kind {
+                        self?.firebaseAuth.markRestoredNoticeDismissed()
+                        if case .restoredAcknowledgement = self?.pendingModerationNotice?.kind {
+                            self?.pendingModerationNotice = nil
+                        }
+                        Task { await self?.firebaseAuth.clearPendingAccountRestoredNoticeIfNeeded() }
+                        return
+                    }
                     self?.pendingModerationNotice = notice
                 }
             },
@@ -1169,6 +1252,25 @@ class AppStateManager: ObservableObject {
         } catch {
             print("⚠️ Failed to refresh moderation notice: \(error.localizedDescription)")
         }
+    }
+
+    /// Shown from a restore push even when the user is already signed out.
+    @MainActor
+    func presentAccountRestoredNotice() {
+        guard isDismissingModerationNotice != true else { return }
+        // Never interrupt sign-in / MFA / an authenticated session.
+        if isAuthenticated || pendingMfaSignIn {
+            firebaseAuth.markRestoredNoticeDismissed()
+            if case .restoredAcknowledgement = pendingModerationNotice?.kind {
+                pendingModerationNotice = nil
+            }
+            Task { await firebaseAuth.clearPendingAccountRestoredNoticeIfNeeded() }
+            return
+        }
+        if firebaseAuth.hasDismissedRestoredNotice() { return }
+        firebaseAuth.markRequiresRestoredAcknowledgement()
+        pendingModerationNotice = ModerationNotice(kind: .restoredAcknowledgement)
+        print("♻️ Showing account restored acknowledgement")
     }
 
     /// Backward-compatible alias used by older call sites.
@@ -1245,6 +1347,20 @@ class AppStateManager: ObservableObject {
                     try await firebaseAuth.clearPendingAccountDeletedNotice()
                 } catch {
                     print("⚠️ Failed to clear account deleted notice: \(error.localizedDescription)")
+                }
+            }
+
+        case .restoredAcknowledgement:
+            // Signed-out handoff only. Never sign the user out after a successful MFA login.
+            pendingModerationNotice = nil
+            isDismissingModerationNotice = false
+            firebaseAuth.markRestoredNoticeDismissed()
+            firebaseAuth.clearRequiresDeletedAcknowledgement()
+            Task {
+                do {
+                    try await firebaseAuth.clearPendingAccountRestoredNotice()
+                } catch {
+                    print("⚠️ Failed to clear account restored notice: \(error.localizedDescription)")
                 }
             }
 

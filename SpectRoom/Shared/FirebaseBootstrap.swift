@@ -83,6 +83,66 @@ enum FirebaseBootstrap {
         applyDebugPhoneAuthSettingsUnlocked()
     }
 
+    /// Call immediately before MFA phone verify on Simulator so Firebase's 1s
+    /// notification-forwarding probe cannot fail and block test numbers.
+    static func prepareSimulatorMfaPhoneVerify() {
+        #if DEBUG
+        #if targetEnvironment(simulator)
+        applyDebugPhoneAuthSettings()
+        SimulatorPhoneAuthSupport.enableForMfaIfNeeded()
+        // Keep re-asserting the probe while Firebase's checkNotificationForwarding() runs.
+        let probe: [AnyHashable: Any] = [
+            "com.google.firebase.auth": [
+                "warning": "This fake notification should be forwarded to Firebase Auth."
+            ]
+        ]
+        for _ in 0..<30 {
+            _ = Auth.auth().canHandleNotification(probe)
+        }
+        #endif
+        #endif
+    }
+
+    /// MFA *sign-in* on Simulator cannot use `isAppVerificationDisabledForTesting`:
+    /// that SDK path posts the obfuscated hint (`+*******2907`) as E.164 and fails.
+    /// Keep the notification probe, turn test-mode OFF, and use reCAPTCHA instead.
+    /// Console test numbers still accept the fixed code (e.g. 123456).
+    static func prepareSimulatorMfaSignInVerify() {
+        #if DEBUG
+        #if targetEnvironment(simulator)
+        guard FirebaseApp.app() != nil else { return }
+        Auth.auth().settings?.isAppVerificationDisabledForTesting = false
+        SimulatorPhoneAuthSupport.enableNotificationProbeIfNeeded()
+        let probe: [AnyHashable: Any] = [
+            "com.google.firebase.auth": [
+                "warning": "This fake notification should be forwarded to Firebase Auth."
+            ]
+        ]
+        for _ in 0..<30 {
+            _ = Auth.auth().canHandleNotification(probe)
+        }
+        print("✅ Phone/MFA sign-in: testMode OFF (simulator) — use reCAPTCHA + Console test code")
+        #endif
+        #endif
+    }
+
+    /// Spams the Auth notification probe for ~1.5s (Firebase's forwarding timeout is 1s).
+    static func sustainSimulatorMfaNotificationProbe() async {
+        #if DEBUG
+        #if targetEnvironment(simulator)
+        let probe: [AnyHashable: Any] = [
+            "com.google.firebase.auth": [
+                "warning": "This fake notification should be forwarded to Firebase Auth."
+            ]
+        ]
+        for _ in 0..<40 {
+            _ = Auth.auth().canHandleNotification(probe)
+            try? await Task.sleep(nanoseconds: 40_000_000)
+        }
+        #endif
+        #endif
+    }
+
     private static func applyDebugPhoneAuthSettingsUnlocked() {
         #if DEBUG
         guard FirebaseApp.app() != nil else { return }
@@ -92,6 +152,10 @@ enum FirebaseBootstrap {
         }
         #if targetEnvironment(simulator)
         settings.isAppVerificationDisabledForTesting = true
+        // PhoneAuthProvider still checks notification forwarding BEFORE test-mode
+        // short-circuit. On Simulator the AppDelegate probe often misses (1s timeout),
+        // which yields notificationNotForwarded and blocks MFA even for Console test numbers.
+        satisfyAuthNotificationForwardingProbeUnlocked()
         print("✅ Phone/MFA test mode ON (simulator). Use Console test numbers. Flag=\(settings.isAppVerificationDisabledForTesting)")
         #else
         settings.isAppVerificationDisabledForTesting = false
@@ -100,6 +164,21 @@ enum FirebaseBootstrap {
         } else {
             print("⚠️ Phone/MFA: GoogleService-Info.plist is missing CLIENT_ID — reCAPTCHA may fail. Enable Google Sign-In once and re-download the plist.")
         }
+        #endif
+        #endif
+    }
+
+    /// Marks Firebase Auth's notification-forwarding probe as satisfied (Simulator / DEBUG).
+    private static func satisfyAuthNotificationForwardingProbeUnlocked() {
+        #if DEBUG
+        #if targetEnvironment(simulator)
+        let probe: [AnyHashable: Any] = [
+            "com.google.firebase.auth": [
+                "warning": "This fake notification should be forwarded to Firebase Auth."
+            ]
+        ]
+        let handled = Auth.auth().canHandleNotification(probe)
+        print("📱 Auth notification forwarding probe injected (handled=\(handled))")
         #endif
         #endif
     }

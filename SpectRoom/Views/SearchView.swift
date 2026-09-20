@@ -2488,7 +2488,9 @@ struct SwipeableProfileCard: View {
                          + Text(String(format: "search.match.suffix".localized, profileFirstName)))
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(SpectRoomTheme.text)
+                            .multilineTextAlignment(.center)
                             .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .center)
                     }
                 }
                 .padding(.horizontal, 18)
@@ -3100,7 +3102,7 @@ struct UserProfileModal: View {
                     }
                 )
             } else if showingReportThankYou {
-                ReportThankYouOverlay {
+                ReportThankYouOverlay(didBlock: true) {
                     showingReportThankYou = false
                     dismiss()
                 }

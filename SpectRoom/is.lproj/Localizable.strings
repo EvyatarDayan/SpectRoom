@@ -115,7 +115,8 @@
 "settings.about.description" = "App útgáfa og upplýsingar";
 "settings.about.app.version" = "Appútgáfa: Beta";
 "settings.sign.out" = "Skráðu þig út";
-"settings.sign.out.confirm.title" = "Ertu viss?";
+"settings.sign.out.confirm.title" = "Skrá út?";
+"settings.sign.out.confirm.message" = "Ertu viss um að þú viljir skrá þig út?";
 "settings.sign.out.confirm.yes" = "Já";
 "settings.development" = "Þróun";
 "settings.reset.user.data" = "Endurstilla notendagögn";
@@ -144,10 +145,14 @@
 "settings.reported.profiles.since" = "Tilkynnt %@";
 "settings.reported.profiles.no.date" = "Tilkynnt";
 "settings.reported.profiles.detail.title" = "Tilkynna upplýsingar";
-"settings.reported.profiles.detail.headline" = "%@ var tilkynnt á %@";
-"settings.reported.profiles.detail.headline.no.date" = "Tilkynnt var um %@";
+"settings.reported.profiles.detail.headline" = "Tilkynning um %@";
+"settings.reported.profiles.detail.headline.no.date" = "Tilkynning um %@";
+"settings.reported.profiles.detail.date.line" = "Dagsetning: %@";
 "settings.reported.profiles.detail.category" = "Tilkynna ástæðu";
+"settings.reported.profiles.detail.category.line" = "Ástæða tilkynningar: %@";
 "settings.reported.profiles.detail.details" = "Skýrsluupplýsingar";
+"settings.reported.profiles.detail.details.line" = "Upplýsingar: %@";
+"settings.reported.profiles.detail.see.details" = "Sjá upplýsingar";
 "settings.reported.profiles.detail.status" = "Staða";
 "settings.reported.profiles.detail.bio" = "Lífsmynd við skýrslutöku";
 "settings.reported.profiles.status.pending" = "Í bið";
@@ -179,6 +184,9 @@
 "settings.delete.account.confirm.yes" = "Já";
 "settings.delete.account.type.message" = "Til að eyða reikningnum þínum skaltu slá inn lykilorðið þitt";
 "settings.delete.account.type.placeholder" = "Lykilorð";
+"settings.delete.account.mfa.message" = "Sláðu inn 6 stafa kóðann sem við sendum á %@";
+"settings.delete.account.mfa.placeholder" = "6 stafa kóði";
+"settings.delete.account.mfa.resend" = "Senda kóða aftur";
 "settings.delete.account.confirm.ok" = "OK";
 "settings.delete.account.error" = "Gat ekki eytt reikningnum þínum. Vinsamlegast reyndu aftur.";
 "settings.delete.account.wrong.password" = "Rangt lykilorð, reyndu aftur.";
@@ -276,11 +284,14 @@
 "admin.ban.popup.message" = "SpectRoom reikningurinn þinn hefur verið bannaður varanlega vegna brota á samfélagsreglum okkar.\n\nÞú munt ekki lengur hafa aðgang að þessum reikningi. Ef þú telur að þetta hafi verið gert fyrir mistök geturðu sent inn áfrýjun til stuðnings.";
 "admin.ban.popup.accept" = "Ég skil";
 "admin.deleted.popup.title" = "Reikningi eytt";
-"admin.deleted.popup.message" = "SpectRoom reikningnum þínum hefur verið eytt varanlega.\n\nÞú munt ekki lengur hafa aðgang að þessum reikningi. Ef þú telur að þetta hafi verið gert fyrir mistök geturðu sent inn áfrýjun til stuðnings.";
+"admin.deleted.popup.message" = "SpectRoom reikningnum þínum hefur verið eytt.\n\nÞú munt ekki lengur hafa aðgang að þessum reikningi. Ef þú telur að þetta hafi verið gert fyrir mistök geturðu sent inn áfrýjun til stuðnings.";
 "admin.deleted.popup.accept" = "Ég skil";
 "admin.ban.lifted.popup.title" = "Reikningsbanni aflétt";
 "admin.ban.lifted.popup.message" = "Banninu þínu á SpectRoom reikningnum þínum hefur verið aflétt.\n\nÞú getur notað SpectRoom aftur.";
 "admin.ban.lifted.popup.accept" = "Ég skil";
+"admin.restored.popup.title" = "Aðgangur endurheimtur";
+"admin.restored.popup.message" = "SpectRoom aðgangurinn þinn er virkur aftur.\n\nÞú getur skráð þig inn aftur.";
+"admin.restored.popup.accept" = "Skrá inn";
 "admin.freeze.login.message" = "Reikningurinn þinn er frystur tímabundið.\n\nReyndu að skrá þig inn eftir %@.";
 "admin.freeze.push.title" = "Reikningur frystur tímabundið";
 "admin.freeze.push.body" = "SpectRoom reikningurinn þinn hefur verið frystur tímabundið. Opnaðu appið til að fá upplýsingar.";
@@ -375,8 +386,8 @@
 "auth.mfa.error.rate.limited" = "Það lítur út fyrir að beðið hafi verið um of marga kóða frá þessu tæki. Vinsamlegast reyndu aftur eftir um það bil 1 klukkustund.";
 "auth.mfa.error.invalid.code" = "Rangur staðfestingarkóði, reyndu aftur.";
 "auth.mfa.error.session" = "Þessi staðfestingarlota rann út. Biðja um nýjan kóða.";
-"auth.mfa.error.send" = "Gat ekki sent SMS kóðann. Reyndu aftur.";
-"auth.mfa.error.sms.unavailable" = "Við gátum ekki lokið SMS staðfestingu. Reyndu aftur eða hafðu samband við þjónustuver ef vandamálið heldur áfram.";
+"auth.mfa.error.send" = "Gat ekki sent SMS. Pikkaðu á Endursenda, eða hafðu samband við þjónustuver ef vandamálið heldur áfram.";
+"auth.mfa.error.sms.unavailable" = "Gat ekki sent SMS til %@. Pikkaðu á Endursenda, eða hafðu samband við þjónustuver ef vandamálið heldur áfram.";
 "auth.mfa.error.factor" = "Enginn annar stuðull símans er tiltækur fyrir þennan reikning.";
 "auth.mfa.phone.missing.title" = "Bættu við símanúmerinu þínu";
 "auth.mfa.phone.missing.save" = "Haltu áfram með þetta númer";
@@ -390,10 +401,10 @@
 "auth.mfa.sign.out" = "Skráðu þig út og byrjaðu upp á nýtt";
 "auth.mfa.phone.using" = "Sími fyrir 2FA: %@";
 "auth.mfa.error.app.verification" = "Ekki tókst að senda SMS kóðann á þessu tæki ennþá. Notaðu Firebase prófunarsímanúmer í DEBUG, eða reyndu aftur / notaðu alvöru iPhone. Þú heldur áfram að skrá þig inn — pikkaðu á Í lagi og reyndu aftur.";
-"auth.mfa.error.sms.detail" = "Gat ekki sent SMS kóðann.\n\nHermir: bættu þessu númeri við undir Firebase Console → Authentication → Innskráningaraðferð → Sími → „Símanúmer til að prófa“, stilltu kóðann 123456, pikkaðu síðan á Endursenda.\n\nRaunverulegur iPhone: leyfðu tilkynningar, bíddu í smá stund, bankaðu á Senda aftur. Þú gætir séð stutta reCAPTCHA ávísun.\n\nNúmer:\n%@";
-"auth.mfa.error.sms.device" = "Gat ekki sent SMS til %@.\n\nÁ alvöru iPhone:\n1. Leyfa tilkynningar þegar beðið er um það\n2. Notaðu farsíma-/Wi-Fi tengingu\n3. Pikkaðu á Senda kóða aftur\n4. Ljúktu við reCAPTCHA ef það birtist\n\nStaðfestu einnig að Firebase Console sé með Phone + SMS MFA virkt og APNs lykil er hlaðið upp (Verkefnastillingar → Cloud Messaging).";
-"auth.mfa.error.sms.client" = "Gat ekki staðfest þetta forrit áður en SMS var sent til %@.\n\nPikkaðu á Senda aftur og kláraðu reCAPTCHA ef það birtist. Ef það heldur áfram að mistakast skaltu staðfesta að GoogleService-Info.plist innihaldi CLIENT_ID / REVERSED_CLIENT_ID (virkjaðu Google Innskráningu einu sinni í Firebase og hlaða niður plistanum aftur) og að vefslóð vefslóðakerfis fyrir snúið auðkenni viðskiptavinar sé í appinu.";
-"auth.mfa.error.sms.debug" = "Gat ekki sent SMS til %@.\n\nVEGLA: bættu þessu númeri við undir Firebase Console → Authentication → Sími → Símanúmer fyrir prófun (kóði 123456), endurbyggðu og pikkaðu svo á Endursenda.\n\nAthugaðu einnig Xcode stjórnborðið fyrir „Sími/MFA prófunarhamur ON“ og „APN-lykil send til Firebase Auth“.";
+"auth.mfa.error.sms.detail" = "Gat ekki sent SMS til %@. Pikkaðu á Endursenda, eða hafðu samband við þjónustuver ef vandamálið heldur áfram.";
+"auth.mfa.error.sms.device" = "Gat ekki sent SMS til %@. Pikkaðu á Endursenda, eða hafðu samband við þjónustuver ef vandamálið heldur áfram.";
+"auth.mfa.error.sms.client" = "Gat ekki sent SMS til %@. Pikkaðu á Endursenda, eða hafðu samband við þjónustuver ef vandamálið heldur áfram.";
+"auth.mfa.error.sms.debug" = "Gat ekki sent SMS til %@. Pikkaðu á Endursenda, eða hafðu samband við þjónustuver ef vandamálið heldur áfram.";
 
 "address.search.map.placeholder" = "Leitaðu til að forskoða staðsetninguna";
 "address.search.use.address" = "Notaðu þetta heimilisfang";
@@ -454,7 +465,7 @@
 "profile.block.confirm.block.and.report" = "Lokaðu og tilkynntu";
 "profile.report.confirm.title" = "Tilkynna %@?";
 "profile.report.confirm.message" = "Þú getur tilkynnt %@, eða tilkynnt og lokað á viðkomandi svo hann geti ekki lengur sent þér skilaboð eða séð prófílinn þinn.";
-"profile.report.confirm.report.and.block" = "Tilkynna og loka";
+"profile.report.confirm.report.and.block" = "Tilkynna & loka";
 "profile.report.confirm.action" = "Tilkynna";
 "profile.report.blocked.notice" = "%@ hefur verið lokað!";
 "profile.report.notice" = "Tilkynna %@";
@@ -467,6 +478,9 @@
 "profile.report.reason.something.else" = "Eitthvað annað";
 "profile.report.something.else.placeholder" = "Segðu okkur meira...";
 "profile.report.submit" = "Skýrsla";
+"profile.report.submitted.title" = "Tilkynning send";
+"profile.report.submitted.body" = "Takk fyrir að halda samfélaginu okkar öruggu. Teymið okkar mun yfirfara þessa tilkynningu fljótlega.";
+"profile.report.submitted.body.blocked" = "Takk fyrir að halda samfélaginu okkar öruggu. Teymið okkar mun yfirfara þessa tilkynningu fljótlega. Við höfum einnig sjálfkrafa lokað á þennan prófíl svo viðkomandi geti ekki lengur séð þig eða haft samband.";
 "profile.report.thank.you" = "Takk fyrir að halda samfélaginu okkar öruggu!";
 "profile.actions.title" = "Aðgerðir";
 "profile.unlike.title" = "Ólíkt þessum prófíl";
@@ -569,6 +583,7 @@
 "messages.photo.share.warning.continue" = "Halda áfram";
 "messages.photo.share.warning.understand" = "Ég skil";
 "messages.conversation.blocked" = "Lokað";
+"messages.copy.menu" = "Afrita";
 "messages.report.menu" = "Tilkynna";
 "messages.delete.menu" = "Eyða";
 "messages.delete.title" = "Eyða skilaboðum";
@@ -927,7 +942,7 @@
 "billing.modal.title" = "Staðfesta áætlunarbreytingu";
 "billing.modal.confirm" = "Staðfesta";
 "billing.change.confirm.message" = "Ertu viss um að þú viljir skipta áætlun úr %@ yfir í %@?";
-"billing.change.success.message" = "Áætluninni var breytt yfir í %@.";
+"billing.change.success.message" = "Áætlunin þín hefur verið breytt yfir í %@.";
 "billing.change.success.title" = "Áætlun breytt";
 "billing.modal.switching.to" = "Skiptir yfir í %@";
 "billing.modal.proration" = "Þér verður rukkað %@ fyrir %@-áætlunina. Ónotuð tími á núverandi áætlun er jafnaður sjálfkrafa.";

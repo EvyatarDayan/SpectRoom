@@ -93,6 +93,7 @@ struct SpectRoomApp: App {
                     message: notice.message,
                     acceptLabel: notice.acceptLabel,
                     requiresCheckbox: notice.requiresCheckbox,
+                    acceptButtonColor: notice.usesBlueAcceptButton ? .blue : .orange,
                     secondaryLinkTitle: notice.showsContactSupport ? notice.contactSupportLabel : nil,
                     onSecondaryLink: notice.showsContactSupport
                         ? {
@@ -213,6 +214,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
         FirebaseAuthService.shared.startAuthListening()
         Self.forwardPendingAPNsTokenToAuthIfPossible()
+        // Ensure MFA test-mode probe is satisfied after Auth listeners are live.
+        FirebaseBootstrap.applyDebugPhoneAuthSettings()
 
         UNUserNotificationCenter.current().delegate = self
         Messaging.messaging().delegate = self
@@ -389,9 +392,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             } else {
                 print("⚠️ Message notification tap missing senderId")
             }
-        case "moderation_warning", "moderation_freeze", "moderation_freeze_extended", "moderation_unfreeze", "moderation_ban", "moderation_unban":
+        case "moderation_warning", "moderation_freeze", "moderation_freeze_extended", "moderation_unfreeze", "moderation_ban", "moderation_unban", "moderation_account_restored":
             print("📱 User opened moderation notification: \(type ?? "")")
             Task { @MainActor in
+                if type == "moderation_account_restored" {
+                    AppStateManager.shared.presentAccountRestoredNotice()
+                }
                 AppStateManager.shared.startListeningForModerationStatus()
                 await AppStateManager.shared.refreshPendingModerationNotice()
             }
@@ -407,6 +413,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         switch type {
         case "moderation_warning", "moderation_freeze", "moderation_freeze_extended", "moderation_ban", "moderation_unban":
             Task { @MainActor in
+                AppStateManager.shared.startListeningForModerationStatus()
+                await AppStateManager.shared.refreshPendingModerationNotice()
+            }
+        case "moderation_account_restored":
+            Task { @MainActor in
+                AppStateManager.shared.presentAccountRestoredNotice()
                 AppStateManager.shared.startListeningForModerationStatus()
                 await AppStateManager.shared.refreshPendingModerationNotice()
             }

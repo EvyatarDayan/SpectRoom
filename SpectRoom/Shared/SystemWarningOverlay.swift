@@ -6,6 +6,7 @@ struct SystemWarningOverlay: View {
     let message: String
     var acceptLabel: String = "admin.warning.popup.accept".localized
     var requiresCheckbox: Bool = true
+    var acceptButtonColor: Color = .orange
     var secondaryLinkTitle: String? = nil
     var onSecondaryLink: (() -> Void)? = nil
     let onDismiss: () -> Void
@@ -40,7 +41,7 @@ struct SystemWarningOverlay: View {
                         HStack(alignment: .center, spacing: 10) {
                             Image(systemName: didAccept ? "checkmark.square.fill" : "square")
                                 .font(.system(size: 20, weight: .medium))
-                                .foregroundColor(didAccept ? .orange : SpectRoomTheme.secondaryText)
+                                .foregroundColor(didAccept ? acceptButtonColor : SpectRoomTheme.secondaryText)
                                 .frame(width: 22, height: 22)
 
                             Text(acceptLabel)
@@ -61,7 +62,7 @@ struct SystemWarningOverlay: View {
                             .foregroundColor(didAccept ? .white : SpectRoomTheme.secondaryText)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
-                            .background(didAccept ? Color.orange : Color(.systemGray5))
+                            .background(didAccept ? acceptButtonColor : Color(.systemGray5))
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
@@ -75,7 +76,7 @@ struct SystemWarningOverlay: View {
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
-                            .background(Color.orange)
+                            .background(acceptButtonColor)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)

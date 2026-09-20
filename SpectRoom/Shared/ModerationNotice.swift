@@ -17,6 +17,8 @@ struct ModerationNotice: Equatable {
         case deletedAcknowledgement
         /// Shown after a login attempt while the account was deleted by admin.
         case loginDeleted
+        /// Soft-deleted account was restored — acknowledge, then go to onboarding/sign-in.
+        case restoredAcknowledgement
     }
 
     let kind: Kind
@@ -33,6 +35,8 @@ struct ModerationNotice: Equatable {
             return "admin.ban.lifted.popup.title".localized
         case .deletedAcknowledgement, .loginDeleted:
             return "admin.deleted.popup.title".localized
+        case .restoredAcknowledgement:
+            return "admin.restored.popup.title".localized
         }
     }
 
@@ -59,6 +63,8 @@ struct ModerationNotice: Equatable {
             return "admin.ban.lifted.popup.message".localized
         case .deletedAcknowledgement, .loginDeleted:
             return "admin.deleted.popup.message".localized
+        case .restoredAcknowledgement:
+            return "admin.restored.popup.message".localized
         }
     }
 
@@ -66,6 +72,7 @@ struct ModerationNotice: Equatable {
         switch kind {
         case .freezeAcknowledgement, .banAcknowledgement, .deletedAcknowledgement:
             return true
+        // Restored is a signed-out handoff; dismiss only routes to sign-in (no forced re-logout loop).
         default:
             return false
         }
@@ -99,7 +106,15 @@ struct ModerationNotice: Equatable {
             return "admin.ban.lifted.popup.accept".localized
         case .deletedAcknowledgement, .loginDeleted:
             return "admin.deleted.popup.accept".localized
+        case .restoredAcknowledgement:
+            return "admin.restored.popup.accept".localized
         }
+    }
+
+    /// Restore handoff uses a blue primary CTA; other moderation notices stay orange.
+    var usesBlueAcceptButton: Bool {
+        if case .restoredAcknowledgement = kind { return true }
+        return false
     }
 
     var contactSupportLabel: String {

@@ -115,7 +115,8 @@
 "settings.about.description" = "Sovelluksen versio ja tiedot";
 "settings.about.app.version" = "Sovellusversio: Beta";
 "settings.sign.out" = "Kirjaudu ulos";
-"settings.sign.out.confirm.title" = "Oletko varma?";
+"settings.sign.out.confirm.title" = "Kirjaudu ulos?";
+"settings.sign.out.confirm.message" = "Haluatko varmasti kirjautua ulos?";
 "settings.sign.out.confirm.yes" = "Kyllä";
 "settings.development" = "Kehitys";
 "settings.reset.user.data" = "Nollaa käyttäjätiedot";
@@ -144,10 +145,14 @@
 "settings.reported.profiles.since" = "Ilmoitettu %@";
 "settings.reported.profiles.no.date" = "Ilmoitettu";
 "settings.reported.profiles.detail.title" = "Raportin tiedot";
-"settings.reported.profiles.detail.headline" = "%@ raportoitiin %@";
-"settings.reported.profiles.detail.headline.no.date" = "%@ raportoitiin";
+"settings.reported.profiles.detail.headline" = "Raportti käyttäjästä %@";
+"settings.reported.profiles.detail.headline.no.date" = "Raportti käyttäjästä %@";
+"settings.reported.profiles.detail.date.line" = "Päivämäärä: %@";
 "settings.reported.profiles.detail.category" = "Ilmoita syy";
+"settings.reported.profiles.detail.category.line" = "Ilmoituksen syy: %@";
 "settings.reported.profiles.detail.details" = "Raportin tiedot";
+"settings.reported.profiles.detail.details.line" = "Raportin tiedot: %@";
+"settings.reported.profiles.detail.see.details" = "Katso tiedot";
 "settings.reported.profiles.detail.status" = "Status";
 "settings.reported.profiles.detail.bio" = "Bio raportointihetkellä";
 "settings.reported.profiles.status.pending" = "Odottaa";
@@ -179,6 +184,9 @@
 "settings.delete.account.confirm.yes" = "Kyllä";
 "settings.delete.account.type.message" = "Voit poistaa tilisi syöttämällä salasanasi";
 "settings.delete.account.type.placeholder" = "Salasana";
+"settings.delete.account.mfa.message" = "Syötä 6-numeroinen koodi, jonka lähetimme numeroon %@";
+"settings.delete.account.mfa.placeholder" = "6-numeroinen koodi";
+"settings.delete.account.mfa.resend" = "Lähetä koodi uudelleen";
 "settings.delete.account.confirm.ok" = "OK";
 "settings.delete.account.error" = "Tiliäsi ei voitu poistaa. Yritä uudelleen.";
 "settings.delete.account.wrong.password" = "Väärä salasana, yritä uudelleen.";
@@ -276,11 +284,14 @@
 "admin.ban.popup.message" = "SpectRoom-tilisi on estetty pysyvästi yhteisön sääntöjemme rikkomisen vuoksi.\n\nEt voi enää käyttää tätä tiliä. Jos uskot, että tämä on tehty virheellisesti, voit lähettää valituksen tukeen.";
 "admin.ban.popup.accept" = "Ymmärrän";
 "admin.deleted.popup.title" = "Tili poistettu";
-"admin.deleted.popup.message" = "SpectRoom-tilisi on poistettu pysyvästi.\n\nEt voi enää käyttää tätä tiliä. Jos uskot, että tämä on tehty virheellisesti, voit lähettää valituksen tukeen.";
+"admin.deleted.popup.message" = "SpectRoom-tilisi on poistettu.\n\nEt voi enää käyttää tätä tiliä. Jos uskot, että tämä on tehty virheellisesti, voit lähettää valituksen tukeen.";
 "admin.deleted.popup.accept" = "Ymmärrän";
 "admin.ban.lifted.popup.title" = "Tilikielto poistettu";
 "admin.ban.lifted.popup.message" = "SpectRoom-tilisi kielto on poistettu.\n\nVoit käyttää SpectRoomia uudelleen.";
 "admin.ban.lifted.popup.accept" = "Ymmärrän";
+"admin.restored.popup.title" = "Tili palautettu";
+"admin.restored.popup.message" = "SpectRoom-tilisi on taas aktiivinen.\n\nVoit kirjautua sisään uudelleen.";
+"admin.restored.popup.accept" = "Kirjaudu sisään";
 "admin.freeze.login.message" = "Tilisi on väliaikaisesti jäädytetty.\n\nYritä kirjautua sisään %@ jälkeen.";
 "admin.freeze.push.title" = "Tili jäädytetty väliaikaisesti";
 "admin.freeze.push.body" = "SpectRoom-tilisi on väliaikaisesti jäädytetty. Avaa sovellus saadaksesi lisätietoja.";
@@ -375,8 +386,8 @@
 "auth.mfa.error.rate.limited" = "Näyttää siltä, ​​että tältä laitteelta pyydettiin liian monta koodia. Yritä uudelleen noin tunnin kuluttua.";
 "auth.mfa.error.invalid.code" = "Virheellinen vahvistuskoodi, yritä uudelleen.";
 "auth.mfa.error.session" = "Tämä vahvistusistunto vanhentui. Pyydä uusi koodi.";
-"auth.mfa.error.send" = "SMS-koodia ei voitu lähettää. Yritä uudelleen.";
-"auth.mfa.error.sms.unavailable" = "Emme voineet suorittaa tekstiviestivahvistusta loppuun. Yritä uudelleen tai ota yhteyttä tukeen, jos ongelma jatkuu.";
+"auth.mfa.error.send" = "Tekstiviestiä ei voitu lähettää. Napauta Lähetä uudelleen, tai ota yhteyttä tukeen, jos ongelma jatkuu.";
+"auth.mfa.error.sms.unavailable" = "Tekstiviestiä ei voitu lähettää numeroon %@. Napauta Lähetä uudelleen, tai ota yhteyttä tukeen, jos ongelma jatkuu.";
 "auth.mfa.error.factor" = "Tälle tilille ei ole saatavilla puhelimen toista tekijää.";
 "auth.mfa.phone.missing.title" = "Lisää puhelinnumerosi";
 "auth.mfa.phone.missing.save" = "Jatka tällä numerolla";
@@ -390,10 +401,10 @@
 "auth.mfa.sign.out" = "Kirjaudu ulos ja aloita alusta";
 "auth.mfa.phone.using" = "Puhelin 2FA:lle: %@";
 "auth.mfa.error.app.verification" = "Tekstiviestikoodia ei voitu lähettää vielä tälle laitteelle. Käytä Firebasen testipuhelinnumeroa DEBUGissa tai yritä uudelleen / käytä oikeaa iPhonea. Pysyt kirjautuneena – napauta OK ja yritä uudelleen.";
-"auth.mfa.error.sms.detail" = "Tekstiviestikoodia ei voitu lähettää.\n\nSimulaattori: lisää tämä numero kohtaan Firebase-konsoli → Todennus → Kirjautumistapa → Puhelin → \"Puhelinnumerot testausta varten\", aseta koodi 123456 ja napauta sitten Lähetä uudelleen.\n\nOikea iPhone: salli ilmoitukset, odota hetki ja napauta Lähetä uudelleen. Saatat nähdä lyhyen reCAPTCHA-tarkistuksen.\n\nNumero:\n%@";
-"auth.mfa.error.sms.device" = "Tekstiviestiä ei voitu lähettää numeroon %@.\n\nOikealla iPhonella:\n1. Salli ilmoitukset pyydettäessä\n2. Käytä matkapuhelin-/Wi-Fi-yhteyttä\n3. Napauta Lähetä koodi uudelleen\n4. Täytä reCAPTCHA, jos se tulee näkyviin\n\nVarmista myös, että Firebase-konsolissa on puhelimen ja tekstiviestien MFA käytössä ja APN-avain ladattu (Projektiasetukset → Cloud Messaging).";
-"auth.mfa.error.sms.client" = "Tätä sovellusta ei voitu vahvistaa ennen tekstiviestin lähettämistä numeroon %@.\n\nNapauta Lähetä uudelleen ja täytä reCAPTCHA, jos se tulee näkyviin. Jos se epäonnistuu jatkuvasti, varmista, että GoogleService-Info.plist sisältää CLIENT_ID / REVERSED_CLIENT_ID (ota Google-sisäänkirjautuminen käyttöön kerran Firebasessa ja lataa plist uudelleen) ja että käänteinen asiakastunnuksen URL-osoite on sovelluksessa.";
-"auth.mfa.error.sms.debug" = "Tekstiviestiä ei voitu lähettää numeroon %@.\n\nDEBUG: lisää tämä numero kohtaan Firebase-konsoli → Todennus → Puhelin → Puhelinnumerot testausta varten (koodi 123456), kokoa uudelleen ja napauta sitten Lähetä uudelleen.\n\nTarkista myös Xcode-konsolista \"Puhelin/MFA-testitila PÄÄLLÄ\" ja \"APN-tunnus välitetty Firebase Authille\".";
+"auth.mfa.error.sms.detail" = "Tekstiviestiä ei voitu lähettää numeroon %@. Napauta Lähetä uudelleen, tai ota yhteyttä tukeen, jos ongelma jatkuu.";
+"auth.mfa.error.sms.device" = "Tekstiviestiä ei voitu lähettää numeroon %@. Napauta Lähetä uudelleen, tai ota yhteyttä tukeen, jos ongelma jatkuu.";
+"auth.mfa.error.sms.client" = "Tekstiviestiä ei voitu lähettää numeroon %@. Napauta Lähetä uudelleen, tai ota yhteyttä tukeen, jos ongelma jatkuu.";
+"auth.mfa.error.sms.debug" = "Tekstiviestiä ei voitu lähettää numeroon %@. Napauta Lähetä uudelleen, tai ota yhteyttä tukeen, jos ongelma jatkuu.";
 
 "address.search.map.placeholder" = "Hae esikatsellaksesi sijaintia";
 "address.search.use.address" = "Käytä tätä osoitetta";
@@ -454,7 +465,7 @@
 "profile.block.confirm.block.and.report" = "Estä ja tee ilmoitus";
 "profile.report.confirm.title" = "Ilmoita %@?";
 "profile.report.confirm.message" = "Voit ilmoittaa käyttäjän %@ tai ilmoittaa ja estää, jotta hän ei enää voi lähettää viestejä tai nähdä profiiliasi.";
-"profile.report.confirm.report.and.block" = "Ilmoita ja estä";
+"profile.report.confirm.report.and.block" = "Ilmoita & estä";
 "profile.report.confirm.action" = "Ilmoita";
 "profile.report.blocked.notice" = "%@ on estetty!";
 "profile.report.notice" = "Ilmoita %@";
@@ -467,6 +478,9 @@
 "profile.report.reason.something.else" = "Jotain muuta";
 "profile.report.something.else.placeholder" = "Kerro meille lisää...";
 "profile.report.submit" = "Raportoi";
+"profile.report.submitted.title" = "Ilmoitus lähetetty";
+"profile.report.submitted.body" = "Kiitos, että pidät yhteisömme turvassa. Tiimimme tarkistaa tämän ilmoituksen pian.";
+"profile.report.submitted.body.blocked" = "Kiitos, että pidät yhteisömme turvassa. Tiimimme tarkistaa tämän ilmoituksen pian. Olemme myös estäneet tämän profiilin automaattisesti, jotta he eivät enää voi nähdä sinua tai ottaa yhteyttä.";
 "profile.report.thank.you" = "Kiitos, että pidät yhteisömme turvassa!";
 "profile.actions.title" = "Toiminnot";
 "profile.unlike.title" = "Toisin kuin tämä profiili";
@@ -569,6 +583,7 @@
 "messages.photo.share.warning.continue" = "Jatkaa";
 "messages.photo.share.warning.understand" = "Ymmärrän";
 "messages.conversation.blocked" = "Estetty";
+"messages.copy.menu" = "Kopioi";
 "messages.report.menu" = "Ilmoita";
 "messages.delete.menu" = "Poista";
 "messages.delete.title" = "Poista viesti";
@@ -927,7 +942,7 @@
 "billing.modal.title" = "Vahvista paketin vaihto";
 "billing.modal.confirm" = "Vahvista";
 "billing.change.confirm.message" = "Haluatko varmasti vaihtaa tilauksesi tasolta %@ tasolle %@?";
-"billing.change.success.message" = "Tilaus vaihdettiin onnistuneesti tasolle %@.";
+"billing.change.success.message" = "Tilauksesi vaihdettiin onnistuneesti tasolle %@.";
 "billing.change.success.title" = "Tilaus vaihdettu";
 "billing.modal.switching.to" = "Vaihdetaan pakettiin %@";
 "billing.modal.proration" = "Sinulta veloitetaan %@ paketista %@. Nykyisen paketin käyttämätön aika hyvitetään automaattisesti.";

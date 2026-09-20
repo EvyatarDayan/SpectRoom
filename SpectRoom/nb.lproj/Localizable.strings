@@ -115,7 +115,8 @@
 "settings.about.description" = "Appversjon og informasjon";
 "settings.about.app.version" = "Appversjon: Beta";
 "settings.sign.out" = "Logg ut";
-"settings.sign.out.confirm.title" = "Er du sikker?";
+"settings.sign.out.confirm.title" = "Logge ut?";
+"settings.sign.out.confirm.message" = "Er du sikker på at du vil logge ut?";
 "settings.sign.out.confirm.yes" = "Ja";
 "settings.development" = "Utvikling";
 "settings.reset.user.data" = "Tilbakestill brukerdata";
@@ -144,10 +145,14 @@
 "settings.reported.profiles.since" = "Rapportert %@";
 "settings.reported.profiles.no.date" = "Rapportert";
 "settings.reported.profiles.detail.title" = "Rapporter detaljer";
-"settings.reported.profiles.detail.headline" = "%@ ble rapportert på %@";
-"settings.reported.profiles.detail.headline.no.date" = "%@ ble rapportert";
+"settings.reported.profiles.detail.headline" = "Rapport om %@";
+"settings.reported.profiles.detail.headline.no.date" = "Rapport om %@";
+"settings.reported.profiles.detail.date.line" = "Dato: %@";
 "settings.reported.profiles.detail.category" = "Rapporter årsak";
+"settings.reported.profiles.detail.category.line" = "Rapporter årsak: %@";
 "settings.reported.profiles.detail.details" = "Rapportdetaljer";
+"settings.reported.profiles.detail.details.line" = "Rapportdetaljer: %@";
+"settings.reported.profiles.detail.see.details" = "Se detaljer";
 "settings.reported.profiles.detail.status" = "Status";
 "settings.reported.profiles.detail.bio" = "Bio på tidspunktet for rapporten";
 "settings.reported.profiles.status.pending" = "I påvente av";
@@ -179,6 +184,9 @@
 "settings.delete.account.confirm.yes" = "Ja";
 "settings.delete.account.type.message" = "For å slette kontoen din, skriv inn passordet ditt";
 "settings.delete.account.type.placeholder" = "Passord";
+"settings.delete.account.mfa.message" = "Skriv inn den 6-sifrede koden vi sendte til %@";
+"settings.delete.account.mfa.placeholder" = "6-sifret kode";
+"settings.delete.account.mfa.resend" = "Send koden på nytt";
 "settings.delete.account.confirm.ok" = "OK";
 "settings.delete.account.error" = "Kunne ikke slette kontoen din. Vennligst prøv igjen.";
 "settings.delete.account.wrong.password" = "Feil passord, prøv igjen.";
@@ -276,11 +284,14 @@
 "admin.ban.popup.message" = "SpectRoom-kontoen din har blitt permanent utestengt for brudd på retningslinjene våre for fellesskapet.\n\nDu vil ikke lenger ha tilgang til denne kontoen. Hvis du mener at dette ble gjort ved en feil, kan du sende inn en klage til support.";
 "admin.ban.popup.accept" = "Jeg forstår";
 "admin.deleted.popup.title" = "Konto slettet";
-"admin.deleted.popup.message" = "SpectRoom-kontoen din er permanent slettet.\n\nDu vil ikke lenger ha tilgang til denne kontoen. Hvis du mener at dette ble gjort ved en feil, kan du sende inn en klage til support.";
+"admin.deleted.popup.message" = "SpectRoom-kontoen din er slettet.\n\nDu vil ikke lenger ha tilgang til denne kontoen. Hvis du mener at dette ble gjort ved en feil, kan du sende inn en klage til support.";
 "admin.deleted.popup.accept" = "Jeg forstår";
 "admin.ban.lifted.popup.title" = "Kontoforbud opphevet";
 "admin.ban.lifted.popup.message" = "Din SpectRoom-kontoforbud er opphevet.\n\nDu kan bruke SpectRoom igjen.";
 "admin.ban.lifted.popup.accept" = "Jeg forstår";
+"admin.restored.popup.title" = "Konto gjenopprettet";
+"admin.restored.popup.message" = "SpectRoom-kontoen din er aktiv igjen.\n\nDu kan logge inn igjen.";
+"admin.restored.popup.accept" = "Logg inn";
 "admin.freeze.login.message" = "Kontoen din er midlertidig frosset.\n\nPrøv å logge på etter %@.";
 "admin.freeze.push.title" = "Kontoen er midlertidig frosset";
 "admin.freeze.push.body" = "SpectRoom-kontoen din har blitt midlertidig frosset. Åpne appen for detaljer.";
@@ -375,8 +386,8 @@
 "auth.mfa.error.rate.limited" = "Det ser ut til at det ble bedt om for mange koder fra denne enheten. Prøv igjen om ca. 1 time.";
 "auth.mfa.error.invalid.code" = "Feil bekreftelseskode. Prøv på nytt.";
 "auth.mfa.error.session" = "Denne bekreftelsesøkten utløp. Be om en ny kode.";
-"auth.mfa.error.send" = "Kunne ikke sende SMS-koden. Prøv igjen.";
-"auth.mfa.error.sms.unavailable" = "Vi kunne ikke fullføre SMS-bekreftelsen. Prøv igjen, eller kontakt support hvis problemet fortsetter.";
+"auth.mfa.error.send" = "Kunne ikke sende SMS. Trykk Send på nytt, eller kontakt support hvis problemet fortsetter.";
+"auth.mfa.error.sms.unavailable" = "Kunne ikke sende SMS til %@. Trykk Send på nytt, eller kontakt support hvis problemet fortsetter.";
 "auth.mfa.error.factor" = "Ingen telefon nummer tofaktor er tilgjengelig for denne kontoen.";
 "auth.mfa.phone.missing.title" = "Legg til telefonnummeret ditt";
 "auth.mfa.phone.missing.save" = "Fortsett med dette nummeret";
@@ -390,10 +401,10 @@
 "auth.mfa.sign.out" = "Logg ut og begynn på nytt";
 "auth.mfa.phone.using" = "Telefon for 2FA: %@";
 "auth.mfa.error.app.verification" = "Kunne ikke sende SMS-koden på denne enheten ennå. Bruk et Firebase-testtelefonnummer i DEBUG, eller prøv igjen / bruk en ekte iPhone. Du forblir pålogget – trykk på OK og prøv på nytt.";
-"auth.mfa.error.sms.detail" = "Kunne ikke sende SMS-koden.\n\nSimulator: legg til dette nummeret under Firebase-konsoll → Autentisering → Påloggingsmetode → Telefon → \"Telefonnumre for testing\", angi kode 123456, og trykk deretter på Send på nytt.\n\nEkte iPhone: tillat varsler, vent et øyeblikk, trykk på Send på nytt. Du kan se en kort reCAPTCHA-sjekk.\n\nAntall:\n%@";
-"auth.mfa.error.sms.device" = "Kunne ikke sende SMS til %@.\n\nPå en ekte iPhone:\n1. Tillat varsler når du blir spurt\n2. Bruk en mobil/Wi-Fi-tilkobling\n3. Trykk på Send kode på nytt\n4. Fullfør reCAPTCHA hvis det vises\n\nBekreft også at Firebase-konsollen har Telefon + SMS MFA aktivert og en APN-nøkkel lastet opp (Prosjektinnstillinger → Cloud Messaging).";
-"auth.mfa.error.sms.client" = "Kunne ikke bekrefte denne appen før du sendte SMS til %@.\n\nTrykk på Send på nytt og fullfør reCAPTCHA hvis det vises. Hvis det fortsetter å mislykkes, bekrefter du at GoogleService-Info.plist inkluderer CLIENT_ID / REVERSED_CLIENT_ID (aktiver Google-pålogging én gang i Firebase og last ned plisten på nytt), og at URL-skjemaet med omvendt klient-ID er i appen.";
-"auth.mfa.error.sms.debug" = "Kunne ikke sende SMS til %@.\n\nDEBUG: legg til dette nummeret under Firebase-konsoll → Autentisering → Telefon → Telefonnumre for testing (kode 123456), bygg på nytt, og trykk deretter på Send på nytt.\n\nSjekk også Xcode-konsollen for \"Telefon/MFA-testmodus PÅ\" og \"APN-token videresendt til Firebase Auth\".";
+"auth.mfa.error.sms.detail" = "Kunne ikke sende SMS til %@. Trykk Send på nytt, eller kontakt support hvis problemet fortsetter.";
+"auth.mfa.error.sms.device" = "Kunne ikke sende SMS til %@. Trykk Send på nytt, eller kontakt support hvis problemet fortsetter.";
+"auth.mfa.error.sms.client" = "Kunne ikke sende SMS til %@. Trykk Send på nytt, eller kontakt support hvis problemet fortsetter.";
+"auth.mfa.error.sms.debug" = "Kunne ikke sende SMS til %@. Trykk Send på nytt, eller kontakt support hvis problemet fortsetter.";
 
 "address.search.map.placeholder" = "Søk for å forhåndsvise plasseringen";
 "address.search.use.address" = "Bruk denne adressen";
@@ -454,7 +465,7 @@
 "profile.block.confirm.block.and.report" = "Blokker og rapporter";
 "profile.report.confirm.title" = "Rapporter %@?";
 "profile.report.confirm.message" = "Du kan rapportere %@, eller rapportere og blokkere slik at personen ikke lenger kan sende deg meldinger eller se profilen din.";
-"profile.report.confirm.report.and.block" = "Rapporter og blokker";
+"profile.report.confirm.report.and.block" = "Rapporter & blokker";
 "profile.report.confirm.action" = "Rapporter";
 "profile.report.blocked.notice" = "%@ har blitt blokkert!";
 "profile.report.notice" = "Rapporter %@";
@@ -467,6 +478,9 @@
 "profile.report.reason.something.else" = "Noe annet";
 "profile.report.something.else.placeholder" = "Fortell oss mer...";
 "profile.report.submit" = "Rapportere";
+"profile.report.submitted.title" = "Rapport sendt";
+"profile.report.submitted.body" = "Takk for at du holder samfunnet vårt trygt. Teamet vårt vil snart gjennomgå denne rapporten.";
+"profile.report.submitted.body.blocked" = "Takk for at du holder samfunnet vårt trygt. Teamet vårt vil snart gjennomgå denne rapporten. Vi har også automatisk blokkert denne profilen, slik at de ikke lenger kan se eller kontakte deg.";
 "profile.report.thank.you" = "Takk for at du holder samfunnet vårt trygt!";
 "profile.actions.title" = "Handlinger";
 "profile.unlike.title" = "I motsetning til denne profilen";
@@ -569,6 +583,7 @@
 "messages.photo.share.warning.continue" = "Fortsette";
 "messages.photo.share.warning.understand" = "Jeg forstår";
 "messages.conversation.blocked" = "Blokkert";
+"messages.copy.menu" = "Kopier";
 "messages.report.menu" = "Rapporter";
 "messages.delete.menu" = "Slett";
 "messages.delete.title" = "Slett melding";
@@ -927,7 +942,7 @@
 "billing.modal.title" = "Bekreft planendring";
 "billing.modal.confirm" = "Bekreft";
 "billing.change.confirm.message" = "Er du sikker på at du vil bytte plan fra %@ til %@?";
-"billing.change.success.message" = "Planen er endret til %@.";
+"billing.change.success.message" = "Planen din er endret til %@.";
 "billing.change.success.title" = "Plan endret";
 "billing.modal.switching.to" = "Bytter til %@";
 "billing.modal.proration" = "Du belastes %@ for %@-planen. Ubrukt tid på gjeldende plan justeres automatisk.";

@@ -414,21 +414,10 @@ class FirebaseAuthService: ObservableObject {
     }
     
     func reauthenticate(withPassword password: String) async throws {
-        guard let user = auth.currentUser, let email = user.email else {
-            throw SpectRoomAuthError.notAuthenticated
-        }
-        
-        guard !password.isEmpty else {
-            throw SpectRoomAuthError.wrongPassword
-        }
-        
-        let credential = EmailAuthProvider.credential(withEmail: email, password: password)
-        do {
-            try await user.reauthenticate(with: credential)
-        } catch {
-            // Any failed reauth in this flow is treated as an incorrect password for UX.
-            print("⚠️ Reauthentication failed: \(error.localizedDescription)")
-            throw SpectRoomAuthError.wrongPassword
+        let outcome = try await reauthenticateWithPossibleMfa(password: password)
+        if case .mfaRequired = outcome {
+            // Caller must continue with `confirmReauthMfa`. Keep the old API failing clearly.
+            throw SpectRoomAuthError.mfaSendFailed
         }
     }
     
@@ -2244,36 +2233,74 @@ class FirebaseAuthService: ObservableObject {
     func clearPendingAccountDeletedNotice() async throws {
         defer { clearRequiresDeletedAcknowledgement() }
 
-        // Auth may already be revoked/deleted by admin — still clear local ack flags.
         guard let userId = auth.currentUser?.uid else {
             print("🗑️ clearPendingAccountDeletedNotice: no Auth user (already signed out)")
             return
         }
-        // Prefer server hard-wipe (Auth + Firestore + Storage). Fall back to clearing the notice only.
+        // Clear the notice only. Do NOT call a hard-wipe Cloud Function — admin restore
+        // within 14 days must keep the same password + MFA. Hard wipe is purge only.
+        do {
+            try await db.collection("users").document(userId).updateData([
+                "pendingAccountDeleted": FieldValue.delete()
+            ])
+        } catch {
+            print("⚠️ Local pendingAccountDeleted clear failed: \(error.localizedDescription)")
+        }
+    }
+
+    func clearPendingAccountRestoredNotice() async throws {
+        defer { clearRequiresRestoredAcknowledgement() }
+
+        guard let userId = auth.currentUser?.uid else {
+            print("♻️ clearPendingAccountRestoredNotice: no Auth user (already signed out)")
+            return
+        }
         do {
             _ = try await Functions.functions(region: "us-central1")
-                .httpsCallable("acknowledgeAccountDeleted")
+                .httpsCallable("acknowledgeAccountRestored")
                 .call([:])
         } catch {
-            print("⚠️ acknowledgeAccountDeleted failed, clearing notice locally: \(error.localizedDescription)")
+            print("⚠️ acknowledgeAccountRestored failed, clearing notice locally: \(error.localizedDescription)")
             do {
                 try await db.collection("users").document(userId).updateData([
-                    "pendingAccountDeleted": FieldValue.delete()
+                    "pendingAccountRestored": FieldValue.delete()
                 ])
             } catch {
-                // Permission may be gone after Auth delete — local UI dismissal is enough.
-                print("⚠️ Local pendingAccountDeleted clear failed: \(error.localizedDescription)")
+                print("⚠️ Local pendingAccountRestored clear failed: \(error.localizedDescription)")
             }
+        }
+        markRestoredNoticeDismissed()
+    }
+
+    /// Silently drop a leftover restore notice after a successful sign-in (no popup / no sign-out).
+    func clearPendingAccountRestoredNoticeIfNeeded() async {
+        guard auth.currentUser?.uid != nil else { return }
+        do {
+            let data = try await fetchUserData(preferServer: true) ?? [:]
+            guard let restored = data["pendingAccountRestored"] as? [String: Any],
+                  (restored["acknowledged"] as? Bool) != true else {
+                clearRequiresRestoredAcknowledgement()
+                markRestoredNoticeDismissed()
+                return
+            }
+            try await clearPendingAccountRestoredNotice()
+            print("♻️ Cleared pendingAccountRestored after successful sign-in")
+        } catch {
+            print("⚠️ clearPendingAccountRestoredNoticeIfNeeded failed: \(error.localizedDescription)")
         }
     }
 
     private static let pendingAdminDeletedAckPrefix = "pendingAdminDeletedAck."
     private static let lastAdminDeletedUidKey = "lastAdminDeletedUid"
+    private static let pendingAdminRestoredAckKey = "pendingAdminRestoredAck"
+    private static let restoredNoticeDismissedKey = "restoredNoticeDismissed"
 
     func markRequiresDeletedAcknowledgement(userId: String) {
         requiresDeletedAcknowledgementUID = userId
         UserDefaults.standard.set(true, forKey: Self.pendingAdminDeletedAckPrefix + userId)
         UserDefaults.standard.set(userId, forKey: Self.lastAdminDeletedUidKey)
+        clearRequiresRestoredAcknowledgement()
+        clearRestoredNoticeDismissed()
     }
 
     func clearRequiresDeletedAcknowledgement() {
@@ -2303,6 +2330,34 @@ class FirebaseAuthService: ObservableObject {
         return false
     }
 
+    func markRequiresRestoredAcknowledgement() {
+        clearRequiresDeletedAcknowledgement()
+        clearRestoredNoticeDismissed()
+        UserDefaults.standard.set(true, forKey: Self.pendingAdminRestoredAckKey)
+    }
+
+    func clearRequiresRestoredAcknowledgement() {
+        UserDefaults.standard.removeObject(forKey: Self.pendingAdminRestoredAckKey)
+    }
+
+    func hasPendingRestoredAcknowledgement() -> Bool {
+        UserDefaults.standard.bool(forKey: Self.pendingAdminRestoredAckKey)
+    }
+
+    /// User tapped "I understand" while signed out — don't re-show from Firestore until a new restore.
+    func markRestoredNoticeDismissed() {
+        UserDefaults.standard.set(true, forKey: Self.restoredNoticeDismissedKey)
+        clearRequiresRestoredAcknowledgement()
+    }
+
+    func clearRestoredNoticeDismissed() {
+        UserDefaults.standard.removeObject(forKey: Self.restoredNoticeDismissedKey)
+    }
+
+    func hasDismissedRestoredNotice() -> Bool {
+        UserDefaults.standard.bool(forKey: Self.restoredNoticeDismissedKey)
+    }
+
     func clearPendingAccountUnbanNotice() async throws {
         guard let userId = auth.currentUser?.uid else { return }
         try await db.collection("users").document(userId).updateData([
@@ -2318,6 +2373,13 @@ class FirebaseAuthService: ObservableObject {
                 markRequiresDeletedAcknowledgement(userId: uid)
             }
             return ModerationNotice(kind: .deletedAcknowledgement)
+        }
+
+        // Restore handoff is shown only while signed out (push / local flag).
+        // Never surface it from a signed-in fetch — that caused a login ↔ restore loop.
+        if let restored = userData["pendingAccountRestored"] as? [String: Any],
+           (restored["acknowledged"] as? Bool) != true {
+            return nil
         }
 
         if userData["isBanned"] as? Bool == true {
@@ -2987,6 +3049,17 @@ class FirebaseAuthService: ObservableObject {
                     DispatchQueue.main.async {
                         self?.markRequiresDeletedAcknowledgement(userId: currentUserId)
                         onNotice(ModerationNotice(kind: .deletedAcknowledgement))
+                    }
+                    return
+                }
+
+                if let restored = data["pendingAccountRestored"] as? [String: Any],
+                   (restored["acknowledged"] as? Bool) != true {
+                    // Signed-in: wipe the field only. Never emit a restore popup here.
+                    print("♻️ pendingAccountRestored while signed in — clearing silently")
+                    Task {
+                        await self?.clearPendingAccountRestoredNoticeIfNeeded()
+                        await MainActor.run { onNoticeCleared() }
                     }
                     return
                 }

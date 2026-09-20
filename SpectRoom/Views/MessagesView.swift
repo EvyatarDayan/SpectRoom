@@ -1235,6 +1235,7 @@ struct MessageConversationModal: View {
     @State private var showingReportReason = false
     @State private var reportReasonHeaderStyle: ReportReasonHeaderStyle = .reportOnly
     @State private var showingReportThankYou = false
+    @State private var reportThankYouDidBlock = false
     @State private var shouldDismissAfterReportFlow = false
     
     private let conversationPageSize = 10
@@ -1597,10 +1598,16 @@ struct MessageConversationModal: View {
                 )
             } else if let messagePendingActions {
                 MessageQuickActionsOverlay(
+                    canCopy: canCopyMessageText(messagePendingActions),
                     onReact: { emoji in
                         let message = messagePendingActions
                         self.messagePendingActions = nil
                         requestReactToMessage(message, emoji: emoji)
+                    },
+                    onCopy: {
+                        let message = messagePendingActions
+                        self.messagePendingActions = nil
+                        copyMessageText(message)
                     },
                     onReport: {
                         self.messagePendingActions = nil
@@ -1625,6 +1632,7 @@ struct MessageConversationModal: View {
                         showingReportConfirmation = false
                         reportReasonHeaderStyle = .reportOnly
                         shouldDismissAfterReportFlow = false
+                        reportThankYouDidBlock = false
                         showingReportReason = true
                     },
                     onReportAndBlock: {
@@ -1632,6 +1640,7 @@ struct MessageConversationModal: View {
                         appState.blockUser(userId: otherUserId, name: otherUserName)
                         reportReasonHeaderStyle = .blocked
                         shouldDismissAfterReportFlow = true
+                        reportThankYouDidBlock = true
                         showingReportReason = true
                     }
                 )
@@ -1650,7 +1659,7 @@ struct MessageConversationModal: View {
                     }
                 )
             } else if showingReportThankYou {
-                ReportThankYouOverlay {
+                ReportThankYouOverlay(didBlock: reportThankYouDidBlock) {
                     showingReportThankYou = false
                     finishReportFlow()
                 }
@@ -2931,7 +2940,20 @@ struct MessageConversationModal: View {
         guard !isSpectRoomSystemConversation else { return }
         guard !message.content.hasPrefix("pending://") else { return }
         guard !message.isDeleted else { return }
-        messagePendingActions = message
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) {
+            messagePendingActions = message
+        }
+    }
+
+    private func canCopyMessageText(_ message: MessageDisplay) -> Bool {
+        guard !message.isDeleted else { return false }
+        guard !message.content.hasPrefix("pending://") else { return false }
+        return message.messageType == .text || message.messageType == .system
+    }
+
+    private func copyMessageText(_ message: MessageDisplay) {
+        guard canCopyMessageText(message) else { return }
+        UIPasteboard.general.string = message.content
     }
 
     private func requestReportPartner() {
@@ -2942,6 +2964,7 @@ struct MessageConversationModal: View {
     private func finishReportFlow() {
         let shouldDismiss = shouldDismissAfterReportFlow
         shouldDismissAfterReportFlow = false
+        reportThankYouDidBlock = false
         showingReportConfirmation = false
         showingReportReason = false
         showingReportThankYou = false
@@ -4099,7 +4122,6 @@ struct VoiceMessagePlayerView: View {
     @State private var currentTime: TimeInterval = 0
     @State private var duration: TimeInterval = 0
     @State private var playbackTimer: Timer?
-    @State private var tempFileURL: URL?
     @State private var pendingAutoPlay = false
     @State private var showElapsedTime = false
     
@@ -4171,9 +4193,6 @@ struct VoiceMessagePlayerView: View {
         }
         .onDisappear {
             stopPlayback(resetPosition: true)
-            if let tempFileURL {
-                try? FileManager.default.removeItem(at: tempFileURL)
-            }
             audioPlayer = nil
         }
     }
@@ -4233,41 +4252,21 @@ struct VoiceMessagePlayerView: View {
             return
         }
         
+        // Instant path when the voice note is already on disk.
+        if !audioURL.isFileURL, let cached = VoiceCacheService.shared.cachedFileURL(for: audioURL) {
+            finishLoading(localURL: cached, autoPlay: autoPlay)
+            return
+        }
+        
         isLoading = true
         loadError = false
         pendingAutoPlay = autoPlay
         
         Task {
             do {
-                let localURL: URL
-                if audioURL.isFileURL {
-                    localURL = audioURL
-                } else {
-                    let (data, _) = try await URLSession.shared.data(from: audioURL)
-                    let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("voice_preview_\(UUID().uuidString).m4a")
-                    try data.write(to: tempURL, options: .atomic)
-                    localURL = tempURL
-                    await MainActor.run {
-                        tempFileURL = tempURL
-                    }
-                }
-                
-                let player = try AVAudioPlayer(contentsOf: localURL)
-                player.prepareToPlay()
-                let actualDuration = player.duration
-                
+                let localURL = try await VoiceCacheService.shared.localFileURL(for: audioURL)
                 await MainActor.run {
-                    audioPlayer = player
-                    if actualDuration > 0 {
-                        duration = actualDuration
-                    } else if let displayDuration, displayDuration > 0 {
-                        duration = displayDuration
-                    }
-                    isLoading = false
-                    
-                    if pendingAutoPlay {
-                        startPlayback()
-                    }
+                    finishLoading(localURL: localURL, autoPlay: pendingAutoPlay)
                 }
             } catch {
                 print("❌ Failed to load audio: \(error)")
@@ -4277,6 +4276,29 @@ struct VoiceMessagePlayerView: View {
                     showElapsedTime = false
                 }
             }
+        }
+    }
+
+    private func finishLoading(localURL: URL, autoPlay: Bool) {
+        do {
+            let player = try AVAudioPlayer(contentsOf: localURL)
+            player.prepareToPlay()
+            audioPlayer = player
+            if player.duration > 0 {
+                duration = player.duration
+            } else if let displayDuration, displayDuration > 0 {
+                duration = displayDuration
+            }
+            isLoading = false
+            loadError = false
+            if autoPlay {
+                startPlayback()
+            }
+        } catch {
+            print("❌ Failed to create audio player: \(error)")
+            isLoading = false
+            loadError = true
+            showElapsedTime = false
         }
     }
     
@@ -4873,10 +4895,13 @@ struct MessageBubble: View {
     }
 
     private var bubbleWithReactions: some View {
-        VStack(alignment: isOutgoing ? .trailing : .leading, spacing: 2) {
+        VStack(alignment: isOutgoing ? .trailing : .leading, spacing: 0) {
             bubbleContent
             if !message.isDeleted, !message.reactionSummary.isEmpty {
                 reactionChips
+                    .offset(y: -10)
+                    .padding(.bottom, -4)
+                    .zIndex(1)
             }
         }
         .onLongPressGesture(minimumDuration: 0.35) {
@@ -4886,24 +4911,19 @@ struct MessageBubble: View {
     }
 
     private var reactionChips: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             ForEach(message.reactionSummary, id: \.emoji) { item in
-                HStack(spacing: 2) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white)
+                        .shadow(color: Color.black.opacity(0.12), radius: 2, x: 0, y: 1)
+
                     Text(item.emoji)
-                        .font(.caption)
-                    if item.count > 1 {
-                        Text("\(item.count)")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundColor(SpectRoomTheme.secondaryText)
-                    }
+                        .font(.system(size: 11))
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color(.systemBackground).opacity(0.95))
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(Color.black.opacity(0.08), lineWidth: 0.5)
+                .frame(width: 26, height: 26)
+                .accessibilityLabel(
+                    item.count > 1 ? "\(item.emoji) \(item.count)" : item.emoji
                 )
             }
         }

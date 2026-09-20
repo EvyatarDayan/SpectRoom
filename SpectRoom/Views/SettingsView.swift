@@ -28,6 +28,8 @@ struct SettingsView: View {
     @State private var showingDeleteAccountConfirmation = false
     @State private var deleteConfirmationStep: DeleteAccountConfirmationStep = .sure
     @State private var deleteConfirmationText = ""
+    @State private var deleteMfaCode = ""
+    @State private var deleteMfaMaskedPhone = ""
     @State private var isDeletingAccount = false
     @State private var deleteAccountErrorMessage: String?
     @State private var isExportingMessages = false
@@ -393,6 +395,8 @@ struct SettingsView: View {
                     Button(action: {
                         deleteConfirmationStep = .sure
                         deleteConfirmationText = ""
+                        deleteMfaCode = ""
+                        deleteMfaMaskedPhone = ""
                         isDeletingAccount = false
                         deleteAccountErrorMessage = nil
                         showingDeleteAccountConfirmation = true
@@ -503,11 +507,16 @@ struct SettingsView: View {
                     DeleteAccountConfirmationDialog(
                         step: $deleteConfirmationStep,
                         confirmationText: $deleteConfirmationText,
+                        mfaCode: $deleteMfaCode,
+                        mfaMaskedPhone: deleteMfaMaskedPhone,
                         isDeleting: $isDeletingAccount,
                         errorMessage: $deleteAccountErrorMessage,
                         onCancel: {
+                            appState.cancelDeleteAccountMfa()
                             showingDeleteAccountConfirmation = false
                             deleteConfirmationText = ""
+                            deleteMfaCode = ""
+                            deleteMfaMaskedPhone = ""
                             deleteConfirmationStep = .sure
                             deleteAccountErrorMessage = nil
                         },
@@ -515,10 +524,43 @@ struct SettingsView: View {
                             Task {
                                 await MainActor.run { isDeletingAccount = true }
                                 do {
-                                    try await appState.deleteAccount(password: password)
+                                    let outcome = try await appState.deleteAccount(password: password)
+                                    await MainActor.run {
+                                        isDeletingAccount = false
+                                        deleteAccountErrorMessage = nil
+                                        switch outcome {
+                                        case .completed:
+                                            deleteConfirmationText = ""
+                                            deleteConfirmationStep = .success
+                                        case .mfaRequired(let maskedPhone):
+                                            deleteMfaMaskedPhone = maskedPhone
+                                            deleteMfaCode = ""
+                                            deleteConfirmationStep = .enterMfaCode
+                                        }
+                                    }
+                                } catch let error as SpectRoomAuthError {
+                                    await MainActor.run {
+                                        isDeletingAccount = false
+                                        deleteAccountErrorMessage = error.errorDescription
+                                            ?? "settings.delete.account.error".localized
+                                    }
+                                } catch {
+                                    await MainActor.run {
+                                        isDeletingAccount = false
+                                        deleteAccountErrorMessage = "settings.delete.account.error".localized
+                                    }
+                                }
+                            }
+                        },
+                        onConfirmMfa: { code in
+                            Task {
+                                await MainActor.run { isDeletingAccount = true }
+                                do {
+                                    try await appState.completeDeleteAccountAfterMfa(code: code)
                                     await MainActor.run {
                                         isDeletingAccount = false
                                         deleteConfirmationText = ""
+                                        deleteMfaCode = ""
                                         deleteAccountErrorMessage = nil
                                         deleteConfirmationStep = .success
                                     }
@@ -536,10 +578,32 @@ struct SettingsView: View {
                                 }
                             }
                         },
+                        onResendMfa: {
+                            Task {
+                                do {
+                                    try await appState.resendDeleteAccountMfaCode()
+                                    await MainActor.run {
+                                        deleteAccountErrorMessage = nil
+                                    }
+                                } catch let error as SpectRoomAuthError {
+                                    await MainActor.run {
+                                        deleteAccountErrorMessage = error.errorDescription
+                                            ?? "auth.mfa.error.send".localized
+                                    }
+                                } catch {
+                                    await MainActor.run {
+                                        deleteAccountErrorMessage = "auth.mfa.error.send".localized
+                                    }
+                                }
+                            }
+                        },
                         onSuccessAcknowledged: {
+                            appState.cancelDeleteAccountMfa()
                             showingDeleteAccountConfirmation = false
                             deleteConfirmationStep = .sure
                             deleteConfirmationText = ""
+                            deleteMfaCode = ""
+                            deleteMfaMaskedPhone = ""
                             deleteAccountErrorMessage = nil
                             appState.signOut()
                         }
@@ -883,207 +947,155 @@ private struct ReportedProfileRow: View {
 private struct ReportDetailsOverlay: View {
     let report: UserReport
     let onDismiss: () -> Void
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var isLight: Bool { colorScheme == .light }
-    private var panelBackground: Color { isLight ? Color.white : Color.black }
-    private var primaryText: Color { isLight ? Color.black : Color.white }
-    private var secondaryText: Color { isLight ? Color.black.opacity(0.55) : Color.white.opacity(0.7) }
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.80)
+            Color.black.opacity(0.35)
                 .ignoresSafeArea()
                 .onTapGesture(perform: onDismiss)
 
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top, spacing: 12) {
-                    profilePhoto
-
-                    Text(headlineText)
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(primaryText)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    detailRow(
-                        title: "settings.reported.profiles.detail.category".localized,
-                        value: report.category
-                    )
-
-                    if let details = report.details?.trimmingCharacters(in: .whitespacesAndNewlines), !details.isEmpty {
-                        detailRow(
-                            title: "settings.reported.profiles.detail.details".localized,
-                            value: details
+            VStack(spacing: 0) {
+                VStack(spacing: 8) {
+                    Text(
+                        String(
+                            format: "settings.reported.profiles.detail.headline".localized,
+                            report.reportedName
                         )
-                    }
-
-                    detailRow(
-                        title: "settings.reported.profiles.detail.status".localized,
-                        value: localizedStatus(report.status)
                     )
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(SpectRoomTheme.text)
+                    .padding(.bottom, 4)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let dateLine = formattedDateLine {
+                            Text(dateLine)
+                        }
+
+                        Text(
+                            String(
+                                format: "settings.reported.profiles.detail.category.line".localized,
+                                displayCategory
+                            )
+                        )
+
+                        if let details = report.details?.trimmingCharacters(in: .whitespacesAndNewlines),
+                           !details.isEmpty {
+                            Text(
+                                String(
+                                    format: "settings.reported.profiles.detail.details.line".localized,
+                                    details
+                                )
+                            )
+                        }
+                    }
+                    .font(.subheadline)
+                    .multilineTextAlignment(.leading)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 18)
+
+                Divider()
 
                 Button(action: onDismiss) {
-                    Text("common.got.it".localized)
-                        .font(.body.weight(.medium))
-                        .foregroundColor(primaryText)
+                    Text("common.close".localized)
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(.green)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color(.systemGray5))
-                        .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .padding(.top, 4)
             }
-            .padding(24)
-            .frame(maxWidth: 340)
-            .background(panelBackground)
+            .background(SpectRoomTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(isLight ? Color.black.opacity(0.06) : Color.clear, lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(isLight ? 0.12 : 0), radius: 16, x: 0, y: 8)
-            .padding(.horizontal, 28)
+            .padding(.horizontal, 36)
         }
     }
 
-    private var headlineText: String {
-        if let createdAt = report.createdAt {
-            let formattedDate = createdAt.formatted(
-                Date.FormatStyle()
-                    .day()
-                    .month(.abbreviated)
-                    .year()
-                    .hour()
-                    .minute()
-            )
-            return String(
-                format: "settings.reported.profiles.detail.headline".localized,
-                report.reportedName,
-                formattedDate
-            )
+    private var displayCategory: String {
+        let category = report.category.trimmingCharacters(in: .whitespacesAndNewlines)
+        let somethingElseStorage = ProfileReportReason.somethingElse.storageCategory
+        let somethingElseLabel = ProfileReportReason.somethingElse.label
+        if category.caseInsensitiveCompare(somethingElseStorage) == .orderedSame
+            || category.caseInsensitiveCompare(somethingElseLabel) == .orderedSame {
+            return "settings.reported.profiles.detail.see.details".localized
         }
-        return String(
-            format: "settings.reported.profiles.detail.headline.no.date".localized,
-            report.reportedName
+        return category
+    }
+
+    private var formattedDateLine: String? {
+        guard let createdAt = report.createdAt else { return nil }
+        let formattedDate = createdAt.formatted(
+            Date.FormatStyle()
+                .day()
+                .month(.abbreviated)
+                .year()
+                .hour()
+                .minute()
         )
-    }
-
-    private func localizedStatus(_ status: String) -> String {
-        switch status.lowercased() {
-        case "pending":
-            return "settings.reported.profiles.status.pending".localized
-        case "reviewed":
-            return "settings.reported.profiles.status.reviewed".localized
-        case "dismissed":
-            return "settings.reported.profiles.status.dismissed".localized
-        case "actioned":
-            return "settings.reported.profiles.status.actioned".localized
-        default:
-            return status.capitalized
-        }
-    }
-
-    private func detailRow(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(secondaryText)
-            Text(value)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(primaryText)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var profilePhoto: some View {
-        Group {
-            if let photoURL = report.primaryPhotoURL, let url = URL(string: photoURL) {
-                CachedAsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    initialsPlaceholder
-                }
-            } else {
-                initialsPlaceholder
-            }
-        }
-        .frame(width: 52, height: 52)
-        .clipShape(Circle())
-    }
-
-    private var initialsPlaceholder: some View {
-        Circle()
-            .fill(Color.blue.opacity(0.2))
-            .overlay(
-                Text(String(report.reportedName.prefix(1)).uppercased())
-                    .font(.title3.weight(.semibold))
-                    .foregroundColor(.blue)
-            )
+        return String(
+            format: "settings.reported.profiles.detail.date.line".localized,
+            formattedDate
+        )
     }
 }
 
 private struct SignOutConfirmationOverlay: View {
     let onCancel: () -> Void
     let onConfirm: () -> Void
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.45)
+            Color.black.opacity(0.35)
                 .ignoresSafeArea()
                 .onTapGesture(perform: onCancel)
 
-            VStack(spacing: 16) {
-                Text("settings.sign.out.confirm.title".localized)
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .foregroundColor(SpectRoomTheme.text)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 22)
+            VStack(spacing: 0) {
+                VStack(spacing: 8) {
+                    Text("settings.sign.out.confirm.title".localized)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(SpectRoomTheme.text)
+                        .padding(.bottom, 4)
 
-                HStack(spacing: 12) {
+                    Text("settings.sign.out.confirm.message".localized)
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 18)
+
+                Divider()
+
+                HStack(spacing: 0) {
                     Button(action: onCancel) {
                         Text("common.cancel".localized)
-                            .font(.subheadline.weight(.semibold))
+                            .font(.body)
                             .foregroundColor(SpectRoomTheme.text)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
-                            .background(SpectRoomTheme.background)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(SpectRoomTheme.subtleBorder(for: colorScheme), lineWidth: 1)
-                            )
                     }
                     .buttonStyle(.plain)
 
+                    Divider()
+                        .frame(height: 44)
+
                     Button(action: onConfirm) {
-                        Text("settings.sign.out.confirm.yes".localized)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(.blue)
+                        Text("settings.sign.out".localized)
+                            .font(.body.weight(.semibold))
+                            .foregroundColor(.green)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
-                            .background(Color.blue.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.blue.opacity(0.35), lineWidth: 1)
-                            )
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
             }
             .background(SpectRoomTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -1178,22 +1190,33 @@ private struct BlockedUserRow: View {
 private enum DeleteAccountConfirmationStep {
     case sure
     case enterPassword
+    case enterMfaCode
     case success
 }
 
 private struct DeleteAccountConfirmationDialog: View {
     @Binding var step: DeleteAccountConfirmationStep
     @Binding var confirmationText: String
+    @Binding var mfaCode: String
+    let mfaMaskedPhone: String
     @Binding var isDeleting: Bool
     @Binding var errorMessage: String?
     let onCancel: () -> Void
     let onConfirmDeletion: (String) -> Void
+    let onConfirmMfa: (String) -> Void
+    let onResendMfa: () -> Void
     let onSuccessAcknowledged: () -> Void
-    
+
+    @State private var isPasswordVisible = false
+
     private var canConfirmPasswordStep: Bool {
         !confirmationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isDeleting
     }
-    
+
+    private var canConfirmMfaStep: Bool {
+        mfaCode.trimmingCharacters(in: .whitespacesAndNewlines).count >= 6 && !isDeleting
+    }
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.45)
@@ -1203,19 +1226,19 @@ private struct DeleteAccountConfirmationDialog: View {
                         onCancel()
                     }
                 }
-            
+
             VStack(spacing: 0) {
                 Text(
                     step == .success
                         ? "settings.delete.account.success.message".localized
                         : "settings.delete.account.confirm.title".localized
                 )
-                    .font(step == .success ? .system(size: 20, weight: .bold) : .headline)
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 20)
-                    .padding(.bottom, step == .success ? 8 : 0)
-                    .padding(.horizontal, 20)
-                
+                .font(step == .success ? .system(size: 20, weight: .bold) : .headline)
+                .multilineTextAlignment(.center)
+                .padding(.top, 20)
+                .padding(.bottom, step == .success ? 8 : 0)
+                .padding(.horizontal, 20)
+
                 if step != .success {
                     Group {
                         if step == .sure {
@@ -1225,53 +1248,30 @@ private struct DeleteAccountConfirmationDialog: View {
                                 .multilineTextAlignment(.center)
                                 .padding(.top, 10)
                                 .padding(.horizontal, 20)
+                        } else if step == .enterPassword {
+                            passwordStepContent
                         } else {
-                            VStack(spacing: 12) {
-                                Text("settings.delete.account.type.message".localized)
-                                    .font(.subheadline)
-                                    .foregroundColor(SpectRoomTheme.secondaryText)
-                                    .multilineTextAlignment(.center)
-                                
-                                SecureField("settings.delete.account.type.placeholder".localized, text: $confirmationText)
-                                    .textContentType(.password)
-                                    .padding(10)
-                                    .background(SpectRoomTheme.card)
-                                    .cornerRadius(8)
-                                    .disabled(isDeleting)
-                                
-                                if let errorMessage {
-                                    Text(errorMessage)
-                                        .font(.caption)
-                                        .foregroundColor(.red)
-                                        .multilineTextAlignment(.center)
-                                }
-                                
-                                if isDeleting {
-                                    ProgressView()
-                                        .padding(.top, 4)
-                                }
-                            }
-                            .padding(.top, 10)
-                            .padding(.horizontal, 20)
+                            mfaStepContent
                         }
                     }
                 }
-                
+
                 Divider()
                     .padding(.top, 18)
-                
+
                 if step == .sure {
                     HStack(spacing: 0) {
                         Button("settings.cancel".localized, action: onCancel)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
-                        
+
                         Divider()
                             .frame(height: 44)
-                        
+
                         Button("settings.delete.account.confirm.yes".localized) {
                             step = .enterPassword
                             confirmationText = ""
+                            isPasswordVisible = false
                             errorMessage = nil
                         }
                         .fontWeight(.semibold)
@@ -1288,18 +1288,40 @@ private struct DeleteAccountConfirmationDialog: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .disabled(isDeleting)
-                        
+
                         Divider()
                             .frame(height: 44)
-                        
+
                         Button("settings.delete.account.confirm.ok".localized) {
-                            onConfirmDeletion(confirmationText)
+                            onConfirmDeletion(confirmationText.trimmingCharacters(in: .whitespacesAndNewlines))
                         }
                         .fontWeight(.semibold)
                         .foregroundColor(canConfirmPasswordStep ? .red : .secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .disabled(!canConfirmPasswordStep)
+                    }
+                } else if step == .enterMfaCode {
+                    HStack(spacing: 0) {
+                        Button("settings.cancel".localized) {
+                            guard !isDeleting else { return }
+                            onCancel()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .disabled(isDeleting)
+
+                        Divider()
+                            .frame(height: 44)
+
+                        Button("settings.delete.account.confirm.ok".localized) {
+                            onConfirmMfa(mfaCode.trimmingCharacters(in: .whitespacesAndNewlines))
+                        }
+                        .fontWeight(.semibold)
+                        .foregroundColor(canConfirmMfaStep ? .red : .secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .disabled(!canConfirmMfaStep)
                     }
                 } else {
                     HStack(spacing: 0) {
@@ -1308,10 +1330,10 @@ private struct DeleteAccountConfirmationDialog: View {
                             .padding(.vertical, 14)
                             .disabled(true)
                             .foregroundColor(.secondary)
-                        
+
                         Divider()
                             .frame(height: 44)
-                        
+
                         Button("settings.delete.account.confirm.ok".localized, action: onSuccessAcknowledged)
                             .fontWeight(.semibold)
                             .foregroundColor(.red)
@@ -1326,6 +1348,92 @@ private struct DeleteAccountConfirmationDialog: View {
             .shadow(color: .black.opacity(0.2), radius: 20, y: 8)
             .padding(.horizontal, 40)
         }
+    }
+
+    private var passwordStepContent: some View {
+        VStack(spacing: 12) {
+            Text("settings.delete.account.type.message".localized)
+                .font(.subheadline)
+                .foregroundColor(SpectRoomTheme.secondaryText)
+                .multilineTextAlignment(.center)
+
+            HStack(spacing: 8) {
+                Group {
+                    if isPasswordVisible {
+                        TextField("settings.delete.account.type.placeholder".localized, text: $confirmationText)
+                    } else {
+                        SecureField("settings.delete.account.type.placeholder".localized, text: $confirmationText)
+                    }
+                }
+                .textContentType(.password)
+                .autocorrectionDisabled(true)
+                .textInputAutocapitalization(.never)
+                .disabled(isDeleting)
+
+                Button {
+                    isPasswordVisible.toggle()
+                } label: {
+                    Image(systemName: isPasswordVisible ? "eye.slash.fill" : "eye.fill")
+                        .foregroundColor(.gray)
+                }
+                .buttonStyle(.plain)
+                .disabled(isDeleting)
+            }
+            .padding(10)
+            .background(SpectRoomTheme.background)
+            .cornerRadius(8)
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
+            }
+
+            if isDeleting {
+                ProgressView()
+                    .padding(.top, 4)
+            }
+        }
+        .padding(.top, 10)
+        .padding(.horizontal, 20)
+    }
+
+    private var mfaStepContent: some View {
+        VStack(spacing: 12) {
+            Text(String(format: "settings.delete.account.mfa.message".localized, mfaMaskedPhone))
+                .font(.subheadline)
+                .foregroundColor(SpectRoomTheme.secondaryText)
+                .multilineTextAlignment(.center)
+
+            TextField("settings.delete.account.mfa.placeholder".localized, text: $mfaCode)
+                .keyboardType(.numberPad)
+                .textContentType(.oneTimeCode)
+                .multilineTextAlignment(.center)
+                .padding(10)
+                .background(SpectRoomTheme.background)
+                .cornerRadius(8)
+                .disabled(isDeleting)
+
+            Button("settings.delete.account.mfa.resend".localized, action: onResendMfa)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.blue)
+                .disabled(isDeleting)
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
+            }
+
+            if isDeleting {
+                ProgressView()
+                    .padding(.top, 4)
+            }
+        }
+        .padding(.top, 10)
+        .padding(.horizontal, 20)
     }
 }
 

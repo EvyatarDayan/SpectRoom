@@ -11,6 +11,11 @@ enum AuthSignInOutcome {
     case mfaRequired(maskedPhone: String)
 }
 
+enum ReauthOutcome {
+    case completed
+    case mfaRequired(maskedPhone: String)
+}
+
 enum MfaFlowKind: Equatable {
     case enroll
     case signIn
@@ -25,6 +30,8 @@ extension FirebaseAuthService {
     private static var pendingSignInResolver: MultiFactorResolver?
     private static var pendingVerificationID: String?
     private static var pendingEnrollPhoneE164: String?
+    private static var pendingReauthResolver: MultiFactorResolver?
+    private static var pendingReauthVerificationID: String?
 
     var isMfaEnrolled: Bool {
         guard let factors = auth.currentUser?.multiFactor.enrolledFactors else { return false }
@@ -80,7 +87,6 @@ extension FirebaseAuthService {
 
                 // Always open the security-code screen when the password is correct.
                 // SMS may fail on Simulator (APNs/app verification) — the MFA UI can Resend.
-                FirebaseBootstrap.applyDebugPhoneAuthSettings()
                 do {
                     let verificationID = try await sendSignInMfaCode(resolver: resolver, hint: hint)
                     Self.pendingVerificationID = verificationID
@@ -109,7 +115,6 @@ extension FirebaseAuthService {
         guard let resolver = Self.pendingSignInResolver else {
             throw SpectRoomAuthError.mfaSessionExpired
         }
-        FirebaseBootstrap.applyDebugPhoneAuthSettings()
         let hint = resolver.hints.compactMap { $0 as? PhoneMultiFactorInfo }.first
         let verificationID = try await sendSignInMfaCode(resolver: resolver, hint: hint)
         Self.pendingVerificationID = verificationID
@@ -148,6 +153,9 @@ extension FirebaseAuthService {
             _ = try await resolver.resolveSignIn(with: assertion)
 
             Self.clearPendingMfaSignIn()
+            // Drop restore handoff before UI reacts to the new session (prevents restore↔login loop).
+            markRestoredNoticeDismissed()
+            await clearPendingAccountRestoredNoticeIfNeeded()
             try await finishVerifiedSignInChecks()
         } catch {
             await MainActor.run {
@@ -164,6 +172,89 @@ extension FirebaseAuthService {
                 self.isAuthenticated = false
             }
         }
+    }
+
+    // MARK: - Reauthentication MFA (sensitive actions, e.g. delete account)
+
+    /// Password reauth that surfaces SMS MFA when the account has a second factor.
+    func reauthenticateWithPossibleMfa(password: String) async throws -> ReauthOutcome {
+        guard let user = auth.currentUser, let email = user.email else {
+            throw SpectRoomAuthError.notAuthenticated
+        }
+
+        let trimmed = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw SpectRoomAuthError.wrongPassword
+        }
+
+        let credential = EmailAuthProvider.credential(withEmail: email, password: trimmed)
+        do {
+            try await user.reauthenticate(with: credential)
+            Self.clearPendingMfaReauth()
+            return .completed
+        } catch {
+            if let resolver = Self.multiFactorResolver(from: error) {
+                Self.pendingReauthResolver = resolver
+                let hint = resolver.hints.compactMap { $0 as? PhoneMultiFactorInfo }.first
+                let masked = Self.maskedPhone(for: hint)
+
+                do {
+                    let verificationID = try await sendSignInMfaCode(resolver: resolver, hint: hint)
+                    Self.pendingReauthVerificationID = verificationID
+                } catch {
+                    print("⚠️ Reauth MFA SMS failed (continuing to code step): \(error.localizedDescription)")
+                    Self.pendingReauthVerificationID = nil
+                }
+                return .mfaRequired(maskedPhone: masked)
+            }
+
+            print("⚠️ Reauthentication failed: \(error.localizedDescription)")
+            throw Self.mapPasswordReauthError(error)
+        }
+    }
+
+    var hasPendingReauthMfaVerificationID: Bool {
+        Self.pendingReauthVerificationID != nil
+    }
+
+    func resendReauthMfaCode() async throws {
+        guard let resolver = Self.pendingReauthResolver else {
+            throw SpectRoomAuthError.mfaSessionExpired
+        }
+        let hint = resolver.hints.compactMap { $0 as? PhoneMultiFactorInfo }.first
+        let verificationID = try await sendSignInMfaCode(resolver: resolver, hint: hint)
+        Self.pendingReauthVerificationID = verificationID
+    }
+
+    /// Completes MFA after password reauth; does not change session identity beyond refreshing auth.
+    func confirmReauthMfa(code: String) async throws {
+        guard let resolver = Self.pendingReauthResolver else {
+            throw SpectRoomAuthError.mfaSessionExpired
+        }
+        guard let verificationID = Self.pendingReauthVerificationID else {
+            throw SpectRoomAuthError.mfaSendFailed
+        }
+
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 6 else {
+            throw SpectRoomAuthError.invalidMfaCode
+        }
+
+        do {
+            let credential = PhoneAuthProvider.provider().credential(
+                withVerificationID: verificationID,
+                verificationCode: trimmed
+            )
+            let assertion = PhoneMultiFactorGenerator.assertion(with: credential)
+            _ = try await resolver.resolveSignIn(with: assertion)
+            Self.clearPendingMfaReauth()
+        } catch {
+            throw mapMfaError(error)
+        }
+    }
+
+    func cancelPendingMfaReauth() {
+        Self.clearPendingMfaReauth()
     }
 
     // MARK: - Enrollment MFA
@@ -197,6 +288,9 @@ extension FirebaseAuthService {
     func startMfaEnrollment(phoneE164: String) async throws {
         FirebaseBootstrap.configureIfNeeded()
         FirebaseBootstrap.applyDebugPhoneAuthSettings()
+        #if DEBUG && targetEnvironment(simulator)
+        SimulatorPhoneAuthSupport.enableForMfaIfNeeded()
+        #endif
 
         guard let user = auth.currentUser else {
             throw SpectRoomAuthError.notAuthenticated
@@ -212,6 +306,9 @@ extension FirebaseAuthService {
         if Auth.auth().settings?.isAppVerificationDisabledForTesting != true {
             print("⚠️ Re-applying phone test mode before MFA enroll")
             FirebaseBootstrap.applyDebugPhoneAuthSettings()
+        } else {
+            // Re-inject in case an earlier failed probe cached forwarding=false for this process.
+            FirebaseBootstrap.applyDebugPhoneAuthSettings()
         }
         #endif
         print("📱 MFA enroll to \(phoneE164), testMode=\(Auth.auth().settings?.isAppVerificationDisabledForTesting ?? false), clientID=\(FirebaseApp.app()?.options.clientID ?? "nil")")
@@ -222,7 +319,14 @@ extension FirebaseAuthService {
             let verificationID = try await verifyPhoneForEnrollment(phoneE164: phoneE164, session: session)
             Self.pendingVerificationID = verificationID
             Self.pendingEnrollPhoneE164 = phoneE164
+            #if DEBUG
+            print("✅ MFA enroll SMS verificationID received (\(verificationID.prefix(8))…)")
+            #endif
         } catch {
+            #if DEBUG
+            let ns = error as NSError
+            print("❌ MFA enroll SMS failed domain=\(ns.domain) code=\(ns.code) \(ns.localizedDescription)")
+            #endif
             throw mapMfaError(error)
         }
 
@@ -350,6 +454,7 @@ extension FirebaseAuthService {
         if let userId {
             await loadUserData(for: userId)
             await updateFCMTokenIfNeeded()
+            await clearPendingAccountRestoredNoticeIfNeeded()
         }
     }
 
@@ -361,55 +466,137 @@ extension FirebaseAuthService {
             throw SpectRoomAuthError.mfaFactorUnavailable
         }
         let session = resolver.session
-        return try await withCheckedThrowingContinuation { continuation in
+        #if DEBUG && targetEnvironment(simulator)
+        // Do NOT use isAppVerificationDisabledForTesting for MFA sign-in.
+        // That SDK path posts the obfuscated hint (+*******…) as E.164 → invalid-phone-number.
+        // reCAPTCHA + Console test numbers still accept the fixed code (123456).
+        FirebaseBootstrap.prepareSimulatorMfaSignInVerify()
+        let probeTask = Task {
+            await FirebaseBootstrap.sustainSimulatorMfaNotificationProbe()
+        }
+        defer {
+            probeTask.cancel()
+            // Restore enrollment-friendly test mode for later flows.
+            FirebaseBootstrap.applyDebugPhoneAuthSettings()
+        }
+        #endif
+        return try await performPhoneAuthRequest(timeoutSeconds: 60) { resume in
             DispatchQueue.main.async {
+                #if DEBUG && targetEnvironment(simulator)
                 PhoneAuthProvider.provider().verifyPhoneNumber(
                     with: hint,
                     uiDelegate: SpectRoomAuthUIDelegate.shared,
                     multiFactorSession: session
                 ) { verificationID, error in
                     if let error {
-                        continuation.resume(throwing: error)
+                        let ns = error as NSError
+                        print("❌ MFA sign-in SMS failed domain=\(ns.domain) code=\(ns.code) \(ns.localizedDescription)")
+                        resume(.failure(error))
                     } else if let verificationID {
-                        continuation.resume(returning: verificationID)
+                        print("✅ MFA sign-in SMS verificationID received (simulator)")
+                        resume(.success(verificationID))
                     } else {
-                        continuation.resume(throwing: SpectRoomAuthError.mfaSendFailed)
+                        resume(.failure(SpectRoomAuthError.mfaSendFailed))
                     }
                 }
+                #else
+                PhoneAuthProvider.provider().verifyPhoneNumber(
+                    with: hint,
+                    uiDelegate: SpectRoomAuthUIDelegate.shared,
+                    multiFactorSession: session
+                ) { verificationID, error in
+                    if let error {
+                        resume(.failure(error))
+                    } else if let verificationID {
+                        resume(.success(verificationID))
+                    } else {
+                        resume(.failure(SpectRoomAuthError.mfaSendFailed))
+                    }
+                }
+                #endif
             }
         }
     }
 
     private func getMultiFactorSession(for user: User) async throws -> MultiFactorSession {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<MultiFactorSession, Error>) in
+        try await performPhoneAuthRequest(timeoutSeconds: 30) { resume in
             user.multiFactor.getSessionWithCompletion { session, error in
                 if let error {
-                    continuation.resume(throwing: error)
+                    resume(.failure(error))
                 } else if let session {
-                    continuation.resume(returning: session)
+                    resume(.success(session))
                 } else {
-                    continuation.resume(throwing: SpectRoomAuthError.mfaSendFailed)
+                    resume(.failure(SpectRoomAuthError.mfaSendFailed))
                 }
             }
         }
     }
 
     private func verifyPhoneForEnrollment(phoneE164: String, session: MultiFactorSession) async throws -> String {
-        return try await withCheckedThrowingContinuation { continuation in
+        #if DEBUG && targetEnvironment(simulator)
+        FirebaseBootstrap.prepareSimulatorMfaPhoneVerify()
+        let probeTask = Task {
+            await FirebaseBootstrap.sustainSimulatorMfaNotificationProbe()
+        }
+        defer { probeTask.cancel() }
+        #endif
+
+        return try await performPhoneAuthRequest(timeoutSeconds: 45) { resume in
             DispatchQueue.main.async {
+                #if DEBUG && targetEnvironment(simulator)
+                // Test mode: no reCAPTCHA UI. Passing a UIDelegate can stall Simulator MFA.
+                PhoneAuthProvider.provider().verifyPhoneNumber(
+                    phoneE164,
+                    uiDelegate: nil,
+                    multiFactorSession: session
+                ) { verificationID, error in
+                    if let error {
+                        resume(.failure(error))
+                    } else if let verificationID {
+                        resume(.success(verificationID))
+                    } else {
+                        resume(.failure(SpectRoomAuthError.mfaSendFailed))
+                    }
+                }
+                #else
                 PhoneAuthProvider.provider().verifyPhoneNumber(
                     phoneE164,
                     uiDelegate: SpectRoomAuthUIDelegate.shared,
                     multiFactorSession: session
                 ) { verificationID, error in
                     if let error {
-                        continuation.resume(throwing: error)
+                        resume(.failure(error))
                     } else if let verificationID {
-                        continuation.resume(returning: verificationID)
+                        resume(.success(verificationID))
                     } else {
-                        continuation.resume(throwing: SpectRoomAuthError.mfaSendFailed)
+                        resume(.failure(SpectRoomAuthError.mfaSendFailed))
                     }
                 }
+                #endif
+            }
+        }
+    }
+
+    /// Wraps Firebase phone/MFA callbacks with a timeout. Simulator reCAPTCHA/APNs can hang forever.
+    private func performPhoneAuthRequest<T: Sendable>(
+        timeoutSeconds: TimeInterval,
+        start: @escaping (@escaping (Result<T, Error>) -> Void) -> Void
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            let lock = NSLock()
+            var settled = false
+            let resumeOnce: (Result<T, Error>) -> Void = { result in
+                lock.lock()
+                defer { lock.unlock() }
+                guard !settled else { return }
+                settled = true
+                continuation.resume(with: result)
+            }
+
+            start(resumeOnce)
+
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeoutSeconds) {
+                resumeOnce(.failure(SpectRoomAuthError.mfaSendFailed))
             }
         }
     }
@@ -427,9 +614,10 @@ extension FirebaseAuthService {
     }
 
     /// Prefer the real phone number over MFA display names like "Phone".
+    /// SpectRoom shows the full number on the security-code screen (not masked).
     private static func maskedPhone(for hint: PhoneMultiFactorInfo?) -> String {
         if let phone = hint?.phoneNumber.nilIfEmpty {
-            return PhoneNumberE164.maskedDisplay(phone)
+            return phone
         }
         if let name = hint?.displayName?.nilIfEmpty {
             let genericNames: Set<String> = ["phone", "sms", "mobile", "mfa"]
@@ -469,6 +657,41 @@ extension FirebaseAuthService {
     private static func clearPendingMfaSignIn() {
         pendingSignInResolver = nil
         pendingVerificationID = nil
+    }
+
+    private static func clearPendingMfaReauth() {
+        pendingReauthResolver = nil
+        pendingReauthVerificationID = nil
+    }
+
+    private static func mapPasswordReauthError(_ error: Error) -> Error {
+        let nsError = error as NSError
+        if nsError.domain == AuthErrorDomain {
+            switch nsError.code {
+            case AuthErrorCode.wrongPassword.rawValue,
+                 AuthErrorCode.invalidCredential.rawValue,
+                 AuthErrorCode.invalidEmail.rawValue,
+                 AuthErrorCode.userNotFound.rawValue:
+                return SpectRoomAuthError.wrongPassword
+            default:
+                break
+            }
+        }
+        if let code = AuthErrorCode(_bridgedNSError: nsError)?.code {
+            switch code {
+            case .wrongPassword, .invalidCredential, .invalidEmail, .userNotFound:
+                return SpectRoomAuthError.wrongPassword
+            default:
+                break
+            }
+        }
+        let message = nsError.localizedDescription
+        if message.localizedCaseInsensitiveContains("password")
+            || message.localizedCaseInsensitiveContains("credential")
+            || message.localizedCaseInsensitiveContains("invalid email") {
+            return SpectRoomAuthError.wrongPassword
+        }
+        return error
     }
 
     private func mapMfaError(_ error: Error) -> Error {

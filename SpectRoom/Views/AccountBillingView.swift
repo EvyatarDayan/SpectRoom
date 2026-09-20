@@ -175,10 +175,6 @@ final class AccountBillingViewModel: ObservableObject {
         return "\(confirm)\n\n\(billingOutcomeExplanation(for: plan))"
     }
 
-    func planChangeSuccessMessage(planLabel: String) -> String {
-        String(format: "billing.change.success.message".localized, planLabel)
-    }
-
     /// Charge / proration outcome shown under the confirm question.
     func billingOutcomeExplanation(for plan: SubscriptionPlan) -> String {
         if plan.tier == .free {
@@ -247,7 +243,31 @@ struct AccountBillingView: View {
                     }
                     .animation(.easeInOut(duration: 0.25), value: viewModel.toastMessage)
                 }
+
+                if let planLabel = viewModel.planChangeSuccessLabel {
+                    PlanChangeSuccessOverlay(planLabel: planLabel) {
+                        viewModel.planChangeSuccessLabel = nil
+                    }
+                    .transition(.opacity)
+                    .zIndex(20)
+                }
+
+                if let plan = viewModel.pendingPlanChange {
+                    PlanChangeConfirmOverlay(
+                        title: viewModel.planChangeAlertTitle(for: plan),
+                        message: viewModel.planChangeAlertMessage(for: plan),
+                        onCancel: { viewModel.dismissPlanChangeDialog() },
+                        onConfirm: {
+                            viewModel.pendingPlanChange = nil
+                            Task { await viewModel.performPlanChange(plan) }
+                        }
+                    )
+                    .transition(.opacity)
+                    .zIndex(21)
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: viewModel.planChangeSuccessLabel)
+            .animation(.easeInOut(duration: 0.2), value: viewModel.pendingPlanChange?.id)
             .navigationTitle("billing.title".localized)
             .navigationBarTitleDisplayMode(.inline)
             .spectRoomNavigationChrome(colorScheme: colorScheme)
@@ -287,41 +307,6 @@ struct AccountBillingView: View {
             } message: {
                 if let label = viewModel.cancelSuccessPlanLabel {
                     Text(viewModel.cancelSuccessMessage(planLabel: label))
-                }
-            }
-            .alert(
-                viewModel.pendingPlanChange.map { viewModel.planChangeAlertTitle(for: $0) } ?? "",
-                isPresented: Binding(
-                    get: { viewModel.pendingPlanChange != nil },
-                    set: { if !$0 { viewModel.pendingPlanChange = nil } }
-                )
-            ) {
-                Button("billing.modal.confirm".localized) {
-                    guard let plan = viewModel.pendingPlanChange else { return }
-                    viewModel.pendingPlanChange = nil
-                    Task { await viewModel.performPlanChange(plan) }
-                }
-                Button("common.cancel".localized, role: .cancel) {
-                    viewModel.dismissPlanChangeDialog()
-                }
-            } message: {
-                if let plan = viewModel.pendingPlanChange {
-                    Text(viewModel.planChangeAlertMessage(for: plan))
-                }
-            }
-            .alert(
-                "billing.change.success.title".localized,
-                isPresented: Binding(
-                    get: { viewModel.planChangeSuccessLabel != nil },
-                    set: { if !$0 { viewModel.planChangeSuccessLabel = nil } }
-                )
-            ) {
-                Button("common.ok".localized, role: .cancel) {
-                    viewModel.planChangeSuccessLabel = nil
-                }
-            } message: {
-                if let label = viewModel.planChangeSuccessLabel {
-                    Text(viewModel.planChangeSuccessMessage(planLabel: label))
                 }
             }
             .sheet(isPresented: Binding(

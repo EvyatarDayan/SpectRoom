@@ -49,42 +49,55 @@ struct ReportConfirmationOverlay: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.80)
+            Color.black.opacity(0.35)
                 .ignoresSafeArea()
                 .onTapGesture(perform: onCancel)
 
-            VStack(spacing: 16) {
+            VStack(spacing: 0) {
                 VStack(spacing: 8) {
-                    Text(String(format: "profile.report.confirm.title".localized, firstName))
+                    Text("profile.report.confirm.title".localized(with: firstName))
                         .font(.headline)
                         .multilineTextAlignment(.center)
                         .foregroundColor(SpectRoomTheme.text)
                         .padding(.bottom, 4)
 
-                    Text(String(format: "profile.report.confirm.message".localized, firstName))
+                    Text("profile.report.confirm.message".localized(with: firstName))
                         .font(.subheadline)
                         .multilineTextAlignment(.center)
-                        .foregroundColor(SpectRoomTheme.text)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
+                .padding(.bottom, 18)
 
-                HStack(spacing: 12) {
-                    destructiveOutlineButton(
-                        title: "profile.report.confirm.report.and.block".localized,
-                        lineLimit: 2,
-                        action: onReportAndBlock
-                    )
+                Divider()
 
-                    destructiveOutlineButton(
-                        title: "profile.report.confirm.action".localized,
-                        lineLimit: 1,
-                        action: onReport
-                    )
+                HStack(spacing: 0) {
+                    Button(action: onReportAndBlock) {
+                        Text("profile.report.confirm.report.and.block".localized)
+                            .font(.body.weight(.semibold))
+                            .foregroundColor(.red)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.85)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.plain)
+
+                    Divider()
+                        .frame(height: 44)
+
+                    Button(action: onReport) {
+                        Text("profile.report.confirm.action".localized)
+                            .font(.body.weight(.semibold))
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
             }
             .background(SpectRoomTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -102,27 +115,6 @@ struct ReportConfirmationOverlay: View {
             }
             .padding(.horizontal, 36)
         }
-    }
-
-    @ViewBuilder
-    private func destructiveOutlineButton(title: String, lineLimit: Int, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(.red)
-                .multilineTextAlignment(.center)
-                .lineLimit(lineLimit)
-                .minimumScaleFactor(0.85)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(Color.red.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.red.opacity(0.35), lineWidth: 1)
-                )
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -437,41 +429,166 @@ struct ReportReasonOverlay: View {
 }
 
 struct ReportThankYouOverlay: View {
+    /// When true, body mentions that the profile was automatically blocked.
+    var didBlock: Bool = false
     let onDismiss: () -> Void
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.80)
+            Color.black.opacity(0.35)
                 .ignoresSafeArea()
                 .onTapGesture(perform: onDismiss)
 
-            VStack(spacing: 20) {
-                Text("profile.report.thank.you".localized)
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .foregroundColor(SpectRoomTheme.text)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 24)
+            VStack(spacing: 0) {
+                VStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 36))
+                        .foregroundColor(.green)
+                        .padding(.bottom, 4)
+
+                    Text("profile.report.submitted.title".localized)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(SpectRoomTheme.text)
+                        .padding(.bottom, 4)
+
+                    Text(bodyText)
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 18)
+
+                Divider()
+
+                Button(action: onDismiss) {
+                    Text("common.got.it".localized)
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(.green)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.plain)
+            }
+            .background(SpectRoomTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 36)
+        }
+    }
+
+    private var bodyText: String {
+        if didBlock {
+            return "profile.report.submitted.body.blocked".localized
+        }
+        return "profile.report.submitted.body".localized
+    }
+}
+
+/// Plan-change success dialog matching `ReportThankYouOverlay` chrome.
+struct PlanChangeSuccessOverlay: View {
+    let planLabel: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onDismiss)
+
+            VStack(spacing: 0) {
+                VStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 36))
+                        .foregroundColor(.green)
+                        .padding(.bottom, 4)
+
+                    Text(String(format: "billing.change.success.message".localized, planLabel))
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(SpectRoomTheme.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 18)
+
+                Divider()
 
                 Button(action: onDismiss) {
                     Text("common.ok".localized)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.blue)
-                        .multilineTextAlignment(.center)
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(.green)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color.blue.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.blue.opacity(0.35), lineWidth: 1)
-                        )
                 }
                 .buttonStyle(.plain)
-                .containerRelativeFrame(.horizontal) { width, _ in width * 0.4 }
-                .padding(.bottom, 20)
             }
-            .frame(maxWidth: .infinity)
+            .background(SpectRoomTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 36)
+        }
+    }
+}
+
+/// Plan-change confirm dialog matching unblock / report confirmation chrome.
+struct PlanChangeConfirmOverlay: View {
+    let title: String
+    let message: String
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onCancel)
+
+            VStack(spacing: 0) {
+                VStack(spacing: 8) {
+                    Text(title)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(SpectRoomTheme.text)
+                        .padding(.bottom, 4)
+
+                    Text(message)
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(SpectRoomTheme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 18)
+
+                Divider()
+
+                HStack(spacing: 0) {
+                    Button(action: onCancel) {
+                        Text("common.cancel".localized)
+                            .font(.body)
+                            .foregroundColor(SpectRoomTheme.text)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.plain)
+
+                    Divider()
+                        .frame(height: 44)
+
+                    Button(action: onConfirm) {
+                        Text("billing.modal.confirm".localized)
+                            .font(.body.weight(.semibold))
+                            .foregroundColor(.green)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
             .background(SpectRoomTheme.card)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .padding(.horizontal, 36)

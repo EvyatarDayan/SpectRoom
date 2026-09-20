@@ -44,7 +44,7 @@ struct MfaVerificationView: View {
             return appState.mfaSignInMaskedPhone
         }
         let value = phoneE164.isEmpty ? appState.pendingMfaPhoneE164 : phoneE164
-        return value.isEmpty ? "auth.mfa.phone.fallback".localized : PhoneNumberE164.maskedDisplay(value)
+        return value.isEmpty ? "auth.mfa.phone.fallback".localized : value
     }
 
     private var displayedPhone: String {
@@ -225,17 +225,11 @@ struct MfaVerificationView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
             } else {
-                Text("auth.mfa.error.sms.unavailable".localized)
+                Text(smsFailureDetailText)
                     .font(.body)
                     .foregroundColor(SpectRoomTheme.secondaryText)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
-
-                Text(String(format: "auth.mfa.phone.using".localized, displayedPhoneNumber))
-                    .font(.subheadline.weight(.medium))
-                    .foregroundColor(SpectRoomTheme.text)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
 
                 Button {
                     Task { await startEnrollmentSmsIfNeeded(force: true) }
@@ -251,6 +245,10 @@ struct MfaVerificationView: View {
                 .padding(.horizontal)
             }
         }
+    }
+
+    private var smsFailureDetailText: String {
+        String(format: "auth.mfa.error.sms.unavailable".localized, displayedPhoneNumber)
     }
 
     private var displayedPhoneNumber: String {
@@ -790,6 +788,9 @@ struct MfaVerificationView: View {
                 smsRateLimited = false
             }
             FirebaseBootstrap.applyDebugPhoneAuthSettings()
+            #if DEBUG && targetEnvironment(simulator)
+            FirebaseBootstrap.prepareSimulatorMfaPhoneVerify()
+            #endif
             try await appState.authService.startMfaEnrollment(phoneE164: phoneE164)
             await MainActor.run {
                 smsSent = true
@@ -799,6 +800,10 @@ struct MfaVerificationView: View {
             }
         } catch {
             let rateLimited = isSmsRateLimited(error)
+            #if DEBUG
+            let ns = error as NSError
+            print("❌ MFA enroll SMS UI failed domain=\(ns.domain) code=\(ns.code) \(ns.localizedDescription)")
+            #endif
             await MainActor.run {
                 smsSent = false
                 smsSendFailed = true
@@ -957,10 +962,14 @@ struct MfaVerificationView: View {
             switch authError {
             case .invalidMfaCode, .emailNotVerifiedForMfa:
                 alertTitle = ""
+                errorMessage = message
+            case .mfaSendFailed:
+                alertTitle = "auth.notice".localized
+                errorMessage = smsFailureDetailText
             default:
                 alertTitle = "auth.notice".localized
+                errorMessage = message
             }
-            errorMessage = message
             showingError = true
             return
         }
@@ -980,40 +989,21 @@ struct MfaVerificationView: View {
         alertTitle = "auth.notice".localized
 
         let raw = FirebaseAuthService.humanReadableFunctionsError(error)
-        if raw.localizedCaseInsensitiveContains("canHandleNotification")
+        let isSmsDeliveryIssue =
+            raw.localizedCaseInsensitiveContains("canHandleNotification")
             || raw.localizedCaseInsensitiveContains("app delegate swizzling")
-            || ns.code == AuthErrorCode.notificationNotForwarded.rawValue {
-            #if targetEnvironment(simulator)
-            errorMessage = String(
-                format: "auth.mfa.error.sms.detail".localized,
-                phoneE164.isEmpty ? maskedPhone : phoneE164
-            )
-            #else
-            errorMessage = String(
-                format: "auth.mfa.error.sms.device".localized,
-                phoneE164.isEmpty ? maskedPhone : phoneE164
-            )
-            #endif
-        } else if raw.localizedCaseInsensitiveContains("client identifier")
-            || ns.code == AuthErrorCode.missingClientIdentifier.rawValue {
-            #if targetEnvironment(simulator)
-            errorMessage = String(
-                format: "auth.mfa.error.sms.detail".localized,
-                phoneE164.isEmpty ? maskedPhone : phoneE164
-            )
-            #else
-            errorMessage = String(
-                format: "auth.mfa.error.sms.client".localized,
-                phoneE164.isEmpty ? maskedPhone : phoneE164
-            )
-            #endif
-        } else if raw.localizedCaseInsensitiveContains("failed to get document from server")
+            || raw.localizedCaseInsensitiveContains("client identifier")
+            || raw.localizedCaseInsensitiveContains("failed to get document from server")
             || raw.localizedCaseInsensitiveContains("firestoreSourceServer")
-            || raw.localizedCaseInsensitiveContains("local cache") {
-            errorMessage = "auth.mfa.error.sms.unavailable".localized
-        } else {
-            errorMessage = raw
-        }
+            || raw.localizedCaseInsensitiveContains("local cache")
+            || raw.localizedCaseInsensitiveContains("Phone numbers for testing")
+            || raw.localizedCaseInsensitiveContains("reCAPTCHA")
+            || raw.localizedCaseInsensitiveContains("APNs")
+            || ns.code == AuthErrorCode.notificationNotForwarded.rawValue
+            || ns.code == AuthErrorCode.missingClientIdentifier.rawValue
+
+        // Never surface Firebase/DEBUG troubleshooting text in the UI.
+        errorMessage = isSmsDeliveryIssue ? smsFailureDetailText : raw
         showingError = true
     }
 }

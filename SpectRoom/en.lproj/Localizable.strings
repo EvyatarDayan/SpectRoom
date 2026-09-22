@@ -913,6 +913,11 @@
 "support.button.sent" = "Message Sent ✓";
 "support.or" = "OR";
 "support.email.label" = "Support Email";
+"support.attachment.label" = "Photo (optional)";
+"support.attachment.add" = "Add photo from gallery";
+"support.attachment.added" = "Photo attached";
+"support.attachment.remove" = "Remove photo";
+"support.attachment.hint" = "Max 5MB, JPG, PNG or HEIC.";
 
 /* Account & Billing */
 "billing.title" = "Account & Billing";

@@ -888,6 +888,11 @@
 "support.button.sent" = "Meddelande skickat ✓";
 "support.or" = "ELLER";
 "support.email.label" = "Support-e-post";
+"support.attachment.label" = "Foto (valfritt)";
+"support.attachment.add" = "Lägg till foto från galleriet";
+"support.attachment.added" = "Foto bifogat";
+"support.attachment.remove" = "Ta bort foto";
+"support.attachment.hint" = "Max 5 MB, JPG, PNG eller HEIC.";
 /* Account & Billing */
 "billing.title" = "Konto & fakturering";
 "billing.section.current.plan" = "Nuvarande plan";

@@ -888,6 +888,11 @@
 "support.button.sent" = "Viesti lähetetty ✓";
 "support.or" = "TAI";
 "support.email.label" = "Tuen sähköposti";
+"support.attachment.label" = "Kuva (valinnainen)";
+"support.attachment.add" = "Lisää kuva galleriasta";
+"support.attachment.added" = "Kuva liitetty";
+"support.attachment.remove" = "Poista kuva";
+"support.attachment.hint" = "Max 5 Mt, JPG, PNG tai HEIC.";
 
 /* Account & Billing */
 "billing.title" = "Tili ja laskutus";

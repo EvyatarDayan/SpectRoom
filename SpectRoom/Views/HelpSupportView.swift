@@ -6,7 +6,10 @@
 //
 
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
 import FirebaseFirestore
+import UIKit
 
 struct HelpSupportView: View {
     @Environment(\.dismiss) private var dismiss
@@ -86,6 +89,9 @@ struct HelpSupportView: View {
     @State private var showErrorAlert = false
     @State private var errorMessage = ""
     @State private var didAttemptSend = false
+    @State private var showingImagePicker = false
+    @State private var attachedImage: UIImage? = nil
+    @State private var imageValidationError: ChatImageValidationError? = nil
 
     init(
         initialTopic: Topic = .safety,
@@ -137,9 +143,7 @@ struct HelpSupportView: View {
                                         guard lockedTopic == nil else { return }
                                         withAnimation(.easeInOut(duration: 0.2)) {
                                             if didSendSuccessfully {
-                                                message = ""
-                                                didSendSuccessfully = false
-                                                didAttemptSend = false
+                                                resetFormAfterTopicChange()
                                             }
                                             selectedTopic = topic
                                         }
@@ -214,6 +218,8 @@ struct HelpSupportView: View {
                             .padding(.top, 2)
                         }
 
+                        attachmentSection
+
                         // Send button
                         Button(action: send) {
                             Group {
@@ -232,51 +238,6 @@ struct HelpSupportView: View {
                         }
                         .disabled(isSending || didSendSuccessfully)
 
-                        // OR divider
-                        HStack(spacing: 12) {
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(height: 1)
-                            Text("support.or".localized)
-                                .font(.caption)
-                                .foregroundColor(SpectRoomTheme.secondaryText)
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(height: 1)
-                        }
-                        .padding(.vertical, 4)
-
-                        // Email row
-                        Button {
-                            openMail(to: "spectroom.support@gmail.com")
-                        } label: {
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Text("✉️")
-                                        .font(.system(size: 18))
-                                    Text("support.email.label".localized)
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(SpectRoomTheme.text)
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor(SpectRoomTheme.secondaryText)
-                                }
-                                Text("spectroom.support@gmail.com")
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.blue)
-                                    .padding(.leading, 30)
-                            }
-                            .padding(14)
-                            .background(SpectRoomTheme.card)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.gray.opacity(0.15), lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-
                     Spacer()
                 }
                 .padding(.horizontal, 20)
@@ -293,6 +254,19 @@ struct HelpSupportView: View {
                 }
             }
         }
+        .sheet(isPresented: $showingImagePicker) {
+            SupportImagePicker(
+                selectedImage: $attachedImage,
+                imageValidationError: $imageValidationError
+            )
+            .ignoresSafeArea()
+        }
+        .onChange(of: imageValidationError) { _, error in
+            guard let error else { return }
+            errorMessage = error.alertMessageKey.localized
+            showErrorAlert = true
+            imageValidationError = nil
+        }
         .alert("Error", isPresented: $showErrorAlert) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -300,10 +274,97 @@ struct HelpSupportView: View {
         }
         .presentationDetents([.large])
     }
+
+    @ViewBuilder
+    private var attachmentSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("support.attachment.label".localized)
+                .font(.subheadline)
+                .foregroundColor(SpectRoomTheme.secondaryText)
+
+            if let attachedImage {
+                HStack(spacing: 12) {
+                    Image(uiImage: attachedImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 72, height: 72)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("support.attachment.added".localized)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(SpectRoomTheme.text)
+                        Text("support.attachment.hint".localized)
+                            .font(.caption)
+                            .foregroundColor(SpectRoomTheme.secondaryText)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if !didSendSuccessfully {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                self.attachedImage = nil
+                            }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 22))
+                                .foregroundColor(SpectRoomTheme.secondaryText)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("support.attachment.remove".localized)
+                    }
+                }
+                .padding(12)
+                .background(SpectRoomTheme.card)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.gray.opacity(0.15), lineWidth: 1)
+                )
+                .opacity(didSendSuccessfully ? 0.5 : 1)
+            } else {
+                Button {
+                    showingImagePicker = true
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 18, weight: .medium))
+                        Text("support.attachment.add".localized)
+                            .font(.subheadline.weight(.medium))
+                        Spacer()
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 18))
+                    }
+                    .foregroundColor(.blue)
+                    .padding(14)
+                    .background(SpectRoomTheme.card)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.blue.opacity(0.25), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(didSendSuccessfully || isSending)
+
+                Text("support.attachment.hint".localized)
+                    .font(.caption)
+                    .foregroundColor(SpectRoomTheme.secondaryText)
+            }
+        }
+    }
 }
 
 // MARK: - Actions
 private extension HelpSupportView {
+    func resetFormAfterTopicChange() {
+        message = ""
+        attachedImage = nil
+        didSendSuccessfully = false
+        didAttemptSend = false
+    }
+
     func send() {
         didAttemptSend = true
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -315,28 +376,51 @@ private extension HelpSupportView {
         let userName = appState.currentUser?.name ?? "Unknown"
         let userEmail = appState.currentUser?.email ?? ""
         let ticketId = Self.makeSupportTicketId()
+        let topicLabel = selectedTopic.label
+        let image = attachedImage
 
-        let data: [String: Any] = [
-            "ticketId": ticketId,
-            "userId": userId,
-            "userName": userName,
-            "userEmail": userEmail,
-            "topic": selectedTopic.label,
-            "message": trimmed,
-            "status": "new",
-            "createdAt": FieldValue.serverTimestamp()
-        ]
+        Task {
+            do {
+                var imageURL: String? = nil
+                if let image {
+                    imageURL = try await PhotoStorageService.shared.uploadSupportImage(image, for: userId)
+                }
 
-        Firestore.firestore().collection("supportMessages").addDocument(data: data) { error in
-            isSending = false
-            if let error {
-                errorMessage = error.localizedDescription
-                showErrorAlert = true
-            } else {
-                didSendSuccessfully = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    onMessageSent?()
-                    dismiss()
+                var data: [String: Any] = [
+                    "ticketId": ticketId,
+                    "userId": userId,
+                    "userName": userName,
+                    "userEmail": userEmail,
+                    "topic": topicLabel,
+                    "message": trimmed,
+                    "status": "new",
+                    "createdAt": FieldValue.serverTimestamp()
+                ]
+                if let imageURL {
+                    data["imageURL"] = imageURL
+                    data["hasAttachment"] = true
+                }
+
+                try await Firestore.firestore().collection("supportMessages").addDocument(data: data)
+
+                await MainActor.run {
+                    isSending = false
+                    didSendSuccessfully = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        onMessageSent?()
+                        dismiss()
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isSending = false
+                    if let storageError = error as? PhotoStorageError,
+                       let description = storageError.errorDescription {
+                        errorMessage = description
+                    } else {
+                        errorMessage = error.localizedDescription
+                    }
+                    showErrorAlert = true
                 }
             }
         }
@@ -352,10 +436,143 @@ private extension HelpSupportView {
         let randomPart = String(format: "%05d", Int.random(in: 0...99_999))
         return "\(datePart)-\(randomPart)"
     }
+}
 
-    func openMail(to address: String) {
-        if let url = URL(string: "mailto:\(address)") {
-            UIApplication.shared.open(url)
+// MARK: - Single image gallery picker (≤5MB, JPG/PNG/HEIC)
+
+private struct SupportImagePicker: UIViewControllerRepresentable {
+    @Binding var selectedImage: UIImage?
+    @Binding var imageValidationError: ChatImageValidationError?
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var config = PHPickerConfiguration()
+        config.filter = .images
+        config.selectionLimit = 1
+        let picker = PHPickerViewController(configuration: config)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        let parent: SupportImagePicker
+
+        init(_ parent: SupportImagePicker) {
+            self.parent = parent
+        }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            parent.dismiss()
+            guard let result = results.first else { return }
+            let provider = result.itemProvider
+
+            guard let typeId = ChatImageProcessor.matchingTypeIdentifier(for: provider) else {
+                DispatchQueue.main.async {
+                    self.parent.imageValidationError = .unsupportedFormat
+                }
+                return
+            }
+            if Self.isGIF(typeId) {
+                DispatchQueue.main.async {
+                    self.parent.imageValidationError = .unsupportedFormat
+                }
+                return
+            }
+            loadImage(provider: provider, typeId: typeId)
+        }
+
+        private static func isGIF(_ typeId: String) -> Bool {
+            let lower = typeId.lowercased()
+            return lower == UTType.gif.identifier.lowercased()
+                || lower.contains("gif")
+        }
+
+        private func loadImage(provider: NSItemProvider, typeId: String) {
+            if typeId != UTType.image.identifier,
+               provider.hasItemConformingToTypeIdentifier(typeId) {
+                provider.loadDataRepresentation(forTypeIdentifier: typeId) { data, error in
+                    self.handlePickedImageData(data, typeIdentifier: typeId, error: error, provider: provider)
+                }
+                return
+            }
+
+            let candidates = [
+                UTType.jpeg.identifier,
+                UTType.heic.identifier,
+                UTType.png.identifier,
+                UTType.heif.identifier,
+            ]
+            if let match = candidates.first(where: { provider.hasItemConformingToTypeIdentifier($0) }) {
+                provider.loadDataRepresentation(forTypeIdentifier: match) { data, error in
+                    self.handlePickedImageData(data, typeIdentifier: match, error: error, provider: provider)
+                }
+                return
+            }
+
+            provider.loadObject(ofClass: UIImage.self) { object, _ in
+                DispatchQueue.main.async {
+                    if let image = object as? UIImage {
+                        self.parent.selectedImage = image.normalizedUpOrientation()
+                    } else {
+                        self.parent.imageValidationError = .unsupportedFormat
+                    }
+                }
+            }
+        }
+
+        private func handlePickedImageData(
+            _ data: Data?,
+            typeIdentifier: String,
+            error: Error?,
+            provider: NSItemProvider
+        ) {
+            if let error {
+                print("⚠️ Support image load failed: \(error.localizedDescription)")
+            }
+
+            if let data {
+                do {
+                    try ChatImageProcessor.validateOriginalData(data, typeIdentifier: typeIdentifier)
+                    guard let image = UIImage(data: data) else {
+                        throw ChatImageValidationError.processingFailed
+                    }
+                    DispatchQueue.main.async {
+                        self.parent.selectedImage = image.normalizedUpOrientation()
+                    }
+                    return
+                } catch let validation as ChatImageValidationError {
+                    DispatchQueue.main.async {
+                        self.parent.imageValidationError = validation
+                    }
+                    return
+                } catch {
+                    DispatchQueue.main.async {
+                        self.parent.imageValidationError = .processingFailed
+                    }
+                    return
+                }
+            }
+
+            provider.loadObject(ofClass: UIImage.self) { object, _ in
+                DispatchQueue.main.async {
+                    if let image = object as? UIImage {
+                        if let jpeg = image.jpegData(compressionQuality: 1.0),
+                           jpeg.count > ChatImageProcessor.maxOriginalBytes {
+                            self.parent.imageValidationError = .fileTooLarge
+                        } else {
+                            self.parent.selectedImage = image.normalizedUpOrientation()
+                        }
+                    } else {
+                        self.parent.imageValidationError = .unsupportedFormat
+                    }
+                }
+            }
         }
     }
 }

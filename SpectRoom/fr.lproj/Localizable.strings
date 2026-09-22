@@ -888,6 +888,11 @@
 "support.button.sent" = "Message envoyé ✓";
 "support.or" = "OU";
 "support.email.label" = "E-mail de support";
+"support.attachment.label" = "Photo (facultatif)";
+"support.attachment.add" = "Ajouter une photo depuis la galerie";
+"support.attachment.added" = "Photo jointe";
+"support.attachment.remove" = "Supprimer la photo";
+"support.attachment.hint" = "Max. 5 Mo, JPG, PNG ou HEIC.";
 /* Account & Billing */
 "billing.title" = "Compte et facturation";
 "billing.section.current.plan" = "Forfait actuel";

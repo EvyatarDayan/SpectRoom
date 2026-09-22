@@ -75,6 +75,28 @@ class PhotoStorageService {
 
         return downloadURL.absoluteString
     }
+
+    // MARK: - Support Image Upload
+    /// Single optional attachment for Help & Support (≤5MB, JPG/PNG/HEIC).
+    func uploadSupportImage(_ image: UIImage, for userID: String) async throws -> String {
+        let prepared: (data: Data, contentType: String, fileExtension: String)
+        do {
+            prepared = try ChatImageProcessor.prepareForUpload(image)
+        } catch let error as ChatImageValidationError {
+            throw PhotoStorageError.chatImageValidation(error)
+        }
+
+        let fileName = "support_\(userID)_\(UUID().uuidString).\(prepared.fileExtension)"
+        let storageRef = storage.reference().child("support_images/\(fileName)")
+
+        let metadata = StorageMetadata()
+        metadata.contentType = prepared.contentType
+
+        _ = try await storageRef.putDataAsync(prepared.data, metadata: metadata)
+        let downloadURL = try await storageRef.downloadURL()
+
+        return downloadURL.absoluteString
+    }
     
     // MARK: - Voice Message Upload
     func uploadVoiceMessage(_ fileURL: URL, for userID: String) async throws -> String {

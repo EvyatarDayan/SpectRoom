@@ -888,6 +888,11 @@
 "support.button.sent" = "Skilaboð send ✓";
 "support.or" = "EÐA";
 "support.email.label" = "Stuðningspóstur";
+"support.attachment.label" = "Mynd (valfrjálst)";
+"support.attachment.add" = "Bæta við mynd úr safni";
+"support.attachment.added" = "Mynd meðfylgjandi";
+"support.attachment.remove" = "Fjarlægja mynd";
+"support.attachment.hint" = "Hámark 5 MB, JPG, PNG eða HEIC.";
 
 /* Account & Billing */
 "billing.title" = "Reikningur og innheimta";

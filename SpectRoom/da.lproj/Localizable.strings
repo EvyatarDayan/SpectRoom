@@ -888,6 +888,11 @@
 "support.button.sent" = "Besked sendt ✓";
 "support.or" = "ELLER";
 "support.email.label" = "Support e-mail";
+"support.attachment.label" = "Foto (valgfrit)";
+"support.attachment.add" = "Tilføj foto fra galleriet";
+"support.attachment.added" = "Foto vedhæftet";
+"support.attachment.remove" = "Fjern foto";
+"support.attachment.hint" = "Maks. 5 MB, JPG, PNG eller HEIC.";
 
 /* Account & Billing */
 "billing.title" = "Konto & fakturering";
